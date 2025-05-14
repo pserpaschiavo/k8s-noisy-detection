@@ -6,13 +6,22 @@ statsmodels>=0.14.0
 scikit-learn>=1.0.0
 ruptures>=1.1.9
 pyinform>=0.2.0
+networkx>=3.0.0
 
 # Visualization
 matplotlib>=3.5.0
 seaborn>=0.12.0
+plotly>=6.0.0
+kaleido>=0.2.1
+mplcursors>=0.4
+mpl_chord_diagram>=0.4.0
 
 # Time Series Analysis
 nolds>=0.5.2
 
 # General utilities
 tqdm>=4.65.0
+
+# Jupyter notebooks (para visualizações interativas)
+jupyter>=1.0.0
+nbformat>=5.0.0

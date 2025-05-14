@@ -99,6 +99,41 @@ O pipeline de análise oferece diversas funcionalidades avançadas para processa
 - **Comparações Visuais**: Facilita comparações entre fases e componentes
 - **Exportação Acadêmica**: Produz resultados em formatos adequados para publicações (CSV, LaTeX, PNG, PDF)
 
+## Visualizações Avançadas de Degradação entre Inquilinos
+
+O pipeline inclui visualizações especializadas para análise acadêmica de degradação entre inquilinos:
+
+### Visualizações Disponíveis
+
+1. **Rede de Causalidade Aprimorada**: Versão aprimorada do grafo de causalidade com:
+   - Tamanho dos nós baseado em centralidade (impacto causado)
+   - Cores baseadas em grau de impacto
+   - Espessura das arestas proporcional à força causal
+   - Formatação acadêmica para publicações
+
+2. **Diagrama Circular (Chord)**: Representação circular elegante das relações causais entre inquilinos.
+
+3. **Mapa de Calor Causal**: Heatmap quantitativo da intensidade das relações causais.
+
+4. **Diagrama de Sankey**: Visualização de fluxo de degradação com versão interativa HTML.
+
+### Uso das Visualizações
+
+Para gerar as visualizações com dados existentes:
+
+```bash
+cd analysis_pipeline
+python visualize_degradation.py --data_dir /caminho/para/dados --output_dir /caminho/para/saida
+```
+
+Para testar as visualizações com dados sintéticos (sem necessidade de experimentos reais):
+
+```bash
+python analysis_pipeline/test_synthetic_visualizations.py --output_dir ./output/visualizacoes
+```
+
+Para mais detalhes, consulte a [documentação das visualizações de degradação](analysis_pipeline/DEGRADATION_VISUALIZATIONS_README.md).
+
 ## Como Usar
 
 ### Requisitos

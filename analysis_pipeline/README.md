@@ -29,14 +29,6 @@ O pipeline oferece as seguintes funcionalidades:
 
 ### 4. Análise de Correlação
 
-### 5. Visualizações
-
-- Geração automática de diversos tipos de gráficos (séries temporais, distribuições, boxplots)
-- Comparações visuais entre fases experimentais
-- **Comparação entre inquilinos (tenants)** com visualização do impacto entre diferentes fases
-- **Visualizações acessíveis** com suporte para daltônicos, utilizando paletas e padrões distintos
-- Exportação em alta qualidade para publicação acadêmica
-
 - Matrizes de correlação entre métricas
 - Identificação de correlações fortes
 - Visualização de pares de métricas altamente correlacionadas
@@ -48,12 +40,23 @@ O pipeline oferece as seguintes funcionalidades:
 - Comparações entre fases (linha, boxplot, violino)
 - Heatmaps de correlação
 
-### 6. Detecção de Mudanças Significativas
+### 6. Visualizações Avançadas
+
+- **Visualizações de correlação**: Mapas de calor e matrizes de correlação
+- **Visualizações temporais**: Gráficos de séries temporais com detecção de pontos de mudança
+- **Visualizações de degradação**:
+  - Grafos de causalidade aprimorados com características de centralidade
+  - Diagramas circulares (chord) para visualização compacta de relações causais
+  - Mapas de calor de causalidade para análise quantitativa
+  - Diagramas de Sankey para visualizar fluxos de degradação entre componentes
+- **Visualizações para publicações**: Formatação acadêmica para uso em artigos científicos
+
+### 7. Detecção de Mudanças Significativas
 
 - Identificação automática de métricas com variações significativas durante ataques
 - Quantificação do tamanho do efeito e mudança percentual
 
-### 7. Análises Estatísticas Avançadas
+### 8. Análises Estatísticas Avançadas
 
 - **Decomposição de Séries Temporais**: Separação de tendência, sazonalidade e resíduos
 - **Detecção de Change Points**: Identificação automática de pontos de mudança significativa nos dados
@@ -171,7 +174,8 @@ analysis/YYYY-MM-DD_HH-MM-SS/
 │   ├── 3_-_Recovery/                # Gráficos da fase de recuperação
 │   ├── correlations/                # Análises de correlação
 │   ├── tenant_comparison/           # Comparações entre inquilinos
-│   └── comparacao_fases/            # Comparações entre fases
+│   ├── comparacao_fases/            # Comparações entre fases
+│   └── advanced_visualizations/     # Visualizações avançadas
 ├── stats_results/                   # Resultados estatísticos em CSV e LaTeX
 │   ├── significant_changes.csv      # Métricas com mudanças significativas
 │   ├── phase_comparison_*.csv       # Comparações estatísticas entre fases

@@ -16,6 +16,24 @@ from scipy import stats
 from time_series_analysis import TimeSeriesAnalyzer
 from correlation_analysis import CorrelationAnalyzer
 from data_loader import DataLoader
+import matplotlib.cm as cm
+import mplcursors
+
+# Tentar importar as bibliotecas opcionais
+try:
+    from mpl_chord_diagram import chord_diagram
+    CHORD_AVAILABLE = True
+except ImportError:
+    CHORD_AVAILABLE = False
+    logging.warning("mpl_chord_diagram não encontrado. Diagrama circular não estará disponível.")
+
+try:
+    import plotly.graph_objects as go
+    from plotly.offline import plot
+    PLOTLY_AVAILABLE = True
+except ImportError:
+    PLOTLY_AVAILABLE = False
+    logging.warning("plotly não encontrado. Gráfico de Sankey não estará disponível.")
 
 class TenantDegradationAnalyzer:
     """Analyzes relationships between tenants to identify sources of service degradation."""
@@ -217,9 +235,8 @@ class TenantDegradationAnalyzer:
                         )
                         
                         # If we have the time_series_analysis directory, save results there too
+                        # This code creates a simple lag plot visualization
                         if result and self.ts_dir:
-                            # Save lag analysis plot in time series directory
-                            # This code creates a simple lag plot visualization
                             if 'granger_1_to_2' in result and result['granger_1_to_2']['significant']:
                                 plt.figure(figsize=(10, 6))
                                 lags = list(range(1, max_lag + 1))
@@ -258,26 +275,56 @@ class TenantDegradationAnalyzer:
                 'significant_pairs': causality_pairs
             }
             
-            # Plot causality network to primary visualization folder
+            # Plot causality visualizations in various formats
             if self.plots_dir and causality_pairs:
+                # Original network plot
                 self.plot_causality_network(
                     causality_pairs, 
                     title=f"Granger Causality Network: {metric} ({phase})",
                     filename=f"causality_network_{phase}_{metric}.png"
                 )
                 
+                # Improved network plot for academic publications
+                self.plot_improved_causality_network(
+                    causality_pairs,
+                    title=f"Rede de Causalidade de Granger: {metric} ({phase})",
+                    filename=f"academic_causality_network_{phase}_{metric}.png",
+                    academic_style=True
+                )
+                
+                # Chord diagram if available
+                self.plot_chord_diagram(
+                    causality_pairs,
+                    title=f"Diagrama de Relações Causais: {metric} ({phase})",
+                    filename=f"chord_diagram_{phase}_{metric}.png"
+                )
+                
+                # Sankey diagram if available
+                self.plot_sankey_degradation(
+                    causality_pairs,
+                    title=f"Fluxo de Degradação: {metric} ({phase})",
+                    filename=f"sankey_diagram_{phase}_{metric}.png"
+                )
+                
                 # Also save causality matrix to time series folder
-                if self.ts_dir:
-                    if not causality_matrix.empty:
-                        plt.figure(figsize=(10, 8))
-                        sns.heatmap(causality_matrix, annot=True, cmap='YlOrRd_r', vmin=0, vmax=0.05, 
-                                   square=True, fmt='.4f', cbar_kws={'shrink': .8})
-                        plt.title(f'Granger Causality p-values: {metric} ({phase})')
-                        plt.tight_layout()
-                        
-                        filename = f"granger_causality_matrix_{phase}_{metric}.png".replace(' ', '_').lower()
-                        plt.savefig(self.ts_dir / filename, bbox_inches='tight', dpi=300)
-                        plt.close()
+                if self.ts_dir and not causality_matrix.empty:
+                    # Traditional heatmap
+                    plt.figure(figsize=(10, 8))
+                    sns.heatmap(causality_matrix, annot=True, cmap='YlOrRd_r', vmin=0, vmax=0.05, 
+                               square=True, fmt='.4f', cbar_kws={'shrink': .8})
+                    plt.title(f'Granger Causality p-values: {metric} ({phase})')
+                    plt.tight_layout()
+                    
+                    filename = f"granger_causality_matrix_{phase}_{metric}.png".replace(' ', '_').lower()
+                    plt.savefig(self.ts_dir / filename, bbox_inches='tight', dpi=300)
+                    plt.close()
+                    
+                    # Improved heatmap
+                    self.plot_causality_heatmap(
+                        causality_matrix,
+                        title=f"Mapa de Calor de Causalidade: {metric} ({phase})",
+                        filename=f"causality_heatmap_{phase}_{metric}.png"
+                    )
             
             # Save causality results to CSV
             if self.results_dir and causality_pairs:
@@ -367,7 +414,428 @@ class TenantDegradationAnalyzer:
         else:
             plt.show()
             plt.close()
+
+    def plot_improved_causality_network(self, causality_pairs, title=None, filename=None, academic_style=True):
+        """
+        Versão aprimorada da visualização de rede de causalidade para publicações acadêmicas.
+        
+        Args:
+            causality_pairs (list): Lista de dicionários com resultados de causalidade
+            title (str): Título para o gráfico
+            filename (str): Nome do arquivo para salvar o gráfico
+            academic_style (bool): Se deve usar estilo acadêmico (True) ou padrão (False)
+        """
+        if not causality_pairs:
+            return
             
+        # Criar grafo direcionado
+        G = nx.DiGraph()
+        
+        # Adicionar nós e arestas
+        for pair in causality_pairs:
+            source = pair['source']
+            target = pair['target']
+            p_value = pair['p_value']
+            lag = pair.get('lag', 1)
+            
+            # Adicionar nós se não existirem
+            if source not in G:
+                G.add_node(source)
+            if target not in G:
+                G.add_node(target)
+            
+            # Adicionar aresta com peso baseado no p-valor
+            weight = 1 - p_value  # Transformar p-valor em peso
+            G.add_edge(source, target, weight=weight, p_value=p_value, lag=lag)
+        
+        # Prosseguir apenas se tivermos arestas
+        if not G.edges:
+            logging.warning("Sem relações causais significativas para visualizar")
+            return
+        
+        # Configurar estilo para publicação acadêmica
+        if academic_style:
+            plt.style.use('seaborn-v0_8-whitegrid')
+            plt.rcParams['font.family'] = 'serif'
+            # Desabilitar LaTeX para evitar problemas em sistemas sem LaTeX instalado
+            plt.rcParams['text.usetex'] = False
+        
+        # Criar plot
+        plt.figure(figsize=(10, 8), dpi=300)
+        
+        # Calcular centralidade para definir tamanho dos nós
+        in_centrality = nx.in_degree_centrality(G)  # Quem é mais afetado
+        out_centrality = nx.out_degree_centrality(G)  # Quem causa mais problemas
+        
+        # Tamanho do nó proporcional à centralidade de saída (quanto mais causa, maior o nó)
+        node_sizes = [1000 * (out_centrality[node] + 0.2) for node in G.nodes()]
+        
+        # Cor do nó baseada na centralidade de entrada (quão afetado é)
+        node_colors = [in_centrality[node] for node in G.nodes()]
+        
+        # Usar layout hierárquico para melhor visualização de fluxos causais
+        try:
+            pos = nx.kamada_kawai_layout(G)
+        except:
+            # Fallback para spring layout se kamada_kawai não convergir
+            pos = nx.spring_layout(G, k=0.8, seed=42)
+        
+        # Desenhar nós com bordas mais definidas e cores baseadas na centralidade
+        nodes = nx.draw_networkx_nodes(G, pos, 
+                              node_size=node_sizes,
+                              node_color=node_colors, 
+                              cmap=plt.cm.YlOrRd,
+                              alpha=0.8, 
+                              linewidths=1.5,
+                              edgecolors='k')
+        
+        # Adicionar barra de cores para mostrar o significado das cores dos nós
+        cbar = plt.colorbar(nodes, shrink=0.7, label='Grau de Impacto (Centralidade de Entrada)')
+        cbar.ax.tick_params(labelsize=8)
+        
+        # Desenhar arestas com largura proporcional à causalidade
+        edges = G.edges(data=True)
+        edge_widths = [4 * (1 - d['p_value']) for _, _, d in edges]
+        edge_colors = [cm.YlGnBu(1 - d['p_value']) for _, _, d in edges]
+        nx.draw_networkx_edges(G, pos, 
+                              arrowsize=25, 
+                              width=edge_widths, 
+                              edge_color=edge_colors,
+                              alpha=0.7,
+                              connectionstyle='arc3,rad=0.1')  # Curvatura leve para evitar sobreposições
+        
+        # Adicionar rótulos aos nós com formatação melhorada
+        nx.draw_networkx_labels(G, pos, 
+                               font_size=14, 
+                               font_weight='bold',
+                               bbox=dict(facecolor='white', edgecolor='none', alpha=0.7, pad=6))
+        
+        # Adicionar rótulos às arestas (p-valores)
+        edge_labels = {(u, v): f"p={d['p_value']:.3f}\nlag={d['lag']}" for u, v, d in G.edges(data=True)}
+        nx.draw_networkx_edge_labels(G, pos, 
+                                    edge_labels=edge_labels, 
+                                    font_size=11,
+                                    bbox=dict(facecolor='white', edgecolor='none', alpha=0.7, pad=2))
+        
+        plt.title(title or "Rede de Causalidade entre Inquilinos", fontsize=16, fontweight='bold')
+        plt.axis('off')
+        plt.tight_layout()
+        
+        # Adicionar legenda explicativa
+        plt.figtext(0.02, 0.02, 
+                   "Nota: A espessura das setas indica a força da relação causal.\n"
+                   "Valores p menores indicam maior confiança na relação causal.",
+                   fontsize=10, ha='left')
+        
+        # Salvar o plot no diretório principal de visualização
+        if filename and self.plots_dir:
+            # Salvar como PNG de alta resolução
+            plt.savefig(self.plots_dir / filename, bbox_inches='tight', dpi=300)
+            
+            # Salvar também como PDF para incluir em papers acadêmicos
+            pdf_filename = filename.replace('.png', '.pdf')
+            plt.savefig(self.plots_dir / pdf_filename, bbox_inches='tight', format='pdf')
+            
+            # Salvar também no diretório de análise de séries temporais
+            if self.ts_dir:
+                plt.savefig(self.ts_dir / filename, bbox_inches='tight', dpi=300)
+                plt.savefig(self.ts_dir / pdf_filename, bbox_inches='tight', format='pdf')
+            
+            logging.info(f"Gráfico de rede de causalidade salvo em {filename}")
+            plt.close()
+        else:
+            plt.show()
+            plt.close()
+
+    def plot_chord_diagram(self, causality_pairs, title=None, filename=None):
+        """
+        Cria um diagrama circular (chord diagram) para visualizar relações de causalidade.
+        Requer a biblioteca matplotlib-chord.
+        
+        Args:
+            causality_pairs (list): Lista de dicionários com resultados de causalidade
+            title (str): Título para o gráfico
+            filename (str): Nome do arquivo para salvar o gráfico
+        """
+        if not CHORD_AVAILABLE:
+            logging.error("Não foi possível criar o diagrama circular: biblioteca mpl_chord_diagram não está disponível.")
+            logging.error("Instale com: pip install mpl_chord_diagram")
+            return
+            
+        if not causality_pairs:
+            logging.warning("Sem dados de causalidade para visualizar.")
+            return
+        
+        # Preparar os dados para o diagrama circular
+        sources = []
+        targets = []
+        values = []
+        
+        for pair in causality_pairs:
+            sources.append(pair['source'])
+            targets.append(pair['target'])
+            # Converter p-valor para força (1-p)
+            values.append(1 - pair['p_value'])
+        
+        # Criar DataFrame com os dados
+        df = pd.DataFrame({
+            'source': sources,
+            'target': targets,
+            'value': values
+        })
+        
+        # Obter lista única de todos os inquilinos
+        all_tenants = sorted(list(set(sources + targets)))
+        
+        # Criar matriz de fluxo
+        flow_matrix = np.zeros((len(all_tenants), len(all_tenants)))
+        
+        # Preencher matriz com valores
+        for _, row in df.iterrows():
+            source_idx = all_tenants.index(row['source'])
+            target_idx = all_tenants.index(row['target'])
+            flow_matrix[source_idx, target_idx] = row['value']
+        
+        # Configuração para estilo acadêmico
+        plt.figure(figsize=(12, 10), dpi=300)
+        plt.style.use('seaborn-v0_8-whitegrid')
+        plt.rcParams['font.family'] = 'serif'
+        # Desabilitar LaTeX para evitar problemas em sistemas sem LaTeX instalado
+        plt.rcParams['text.usetex'] = False
+        
+        # Criar diagrama circular com cores acessíveis
+        chord_diagram(flow_matrix, 
+                    names=all_tenants,
+                    colors=[plt.cm.Set3(i) for i in np.linspace(0, 1, len(all_tenants))],
+                    alpha=0.7,
+                    use_gradient=True,
+                    width=0.1,
+                    gap=0.03,
+                    fontsize=14)
+        
+        plt.title(title or "Relações de Degradação entre Inquilinos", fontsize=16, fontweight='bold')
+        
+        # Adicionar legenda explicativa
+        plt.figtext(0.5, 0.02, 
+                   "Nota: A espessura das conexões indica a força da relação causal.\n"
+                   "Conexões mais largas indicam maior probabilidade de relação causal.",
+                   fontsize=10, ha='center')
+        
+        plt.tight_layout(rect=[0, 0.05, 1, 0.95])  # Ajustar para incluir o texto explicativo
+        
+        # Salvar em alta resolução
+        if filename and self.plots_dir:
+            # Salvar como PNG
+            plt.savefig(self.plots_dir / filename, bbox_inches='tight', dpi=300)
+            
+            # Salvar como PDF para publicação
+            pdf_filename = filename.replace('.png', '.pdf')
+            plt.savefig(self.plots_dir / pdf_filename, bbox_inches='tight', format='pdf')
+            
+            # Salvar também no diretório de análise de séries temporais
+            if self.ts_dir:
+                plt.savefig(self.ts_dir / filename, bbox_inches='tight', dpi=300)
+                plt.savefig(self.ts_dir / pdf_filename, bbox_inches='tight', format='pdf')
+                
+            logging.info(f"Diagrama circular salvo em {filename}")
+            plt.close()
+        else:
+            plt.show()
+            plt.close()
+
+    def plot_causality_heatmap(self, causality_matrix, title=None, filename=None):
+        """
+        Cria um mapa de calor mostrando as relações causais entre inquilinos.
+        O mapa usa um esquema de cor que vai de branco (sem causalidade) a vermelho escuro (forte causalidade).
+        
+        Args:
+            causality_matrix (DataFrame): Matriz de p-valores da causalidade de Granger
+            title (str): Título para o gráfico
+            filename (str): Nome do arquivo para salvar o gráfico
+        """
+        if causality_matrix.empty:
+            logging.warning("Matriz de causalidade vazia. Não há dados para visualizar.")
+            return
+        
+        # Configurações para estilo acadêmico
+        plt.figure(figsize=(12, 10), dpi=300)
+        plt.style.use('seaborn-v0_8-whitegrid')
+        plt.rcParams['font.family'] = 'serif'
+        # Desabilitar LaTeX para evitar problemas em sistemas sem LaTeX instalado
+        plt.rcParams['text.usetex'] = False
+        
+        # Transformar p-valores em intensidade de causalidade (1-p)
+        causality_strength = 1 - causality_matrix.copy()
+        
+        # Configurar diagonal para NaN para não mostrar auto-causalidade
+        np.fill_diagonal(causality_strength.values, np.nan)
+        
+        # Criar máscara para valores ausentes
+        mask = np.isnan(causality_strength.values)
+        
+        # Criar mapa de calor com esquema de cores científico
+        plt.figure(figsize=(12, 10))
+        ax = sns.heatmap(causality_strength, 
+                        annot=True, 
+                        fmt='.3f',
+                        cmap='YlOrRd', 
+                        mask=mask,
+                        cbar_kws={'label': 'Intensidade da Causalidade (1-p)', 'shrink': 0.8},
+                        square=True,
+                        linewidths=0.5,
+                        annot_kws={"size": 10})
+        
+        # Configurar título e rótulos
+        plt.title(title or "Intensidade de Causalidade entre Inquilinos", fontsize=16, fontweight='bold')
+        plt.xlabel("Inquilino Causador", fontsize=14)
+        plt.ylabel("Inquilino Afetado", fontsize=14)
+        
+        # Rotacionar rótulos para melhor legibilidade
+        plt.xticks(rotation=45, ha='right', fontsize=12)
+        plt.yticks(fontsize=12)
+        
+        # Adicionar nota explicativa
+        plt.figtext(0.02, 0.02, 
+                   "Nota: Valores mais altos (vermelho) indicam maior confiança na relação causal.\n"
+                   "Linhas representam inquilinos causadores, colunas representam inquilinos afetados.",
+                   fontsize=10, ha='left')
+        
+        plt.tight_layout(rect=[0, 0.05, 1, 0.95])  # Ajustar para incluir o texto explicativo
+        
+        # Adicionar interatividade básica
+        if not plt.isinteractive():
+            mplcursors.cursor(hover=True).connect(
+                "add", lambda sel: sel.annotation.set_text(
+                    f"Causador: {causality_strength.columns[int(sel.target.index)]}\n" +
+                    f"Afetado: {causality_strength.index[int(sel.target[1])]}\n" +
+                    f"Intensidade: {causality_strength.iloc[int(sel.target[1]), int(sel.target.index)]:.3f}"
+                )
+            )
+        
+        # Salvar em alta resolução
+        if filename and self.plots_dir:
+            # Salvar como PNG
+            plt.savefig(self.plots_dir / filename, bbox_inches='tight', dpi=300)
+            
+            # Salvar em PDF para publicações acadêmicas
+            pdf_filename = filename.replace('.png', '.pdf')
+            plt.savefig(self.plots_dir / pdf_filename, bbox_inches='tight', format='pdf')
+            
+            # Salvar também no diretório de análise temporal
+            if self.ts_dir:
+                plt.savefig(self.ts_dir / filename, bbox_inches='tight', dpi=300)
+                plt.savefig(self.ts_dir / pdf_filename, bbox_inches='tight', format='pdf')
+            
+            logging.info(f"Mapa de calor de causalidade salvo em {filename}")
+            plt.close()
+        else:
+            plt.show()
+            plt.close()
+
+    def plot_sankey_degradation(self, causality_pairs, title=None, filename=None):
+        """
+        Cria um diagrama de Sankey mostrando o fluxo de degradação entre inquilinos.
+        Requer a biblioteca plotly.
+        
+        Args:
+            causality_pairs (list): Lista de dicionários com resultados de causalidade
+            title (str): Título para o gráfico
+            filename (str): Nome do arquivo para salvar o gráfico
+        """
+        if not PLOTLY_AVAILABLE:
+            logging.error("Não foi possível criar o diagrama de Sankey: biblioteca plotly não está disponível.")
+            logging.error("Instale com: pip install plotly")
+            return
+        
+        if not causality_pairs:
+            logging.warning("Sem dados de causalidade para visualizar.")
+            return
+        
+        # Preparar dados para o Sankey
+        sources = []
+        targets = []
+        values = []
+        labels = []
+        
+        # Obter lista única de todos os inquilinos
+        all_tenants = sorted(list(set([p['source'] for p in causality_pairs] + [p['target'] for p in causality_pairs])))
+        tenant_indices = {tenant: idx for idx, tenant in enumerate(all_tenants)}
+        
+        # Popular listas para o Sankey
+        for pair in causality_pairs:
+            source_idx = tenant_indices[pair['source']]
+            target_idx = tenant_indices[pair['target']]
+            sources.append(source_idx)
+            targets.append(target_idx)
+            # Usar 1-p como valor do fluxo (força da causalidade)
+            values.append((1 - pair['p_value']) * 10)  # Multiplicar por 10 para melhor visualização
+        
+        # Criar figura Sankey
+        fig = go.Figure(data=[go.Sankey(
+            node=dict(
+                pad=15,
+                thickness=20,
+                line=dict(color="black", width=0.5),
+                label=all_tenants,
+                color="rgba(31,119,180,0.8)"  # Azul semi-transparente
+            ),
+            link=dict(
+                source=sources,
+                target=targets,
+                value=values,
+                color=[f"rgba(214,39,40,{(1-p['p_value'])*0.8+0.2})" for p in causality_pairs]  # Vermelho com opacidade baseada na força
+            ))])
+        
+        # Adicionar anotação explicativa
+        fig.add_annotation(
+            x=0.5, y=-0.1,
+            xref="paper", yref="paper",
+            text="Nota: A espessura das conexões representa a força da relação causal.<br>Cores mais intensas indicam maior confiança na relação.",
+            showarrow=False,
+            font=dict(family="Times New Roman", size=12),
+            align="center",
+            bgcolor="rgba(255,255,255,0.8)",
+            bordercolor="black",
+            borderwidth=1,
+            borderpad=4
+        )
+        
+        # Configurar layout
+        fig.update_layout(
+            title_text=title or "Fluxo de Degradação entre Inquilinos",
+            font_size=14,
+            font_family="Times New Roman",
+            paper_bgcolor='white',
+            plot_bgcolor='white',
+            width=1000,
+            height=800,
+            margin=dict(t=50, l=25, r=25, b=70)  # Mais espaço abaixo para anotação
+        )
+        
+        # Salvar como HTML interativo e como imagem estática
+        if filename and self.plots_dir:
+            # HTML interativo
+            html_filename = filename.replace('.png', '.html')
+            plot(fig, filename=str(self.plots_dir / html_filename), auto_open=False)
+            
+            # Imagem estática de alta qualidade
+            fig.write_image(str(self.plots_dir / filename), scale=2)
+            
+            # PDF para publicação
+            pdf_filename = filename.replace('.png', '.pdf')
+            fig.write_image(str(self.plots_dir / pdf_filename))
+            
+            logging.info(f"Diagrama de Sankey salvo em {filename} e {html_filename}")
+            
+            # Salvar também no diretório de análise temporal, se disponível
+            if self.ts_dir:
+                plot(fig, filename=str(self.ts_dir / html_filename), auto_open=False)
+                fig.write_image(str(self.ts_dir / filename), scale=2)
+                fig.write_image(str(self.ts_dir / pdf_filename))
+        else:
+            # Mostrar no navegador em modo interativo
+            fig.show()
+
     def identify_degradation_sources(self, data, phases, metrics_of_interest, tenants):
         """
         Identify sources of service degradation across phases.
@@ -558,6 +1026,69 @@ class TenantDegradationAnalyzer:
                 f.write(report_text)
         
         logging.info(f"Generated degradation report for {metric_name} at {report_file}")
+
+    def generate_all_visualizations(self, data, phases, metrics_of_interest, tenants, output_subdir='degradation_visualizations'):
+        """
+        Gera todas as visualizações de degradação disponíveis para os dados fornecidos.
+        
+        Args:
+            data (dict): Dados do DataLoader com fases
+            phases (list): Lista de nomes das fases
+            metrics_of_interest (list): Lista de métricas para analisar
+            tenants (list): Lista de inquilinos para analisar
+            output_subdir (str): Subdiretório para salvar as visualizações
+        
+        Returns:
+            dict: Dicionário com caminhos para as visualizações geradas
+        """
+        if not self.output_dir:
+            logging.warning("Diretório de saída não definido. Não é possível salvar visualizações.")
+            return {}
+            
+        # Criar diretório para visualizações
+        vis_dir = self.output_dir / output_subdir
+        vis_dir.mkdir(parents=True, exist_ok=True)
+        logging.info(f"Gerando visualizações de degradação em: {vis_dir}")
+        
+        # Verificar fases
+        baseline_phase = '1 - Baseline' if '1 - Baseline' in phases else phases[0] if phases else None
+        attack_phase = '2 - Attack' if '2 - Attack' in phases else phases[1] if len(phases) > 1 else None
+        recovery_phase = '3 - Recovery' if '3 - Recovery' in phases else phases[2] if len(phases) > 2 else None
+        
+        if not baseline_phase or not attack_phase:
+            logging.error("Fases insuficientes para análise de degradação.")
+            return {}
+            
+        generated_visualizations = {}
+        
+        # Análise de correlação cruzada entre inquilinos
+        logging.info("Gerando visualizações de correlação entre inquilinos...")
+        
+        # Gerar visualizações para fase de baseline e ataque
+        for phase in [baseline_phase, attack_phase, recovery_phase]:
+            if phase:
+                phase_vis = {}
+                
+                # Correlações
+                correlations = self.analyze_cross_tenant_correlations(data, phase, metrics_of_interest, tenants)
+                if correlations:
+                    phase_vis['correlations'] = correlations
+                
+                # Causalidade (gera diversas visualizações)
+                causality = self.analyze_granger_causality(data, phase, metrics_of_interest, tenants)
+                if causality:
+                    phase_vis['causality'] = causality
+                    
+                # Adicionar ao dicionário de visualizações
+                generated_visualizations[phase] = phase_vis
+        
+        # Identificar fontes de degradação e gerar relatórios
+        logging.info("Identificando fontes de degradação...")
+        degradation_sources = self.identify_degradation_sources(data, phases, metrics_of_interest, tenants)
+        generated_visualizations['degradation_sources'] = degradation_sources
+        
+        logging.info(f"Todas as visualizações de degradação foram geradas em: {vis_dir}")
+        return generated_visualizations
 
 def analyze_tenant_degradation(data_loader, output_dir):
     """
