@@ -110,7 +110,7 @@ O pipeline de análise oferece diversas funcionalidades avançadas para processa
 
 1. Clone o repositório:
    ```bash
-   git clone https://github.com/seu-usuario/k8s-noisy-lab-data-pipe.git
+   git clone https://github.com/pserpaschiavo/k8s-noisy-lab-data-pipe.git
    cd k8s-noisy-lab-data-pipe
    ```
 
