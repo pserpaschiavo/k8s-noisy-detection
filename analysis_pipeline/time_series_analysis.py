@@ -235,12 +235,38 @@ class TimeSeriesAnalyzer:
         Returns:
             dict: Dictionary with entropy results
         """
-        # Convert to numeric
-        series = pd.to_numeric(series, errors='coerce').dropna()
+        # Ensure we have a valid pandas Series or numpy array
+        if series is None:
+            logging.warning("Cannot calculate entropy: series is None")
+            return {
+                'entropy_value': None,
+                'method': method
+            }
+            
+        try:
+            # Convert to numeric and handle NaN values
+            if hasattr(series, 'values'):  # If it's a pandas Series
+                series_values = pd.to_numeric(series, errors='coerce').dropna()
+            elif isinstance(series, (list, tuple, np.ndarray)):  # If it's already a list, tuple or array
+                series_values = pd.to_numeric(pd.Series(series), errors='coerce').dropna()
+            else:
+                logging.error(f"Unsupported type for entropy calculation: {type(series)}")
+                return {
+                    'entropy_value': None,
+                    'method': method,
+                    'error': f"Unsupported type: {type(series)}"
+                }
+        except Exception as e:
+            logging.error(f"Error converting series to numeric: {e}")
+            return {
+                'entropy_value': None,
+                'method': method,
+                'error': str(e)
+            }
         
         # Need sufficient data points
-        if len(series) < 10:
-            logging.warning("Series too short for entropy calculation")
+        if len(series_values) < 10:
+            logging.warning(f"Series too short for entropy calculation: {len(series_values)} points")
             return {
                 'entropy_value': None,
                 'method': method
@@ -254,17 +280,17 @@ class TimeSeriesAnalyzer:
             if method == 'sample':
                 # Determine tolerance if not provided (0.2 * std is a common choice)
                 if tolerance is None:
-                    tolerance = 0.2 * series.std()
-                entropy_value = nolds.sampen(series.values, emb_dim=embed_dim, tolerance=tolerance)
+                    tolerance = 0.2 * series_values.std()
+                entropy_value = nolds.sampen(series_values.values, emb_dim=embed_dim, tolerance=tolerance)
             elif method == 'approximate':
                 # Determine tolerance if not provided
                 if tolerance is None:
-                    tolerance = 0.2 * series.std()
+                    tolerance = 0.2 * series_values.std()
                 # Using sampen (Sample Entropy) instead of ap_entropy (Approximate Entropy)
-                entropy_value = nolds.sampen(series.values, emb_dim=embed_dim, tolerance=tolerance)
+                entropy_value = nolds.sampen(series_values.values, emb_dim=embed_dim, tolerance=tolerance)
             elif method == 'shannon':
                 # Discretize the series (into 8 bins by default)
-                hist, bin_edges = np.histogram(series, bins=8)
+                hist, bin_edges = np.histogram(series_values, bins=8)
                 # Normalize to get probabilities
                 p = hist / float(sum(hist))
                 # Remove zero probabilities
@@ -345,32 +371,39 @@ class TimeSeriesAnalyzer:
         
         # Plot comparison if output directory is set
         if self.plots_dir:
-            # Extract entropy values
-            phases = list(entropy_results.keys())
-            entropy_values = [entropy_results[phase]['entropy_value'] for phase in phases]
+            # Extract entropy values and filter out None values
+            phases = []
+            entropy_values = []
+            for phase, result in entropy_results.items():
+                if result['entropy_value'] is not None:
+                    phases.append(phase)
+                    entropy_values.append(result['entropy_value'])
             
-            # Create a bar chart for comparison
-            plt.figure(figsize=(10, 6))
-            bars = plt.bar(phases, entropy_values, alpha=0.7)
-            
-            # Add value labels on top of bars
-            for bar, value in zip(bars, entropy_values):
-                if value is not None:
+            # Only create the plot if we have valid values
+            if phases and entropy_values:
+                # Create a bar chart for comparison
+                plt.figure(figsize=(10, 6))
+                bars = plt.bar(phases, entropy_values, alpha=0.7)
+                
+                # Add value labels on top of bars
+                for bar, value in zip(bars, entropy_values):
                     plt.text(bar.get_x() + bar.get_width()/2, value + 0.01,
                             f'{value:.4f}', ha='center', va='bottom')
-            
-            plt.title(f'Comparison of {method.capitalize()} Entropy: {series_name}')
-            plt.xlabel('Phase')
-            plt.ylabel(f'{method.capitalize()} Entropy')
-            plt.grid(True, axis='y')
-            
-            # Save plot
-            s_name = series_name if series_name else 'unknown'
-            filename = f"entropy_comparison_{method}_{s_name}.png"
-            # Clean filename
-            filename = filename.replace('/', '_').replace(' ', '_').lower()
-            plt.savefig(self.plots_dir / filename, bbox_inches='tight', dpi=300)
-            plt.close()
+                
+                plt.title(f'Comparison of {method.capitalize()} Entropy: {series_name}')
+                plt.xlabel('Phase')
+                plt.ylabel(f'{method.capitalize()} Entropy')
+                plt.grid(True, axis='y')
+                
+                # Save plot
+                s_name = series_name if series_name else 'unknown'
+                filename = f"entropy_comparison_{method}_{s_name}.png"
+                # Clean filename
+                filename = filename.replace('/', '_').replace(' ', '_').lower()
+                plt.savefig(self.plots_dir / filename, bbox_inches='tight', dpi=300)
+                plt.close()
+            else:
+                logging.warning(f"No valid entropy values to plot for {series_name}")
         
         return entropy_results
     

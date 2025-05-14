@@ -78,7 +78,7 @@ python main.py --experiment "2025-05-11/16-58-00/default-experiment-1" --round "
 - `--combine-rounds`: Combinar dados de múltiplas rodadas para a análise
 - `--combine-method`: Método para combinar os dados das rodadas ('mean', 'median', 'min', 'max')
 - `--phases`: Fases a analisar (padrão: "1 - Baseline" "2 - Attack" "3 - Recovery")
-- `--output`: Diretório de saída (padrão: results/analysis/YYYY-MM-DD_HH-MM-SS/)
+- `--output`: Diretório de saída (padrão: analysis/YYYY-MM-DD_HH-MM-SS/)
 - `--skip-plots`: Pula a geração de visualizações (para análise mais rápida)
 - `--skip-advanced`: Pula análises avançadas de séries temporais (mais rápido)
 - `--metrics-of-interest`: Lista de métricas-chave para comparação entre fases
@@ -164,7 +164,7 @@ python test_colorblind_plots.py
 Os resultados são organizados da seguinte forma:
 
 ```
-results/analysis/YYYY-MM-DD_HH-MM-SS/
+analysis/YYYY-MM-DD_HH-MM-SS/
 ├── plots/                           # Visualizações básicas
 │   ├── 1_-_Baseline/                # Gráficos da fase baseline
 │   ├── 2_-_Attack/                  # Gráficos da fase de ataque

@@ -67,7 +67,8 @@ class AdvancedAnalyzer:
             self.changepoint_dir.mkdir(exist_ok=True)
         
         # Set plot style for academic publication quality
-        plt.style.use('seaborn-whitegrid')
+        # Use a seaborn style compatible with newer versions
+        sns.set_style("whitegrid")
         plt.rcParams['figure.figsize'] = (10, 6)
         plt.rcParams['figure.dpi'] = 300
         plt.rcParams['savefig.dpi'] = 300

@@ -1,7 +1,7 @@
 # Kubernetes Noisy Neighbors Lab - Data Analysis Pipeline
 
 ![Pipeline Status](https://img.shields.io/badge/Pipeline-Operational-green)
-![Python](https://img.shields.io/badge/Python-3.6%2B-blue)
+![Python](https://img.shields.io/badge/Python-3.10-blue)
 ![License](https://img.shields.io/badge/License-MIT-orange)
 
 ## Visão Geral
@@ -18,6 +18,30 @@ O principal objetivo deste projeto é quantificar e caracterizar o impacto de ca
 4. Detectar anomalias e pontos de mudança significativos nos dados
 5. Gerar visualizações e resultados estatísticos com qualidade para publicações acadêmicas
 
+## Requisitos do Ambiente
+
+> **⚠️ Importante:** Este pipeline requer Python 3.10
+> 
+> O pipeline utiliza bibliotecas científicas (numpy, scipy, ruptures, etc.) que podem apresentar incompatibilidades com versões mais recentes do Python (como 3.13).
+
+### Configuração do Ambiente
+
+```bash
+# Instalar Python 3.10 (se necessário)
+sudo dnf install -y python3.10 python3.10-devel  # Fedora/RHEL
+# OU
+sudo apt install -y python3.10 python3.10-dev    # Ubuntu/Debian
+
+# Criar ambiente virtual com Python 3.10
+python3.10 -m venv .venv310
+
+# Ativar ambiente virtual
+source .venv310/bin/activate
+
+# Instalar dependências
+pip install -r requirements.txt
+```
+
 ## Estrutura do Repositório
 
 ```
@@ -32,7 +56,8 @@ k8s-noisy-lab-data-pipe/
 │   ├── time_series_analysis.py   # Análises específicas para séries temporais 
 │   ├── visualizations.py         # Gerador de visualizações
 │   └── README.md                 # Documentação detalhada do pipeline
-└── data/                   # Diretório para dados de exemplo
+├── analysis/               # Resultados de análises gerados pelo pipeline  
+└── results/                # Dados brutos dos experimentos
 ```
 
 ## Funcionalidades Principais
@@ -154,7 +179,7 @@ python main.py --experiment "2025-05-11/16-58-00/default-experiment-1" \
 Os resultados são organizados da seguinte forma:
 
 ```
-results/analysis/YYYY-MM-DD_HH-MM-SS/
+analysis/YYYY-MM-DD_HH-MM-SS/
 ├── plots/                        # Visualizações básicas
 │   ├── [fases]/                  # Gráficos por fase
 │   ├── correlations/             # Análises de correlação
@@ -186,9 +211,9 @@ Se você utilizar este pipeline em sua pesquisa, por favor cite:
 
 ```
 @software{k8s_noisy_lab,
-  author = {Autores},
+  author = {SCHIAVO, P. S.},
   title = {Kubernetes Noisy Neighbors Lab - Data Analysis Pipeline},
-  year = {2023},
-  url = {https://github.com/seu-usuario/k8s-noisy-lab-data-pipe}
+  year = {2025},
+  url = {https://github.com/pserpaschiavo/k8s-noisy-lab-data-pipe}
 }
 ```

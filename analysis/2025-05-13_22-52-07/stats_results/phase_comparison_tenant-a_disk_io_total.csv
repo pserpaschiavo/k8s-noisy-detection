@@ -1,0 +1,4 @@
+,t_statistic,p_value,is_significant,effect_size,effect_magnitude,mean_difference,percent_change
+1 - Baseline_vs_2 - Attack,2.6088053118373344,0.009824659351827986,True,0.2904042913925133,small,-0.01747438474096297,-100.0
+1 - Baseline_vs_3 - Recovery,2.6088053118373344,0.009824659351827986,True,0.23323127834064933,small,-0.01747438474096297,-100.0
+2 - Attack_vs_3 - Recovery,,,False,0.0,negligible,0.0,

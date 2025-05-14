@@ -20,6 +20,8 @@ from time_series_analysis import TimeSeriesAnalyzer
 from correlation_analysis import CorrelationAnalyzer
 from visualizations import VisualizationGenerator
 from advanced_analysis import AdvancedAnalyzer
+from tenant_degradation_analysis import TenantDegradationAnalyzer, analyze_tenant_degradation
+from causal_analysis import CausalAnalyzer
 
 # Configure logging
 logging.basicConfig(
@@ -53,7 +55,7 @@ def parse_args():
                         help='Phases to analyze (e.g., "1 - Baseline" "2 - Attack" "3 - Recovery")')
     
     parser.add_argument('--output', type=str, default=None,
-                        help='Output directory for results (default: results/analysis/YYYY-MM-DD_HH-MM-SS/)')
+                        help='Output directory for results (default: analysis/YYYY-MM-DD_HH-MM-SS/)')
     
     parser.add_argument('--skip-plots', action='store_true',
                         help='Skip generating plots (useful for quick analysis)')
@@ -93,6 +95,13 @@ def parse_args():
     parser.add_argument('--recovery-analysis', action='store_true', default=False,
                         help='Analyze system recovery metrics after attack')
     
+    parser.add_argument('--tenant-degradation', action='store_true', default=False,
+                        help='Analyze cross-tenant relationships to identify sources of service degradation')
+    
+    parser.add_argument('--causality-method', type=str, default=None,
+                        choices=['toda-yamamoto', 'transfer-entropy', 'change-point-impact'],
+                        help='Method to use for causal analysis (if not specified, causal analysis is skipped)')
+    
     return parser.parse_args()
 
 def setup_output_dirs(base_dir=None):
@@ -103,7 +112,8 @@ def setup_output_dirs(base_dir=None):
     if base_dir:
         output_dir = Path(base_dir)
     else:
-        output_dir = Path('results') / 'analysis' / timestamp
+        # Salvar na pasta 'analysis' na raiz do repositório em vez de 'results/analysis'
+        output_dir = Path('..') / 'analysis' / timestamp
     
     # Create main directory
     output_dir.mkdir(parents=True, exist_ok=True)
@@ -118,11 +128,15 @@ def setup_output_dirs(base_dir=None):
     advanced_dir = output_dir / 'advanced_analysis'
     advanced_dir.mkdir(exist_ok=True)
     
+    causal_dir = output_dir / 'causal_analysis'
+    causal_dir.mkdir(exist_ok=True)
+    
     return {
         'base': output_dir,
         'plots': plots_dir,
         'stats': stats_dir,
-        'advanced': advanced_dir
+        'advanced': advanced_dir,
+        'causal': causal_dir
     }
 
 def analyze_phase(phase_data, phase_name, output_dirs, skip_plots=False):
@@ -421,6 +435,73 @@ def perform_advanced_analysis(data_loader, phases, components_of_interest, metri
     
     return advanced_results
 
+def perform_causal_analysis(data_loader, phases, components_of_interest, metrics_of_interest, 
+                         output_dirs, causality_method):
+    """Perform causal analysis between metrics."""
+    logging.info(f"Performing causal analysis using method: {causality_method}")
+    
+    # Initialize causal analyzer with output directory
+    causal_analyzer = CausalAnalyzer(output_dirs['stats'])
+    
+    # Prepare data structure for causal analysis
+    phase_data = {}
+    for phase in phases:
+        phase_data[phase] = {}
+        for component in components_of_interest:
+            # Get metrics data for this component in this phase
+            component_data = data_loader.get_all_metrics_for_component(phase, component)
+            
+            if component_data:
+                # Extract series from component data
+                series_dict = {}
+                for metric, data in component_data.items():
+                    if metric in metrics_of_interest and isinstance(data, pd.DataFrame) and not data.empty:
+                        value_col = data.columns[0] if len(data.columns) > 0 else None
+                        if value_col:
+                            series_dict[metric] = data[value_col]
+                
+                if series_dict:
+                    phase_data[phase][component] = series_dict
+    
+    # Run causal analysis
+    results_df = causal_analyzer.run_causal_analysis(
+        phase_data, 
+        method=causality_method,
+        metrics_of_interest=metrics_of_interest,
+        components=components_of_interest,
+        save_results=True
+    )
+    
+    # Log summary of results
+    if not results_df.empty and 'causality' in results_df.columns:
+        causal_count = results_df['causality'].sum()
+        logging.info(f"Found {causal_count} significant causal relationships using {causality_method} method")
+        
+        if causal_count > 0:
+            # Print top causal relationships
+            top_results = results_df[results_df['causality'] == True].head(10)
+            print(f"\nTop causal relationships detected ({causality_method}):")
+            
+            # Format for display based on method
+            if causality_method == 'toda-yamamoto':
+                for _, row in top_results.iterrows():
+                    print(f"- {row['source_metric']} → {row['target_metric']} "
+                          f"(p-value: {row['p_value']:.4f}, lag: {row['lag_order']})")
+                          
+            elif causality_method == 'transfer-entropy':
+                for _, row in top_results.iterrows():
+                    print(f"- {row['source_metric']} → {row['target_metric']} "
+                          f"(TE: {row['transfer_entropy']:.4f}, p-value: {row['p_value']:.4f})")
+                          
+            elif causality_method == 'change-point-impact':
+                for _, row in top_results.iterrows():
+                    print(f"- {row['source_metric']} → {row['target_metric']} "
+                          f"(impact: {row['impact_strength']:.4f}, lag: {row['lag']})")
+    else:
+        logging.warning(f"No significant causal relationships found using {causality_method} method")
+    
+    return results_df
+
 def generate_tenant_comparison(data_loader, phases, tenants, metrics_of_interest, output_dir, colorblind_friendly=True):
     """
     Generate tenant comparison plots across different phases.
@@ -685,6 +766,78 @@ def main():
             )
             logging.info("Tenant comparison plots generated")
         
+        # Run causal analysis if requested
+        if args.causality_method:
+            logging.info(f"Running causal analysis with method: {args.causality_method}...")
+            
+            # Create a dedicated directory for causal analysis results
+            causal_dir = output_dirs['base'] / "causal_analysis"
+            causal_dir.mkdir(exist_ok=True)
+            
+            # Update output_dirs dictionary with new directory
+            output_dirs['causal'] = causal_dir
+            
+            causal_results = perform_causal_analysis(
+                data_loader, 
+                list(data_loader.data.keys()),
+                components_of_interest, 
+                args.metrics_of_interest,
+                output_dirs,
+                args.causality_method
+            )
+            
+            if not causal_results.empty and 'causality' in causal_results.columns:
+                # Save a summary of causal relationships
+                with open(causal_dir / "causal_analysis_summary.txt", "w") as f:
+                    f.write(f"Causal Analysis Summary ({args.causality_method}):\n")
+                    f.write(f"- Total relationships tested: {len(causal_results)}\n")
+                    f.write(f"- Significant causal relationships found: {causal_results['causality'].sum()}\n\n")
+                    
+                    # Add details about top causal relationships
+                    significant = causal_results[causal_results['causality'] == True]
+                    if not significant.empty:
+                        f.write("Top significant causal relationships:\n")
+                        for i, (_, row) in enumerate(significant.head(10).iterrows(), 1):
+                            f.write(f"{i}. {row['source_metric']} → {row['target_metric']}\n")
+                
+                logging.info("Causal analysis completed successfully")
+            else:
+                logging.warning("Causal analysis did not produce significant results")
+        
+        # Run tenant degradation analysis if requested
+        if args.tenant_degradation:
+            logging.info("Running tenant degradation analysis...")
+            
+            # Create a dedicated directory for tenant degradation analysis
+            degradation_dir = output_dirs['base'] / "tenant_degradation_analysis"
+            degradation_dir.mkdir(exist_ok=True)
+            
+            degradation_results = analyze_tenant_degradation(
+                data_loader, 
+                output_dir=degradation_dir
+            )
+            
+            if degradation_results:
+                logging.info("Tenant degradation analysis completed successfully")
+                
+                # Create a summary of degradation analysis
+                summary = ["Tenant Degradation Analysis Summary:"]
+                for metric, results in degradation_results.items():
+                    if 'likely_degradation_sources' in results and results['likely_degradation_sources']:
+                        sources = [s['tenant'] for s in results['likely_degradation_sources']]
+                        summary.append(f"- {metric}: Likely degradation sources: {', '.join(sources)}")
+                    else:
+                        summary.append(f"- {metric}: No clear degradation sources identified")
+                
+                # Print summary
+                print("\n" + "\n".join(summary))
+                
+                # Save summary to file
+                with open(degradation_dir / "degradation_analysis_summary.txt", "w") as f:
+                    f.write("\n".join(summary))
+            else:
+                logging.warning("Tenant degradation analysis did not produce results")
+        
         # Add a summary of the analysis configuration
         with open(output_dirs['base'] / "analysis_config.txt", "w") as f:
             f.write(f"Experiment: {args.experiment}\n")
@@ -695,9 +848,13 @@ def main():
             f.write(f"Phases: {', '.join(args.phases)}\n")
             f.write(f"Components analyzed: {', '.join(components_of_interest)}\n")
             f.write(f"Metrics of interest: {', '.join(args.metrics_of_interest)}\n")
-            f.write(f"Advanced analyses: {args.advanced_analysis or args.distribution_analysis or args.anomaly_detection or args.change_point_detection or args.clustering or args.recovery_analysis}\n")
+            f.write(f"Advanced analyses: {args.advanced_analysis or args.distribution_analysis or args.anomaly_detection or args.change_point_detection or args.clustering or args.recovery_analysis or args.tenant_degradation}\n")
             if args.anomaly_detection:
                 f.write(f"Anomaly detection method: {args.anomaly_detection}\n")
+            if args.tenant_degradation:
+                f.write(f"Tenant degradation analysis: Enabled\n")
+            if args.causality_method:
+                f.write(f"Causal analysis method: {args.causality_method}\n")
             f.write(f"Analysis date: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}\n")
         
         logging.info(f"Analysis complete. Results saved to {output_dirs['base']}")
