@@ -1,0 +1,30 @@
+{
+  "datetime": "2025-05-14 18:18:46",
+  "experiment": null,
+  "rounds": [
+    "round-1"
+  ],
+  "phases": [
+    "1 - Baseline",
+    "2 - Attack",
+    "3 - Recovery"
+  ],
+  "metrics_analysis": true,
+  "phase_analysis": true,
+  "tenant_analysis": true,
+  "skip_plots": false,
+  "skip_advanced": false,
+  "metrics_of_interest": [
+    "cpu_usage",
+    "memory_usage",
+    "network_total_bandwidth",
+    "disk_io_total"
+  ],
+  "components": [
+    "tenant-a",
+    "tenant-b",
+    "tenant-c",
+    "tenant-d",
+    "ingress-nginx"
+  ]
+}

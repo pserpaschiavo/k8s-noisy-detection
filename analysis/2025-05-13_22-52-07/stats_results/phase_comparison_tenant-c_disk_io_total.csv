@@ -1,4 +1,0 @@
-,t_statistic,p_value,is_significant,effect_size,effect_magnitude,mean_difference,percent_change
-1 - Baseline_vs_2 - Attack,,,False,0,negligible,0.0,
-1 - Baseline_vs_3 - Recovery,,,False,0,negligible,0.0,
-2 - Attack_vs_3 - Recovery,,,False,0,negligible,0.0,

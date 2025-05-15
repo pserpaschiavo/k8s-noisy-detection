@@ -161,7 +161,7 @@ Para executar uma análise básica:
 
 ```bash
 cd analysis_pipeline
-python main.py --experiment "2025-05-11/16-58-00/default-experiment-1" --round "round-1"
+python main_integrated.py --experiment "2025-05-11/16-58-00/default-experiment-1" --round "round-1"
 ```
 
 ### Exemplo de Análise Avançada
@@ -169,7 +169,7 @@ python main.py --experiment "2025-05-11/16-58-00/default-experiment-1" --round "
 Para realizar análises estatísticas avançadas:
 
 ```bash
-python main.py --experiment "2025-05-11/16-58-00/default-experiment-1" \
+python main_integrated.py --experiment "2025-05-11/16-58-00/default-experiment-1" \
                --round "round-1" \
                --advanced-analysis \
                --distribution-analysis \
@@ -184,7 +184,7 @@ python main.py --experiment "2025-05-11/16-58-00/default-experiment-1" \
 Para combinar dados de múltiplas rodadas experimentais:
 
 ```bash
-python main.py --experiment "2025-05-11/16-58-00/default-experiment-1" \
+python main_integrated.py --experiment "2025-05-11/16-58-00/default-experiment-1" \
                --round round-1 round-2 round-3 \
                --combine-rounds \
                --combine-method mean

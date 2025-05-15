@@ -65,13 +65,115 @@ O pipeline oferece as seguintes funcionalidades:
 - **Clustering de Métricas**: Agrupamento automático de métricas relacionadas
 - **Análise de Recuperação**: Quantificação de tempos e níveis de recuperação após eventos
 
+### 9. Análise Causal Integrada (Novo)
+
+- **Análise Causal Avançada**: Implementação integrada de múltiplos métodos de análise causal:
+  - **Teste de Causalidade de Toda-Yamamoto**: Avaliação robusta de causalidade entre séries temporais não-estacionárias
+  - **Transfer Entropy**: Análise da transferência de informação de uma série para outra, eficaz para relações não-lineares
+  - **Change Point Impact Analysis**: Análise do impacto de mudanças bruscas em uma métrica sobre outras métricas
+- **Visualizações Causais**: Representações gráficas das relações causais:
+  - Gráficos de rede de causalidade com informação quantitativa
+  - Heatmaps de força causal entre componentes
+  - Gráficos de fluxo de causa-efeito temporal
+- **Detecção de Relações Indiretas**: Identificação de caminhos causais indiretos entre componentes
+- **Análise de Comunidades Causais**: Identificação de grupos de componentes fortemente relacionados causalmente
+- **Quantificação de Impacto Causal**: Estimativa da magnitude de efeitos causais entre métricas
+
+## Estrutura do Pipeline
+
+O pipeline foi projetado com uma arquitetura modular que consiste nos seguintes componentes:
+
+### Módulos Principais
+
+- **metrics_analysis.py**: Implementa análises estatísticas e de séries temporais para métricas individuais
+- **phase_analysis.py**: Realiza comparações entre diferentes fases do experimento (baseline, ataque, recuperação)
+- **tenant_analysis.py**: Foca em análises específicas de inquilinos (tenants) e comparações entre eles
+- **causal_analysis_integrated.py**: Novo módulo integrado para análise causal avançada entre métricas e componentes
+- **suggestion_engine.py**: Gera sugestões de análise baseadas nas características dos dados
+- **pipeline_manager.py**: Orquestra a integração entre todos os componentes de análise
+
+### Scripts de Execução do Pipeline
+
+- **main_integrated.py**: Ponto de entrada recomendado com integração completa entre todos os módulos
+- **main_updated.py**: Versão atualizada com melhor organização mas menor integração
+- **run_pipeline.py**: Script auxiliar para selecionar e executar a versão apropriada do pipeline
+
 ## Como Executar
 
-Para executar o pipeline completo:
+### Usando o Script de Seleção
 
 ```bash
 cd analysis_pipeline
-python main.py --experiment "2025-05-11/16-58-00/default-experiment-1" --round "round-1"
+python run_pipeline.py
+```
+
+Este script guiará você na seleção da versão do pipeline e definição dos argumentos.
+
+### Execução Direta
+
+```bash
+cd analysis_pipeline
+python main_integrated.py --experiment "2025-05-11/16-58-00/default-experiment-1" --round "round-1"
+```
+
+### Opções Avançadas
+
+#### Análise Básica
+```bash
+python main_integrated.py --experiment "experiment-folder" \
+                          --round "round-1" \
+                          --output-dir "resultados_analise"
+```
+
+#### Análise com Detecção de Anomalias
+```bash
+python main_integrated.py --experiment "experiment-folder" \
+                          --round "round-1" \
+                          --anomaly-detection iforest
+```
+
+#### Análise com Detecção de Pontos de Mudança
+```bash
+python main_integrated.py --experiment "experiment-folder" \
+                          --round "round-1" \
+                          --change-point-detection
+```
+
+#### Análise Causal (Novo)
+```bash
+python main_integrated.py --experiment "experiment-folder" \
+                          --round "round-1" \
+                          --causal-analysis \
+                          --causal-method toda-yamamoto
+```
+
+#### Análise Causal com Método Específico (Novo)
+```bash
+# Usando Transfer Entropy
+python main_integrated.py --experiment "experiment-folder" \
+                          --round "round-1" \
+                          --causal-analysis \
+                          --causal-method transfer-entropy
+
+# Usando Change Point Impact Analysis
+python main_integrated.py --experiment "experiment-folder" \
+                          --round "round-1" \
+                          --causal-analysis \
+                          --causal-method change-point-impact
+```
+
+#### Análise Completa com Todos os Componentes (Novo)
+```bash
+python main_integrated.py --experiment "experiment-folder" \
+                          --round "round-1" \
+                          --advanced-analysis \
+                          --distribution-analysis \
+                          --anomaly-detection iforest \
+                          --change-point-detection \
+                          --clustering \
+                          --recovery-analysis \
+                          --causal-analysis \
+                          --causal-method toda-yamamoto
 ```
 
 ### Parâmetros Básicos
@@ -95,12 +197,13 @@ python main.py --experiment "2025-05-11/16-58-00/default-experiment-1" --round "
 - `--change-point-detection`: Executa detecção de pontos de mudança nas séries temporais
 - `--clustering`: Realiza clustering de métricas para identificar padrões relacionados
 - `--recovery-analysis`: Analisa métricas de recuperação após ataques
+- `--causal-analysis`: Realiza análise causal integrada usando métodos avançados
 
 ### Exemplos de Uso
 
 #### Análise Básica
 ```bash
-python main.py --experiment "2025-05-11/16-58-00/default-experiment-1" \
+python main_integrated.py --experiment "2025-05-11/16-58-00/default-experiment-1" \
                --round "round-1" \
                --metrics-of-interest cpu_usage memory_usage network_total_bandwidth \
                --components tenant-a tenant-b ingress-nginx
@@ -108,7 +211,7 @@ python main.py --experiment "2025-05-11/16-58-00/default-experiment-1" \
 
 #### Análise de Múltiplos Rounds
 ```bash
-python main.py --experiment "2025-05-11/16-58-00/default-experiment-1" \
+python main_integrated.py --experiment "2025-05-11/16-58-00/default-experiment-1" \
                --round round-1 round-2 round-3 \
                --combine-rounds \
                --combine-method mean
@@ -116,26 +219,27 @@ python main.py --experiment "2025-05-11/16-58-00/default-experiment-1" \
 
 #### Análise com Detecção de Change Points
 ```bash
-python main.py --experiment "2025-05-11/16-58-00/default-experiment-1" \
+python main_integrated.py --experiment "2025-05-11/16-58-00/default-experiment-1" \
                --round "round-1" \
                --change-point-detection
 ```
 
 #### Análise Completa com Todas as Ferramentas Avançadas
 ```bash
-python main.py --experiment "2025-05-11/16-58-00/default-experiment-1" \
+python main_integrated.py --experiment "2025-05-11/16-58-00/default-experiment-1" \
                --round "round-1" \
                --advanced-analysis \
                --distribution-analysis \
                --anomaly-detection iforest \
                --change-point-detection \
                --clustering \
-               --recovery-analysis
+               --recovery-analysis \
+               --causal-analysis
 ```
 
 #### Visualização de Comparação entre Inquilinos (Tenant Comparison)
 ```bash
-python main.py --experiment "2025-05-11/16-58-00/default-experiment-1" \
+python main_integrated.py --experiment "2025-05-11/16-58-00/default-experiment-1" \
                --round "round-1" \
                --tenant-comparison
 ```
@@ -181,12 +285,14 @@ analysis/YYYY-MM-DD_HH-MM-SS/
 │   ├── phase_comparison_*.csv       # Comparações estatísticas entre fases
 │   ├── *_stats.csv                  # Estatísticas descritivas
 │   ├── granger_*.csv                # Resultados de causalidade de Granger
+│   ├── causal_analysis_*.csv        # Resultados de análise causal integrada
 │   └── entropy_*.csv                # Resultados de análise de entropia
 ├── advanced_analysis/               # Resultados de análises estatísticas avançadas
 │   ├── advanced_plots/              # Visualizações avançadas
 │   │   ├── time_series/             # Decomposição, anomalias e recuperação
 │   │   ├── distributions/           # Análises e ajustes de distribuição
 │   │   ├── changepoints/            # Detecção de pontos de mudança
+│   │   ├── causal_analysis/         # Visualizações de análise causal
 │   │   └── multivariate/            # Clustering e análises multivariadas
 │   ├── advanced_results/            # Resultados tabulares em CSV e LaTeX
 │   └── advanced_analysis_summary.txt # Resumo das análises avançadas
@@ -206,6 +312,7 @@ O pipeline contém os seguintes módulos:
 - `correlation_analysis.py`: Análises de correlação entre métricas
 - `visualizations.py`: Geração de gráficos e visualizações
 - `advanced_analysis.py`: Análises estatísticas avançadas para publicação acadêmica
+- `causal_analysis.py`: Implementação de métodos avançados de análise causal
 - `main.py`: Ponto de entrada do pipeline
 - `setup.py`: Instalação de dependências
 
@@ -267,6 +374,16 @@ Quantifica como o sistema se recupera após eventos disruptivos:
 - Percentual de recuperação em relação ao baseline
 - Análise do nível de estabilidade no período pós-ataque
 
+### Análise Causal Integrada
+
+Implementação integrada de múltiplos métodos de análise causal:
+- Teste de Causalidade de Toda-Yamamoto para séries temporais não-estacionárias
+- Transfer Entropy para relações não-lineares
+- Change Point Impact Analysis para impacto de mudanças bruscas
+- Visualizações gráficas de relações causais
+- Identificação de caminhos causais indiretos
+- Quantificação de impacto causal entre métricas
+
 ## Exportação para Publicações Acadêmicas
 
 Todos os resultados são exportados em formatos adequados para publicações:
@@ -280,25 +397,25 @@ Todos os resultados são exportados em formatos adequados para publicações:
 
 ### Análise Rápida (sem Plots):
 ```bash
-python main.py --skip-plots
+python main_integrated.py --skip-plots
 ```
 
 ### Combinando Rounds com Mediana (mais robustez contra outliers):
 ```bash
-python main.py --round round-1 round-2 round-3 --combine-rounds --combine-method median
+python main_integrated.py --round round-1 round-2 round-3 --combine-rounds --combine-method median
 ```
 
 ### Análise Completa para Publicação Acadêmica:
 ```bash
-python main.py --advanced-analysis --distribution-analysis --anomaly-detection iforest --change-point-detection --clustering --recovery-analysis
+python main_integrated.py --advanced-analysis --distribution-analysis --anomaly-detection iforest --change-point-detection --clustering --recovery-analysis --causal-analysis
 ```
 
 ### Análise Focada em Recuperação:
 ```bash
-python main.py --recovery-analysis --metrics-of-interest cpu_usage memory_usage response_time
+python main_integrated.py --recovery-analysis --metrics-of-interest cpu_usage memory_usage response_time
 ```
 
 ### Detecção de Anomalias em Componentes Específicos:
 ```bash
-python main.py --anomaly-detection iforest --components tenant-a tenant-b
+python main_integrated.py --anomaly-detection iforest --components tenant-a tenant-b
 ```

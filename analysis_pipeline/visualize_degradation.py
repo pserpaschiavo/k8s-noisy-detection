@@ -13,8 +13,8 @@ import logging
 import sys
 import pandas as pd
 from pathlib import Path
-from data_loader import DataLoader
-from tenant_degradation_analysis import TenantDegradationAnalyzer
+from analysis_pipeline.data_loader import DataLoader
+from analysis_pipeline.tenant_analysis import TenantAnalyzer
 
 def main():
     # Configuração de logging

@@ -32,7 +32,12 @@ class DataLoader:
         """
         self.base_path = Path(base_path)
         self.experiment_name = experiment_name
-        self.experiment_path = self.base_path / 'results' / experiment_name
+        
+        # Check if experiment path points to demo-data for easier testing
+        if 'demo-data' in experiment_name:
+            self.experiment_path = self.base_path / experiment_name
+        else:
+            self.experiment_path = self.base_path / 'results' / experiment_name
         
         # Handle round number options
         self.rounds = []
@@ -528,6 +533,48 @@ class DataLoader:
             logging.info(f"Switched to using data from round: {self.current_round}")
         else:
             logging.warning("Combined data not available. Call combine_rounds() first.")
+    
+    def load_demo_data(self):
+        """
+        Método alternativo para carregar dados direto dos arquivos de demonstração.
+        Este método usa uma estrutura mais simples e é útil para testes rápidos.
+        
+        Returns:
+            dict: Dados organizados por fase e componente
+        """
+        data = {}
+        
+        # Certifique-se de que temos um caminho para o round atual
+        if not self.results_path or not self.results_path.exists():
+            logging.error(f"Caminho do round não existe: {self.results_path}")
+            return data
+        
+        logging.info(f"Carregando dados de demonstração do diretório: {self.results_path}")
+        
+        # Para cada diretório de fase
+        for phase_dir in self.results_path.glob("*"):
+            if phase_dir.is_dir():
+                phase_name = phase_dir.name
+                data[phase_name] = {}
+                
+                # Para cada subdiretório que representa um componente
+                for component_dir in phase_dir.glob("*"):
+                    if component_dir.is_dir():
+                        component_name = component_dir.name
+                        data[phase_name][component_name] = {}
+                        
+                        # Carregar cada arquivo CSV como uma métrica
+                        for csv_file in component_dir.glob("*.csv"):
+                            metric_name = csv_file.stem
+                            try:
+                                df = pd.read_csv(csv_file)
+                                data[phase_name][component_name][metric_name] = df
+                                logging.debug(f"Carregado {metric_name} para {component_name} em {phase_name}")
+                            except Exception as e:
+                                logging.error(f"Erro carregando {csv_file}: {str(e)}")
+        
+        self.data = data
+        return data
 
 
 # Example usage

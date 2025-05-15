@@ -1,0 +1,14 @@
+K8s Noisy Detection Analysis Configuration
+=========================================
+
+datetime: 2025-05-14 19:06:10
+experiment: demo-data/default-experiment-1-round
+rounds: round-1
+phases: 1 - Baseline, 2 - Attack, 3 - Recovery
+metrics_analysis: True
+phase_analysis: True
+tenant_analysis: True
+skip_plots: True
+skip_advanced: False
+metrics_of_interest: cpu_usage, memory_usage, network_total_bandwidth, disk_io_total
+components: tenant-a, tenant-b, tenant-c, tenant-d, ingress-nginx
