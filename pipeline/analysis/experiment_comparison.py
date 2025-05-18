@@ -86,38 +86,120 @@ def preprocess_experiments(
         
         # Processar cada métrica
         processed_metrics = {}
-        for metric_name, df in selected_metrics.items():
-            # Normalizar tempo se solicitado
-            if normalize_timestamps:
-                processed_df = normalize_time(df.copy(), exp_data['info'])
-            else:
-                processed_df = df.copy()
+        for metric_name, rounds_data_dict in selected_metrics.items():
+            processed_rounds = {}
+            if not isinstance(rounds_data_dict, dict):
+                pass
 
-            # Aplicar filtro de tenants, se fornecido e a coluna 'tenant' existir
-            if tenants_filter and 'tenant' in processed_df.columns:
-                processed_df = processed_df[processed_df['tenant'].isin(tenants_filter)]
-            
-            # Aplicar filtro de rounds, se fornecido e a coluna 'round' existir
-            if rounds_filter and 'round' in processed_df.columns:
-                processed_df = processed_df[processed_df['round'].isin(rounds_filter)]
+            for round_name, df_round in rounds_data_dict.items():
+                # DEBUG: Check data for comparison_exp_1 and memory_usage after processing in preprocess_experiments
+                if exp_name == "comparison_exp_1" and metric_name == "memory_usage":
+                    print(f"DEBUG PREPROCESS [{exp_name}][{metric_name}][{round_name}]: START of round processing.")
+                    print(f"DEBUG PREPROCESS [{exp_name}][{metric_name}][{round_name}]: Initial df_round empty: {df_round.empty}, shape: {df_round.shape}")
+                    if not df_round.empty:
+                        print(f"DEBUG PREPROCESS [{exp_name}][{metric_name}][{round_name}]: Initial df_round columns: {df_round.columns.tolist()}")
+                        if 'value' in df_round.columns:
+                             print(f"DEBUG PREPROCESS [{exp_name}][{metric_name}][{round_name}]: Initial df_round 'value' head:\n{df_round['value'].head().to_string()}")
 
-            if processed_df.empty: # Pular se o DataFrame ficar vazio após os filtros
-                continue
+                # Normalizar tempo se solicitado
+                if normalize_timestamps:
+                    # Ensure df_round is a DataFrame before calling normalize_time
+                    if not isinstance(df_round, pd.DataFrame):
+                        print(f"Skipping normalization for metric '{metric_name}', round '{round_name}' in exp '{exp_name}': df_round is not a DataFrame, but {type(df_round)}")
+                        processed_df_round = df_round # Assign to processed_df_round before continue
+                        if exp_name == "comparison_exp_1" and metric_name == "memory_usage":
+                            print(f"DEBUG PREPROCESS [{exp_name}][{metric_name}][{round_name}]: SKIPPED NORMALIZATION (not a DataFrame).")
+                        continue
+                    # Call normalize_time correctly, assuming default time_column='datetime'
+                    processed_df_round = normalize_time(df_round.copy())
+                    if exp_name == "comparison_exp_1" and metric_name == "memory_usage":
+                        print(f"DEBUG PREPROCESS [{exp_name}][{metric_name}][{round_name}]: After normalize_time. Empty: {processed_df_round.empty}, Shape: {processed_df_round.shape}")
+                        if not processed_df_round.empty:
+                            print(f"DEBUG PREPROCESS [{exp_name}][{metric_name}][{round_name}]: Columns after norm: {processed_df_round.columns.tolist()}")
+                else:
+                    processed_df_round = df_round.copy()
+                    if exp_name == "comparison_exp_1" and metric_name == "memory_usage":
+                        print(f"DEBUG PREPROCESS [{exp_name}][{metric_name}][{round_name}]: Normalization skipped by flag.")
+
+                # Aplicar filtro de tenants, se fornecido e a coluna 'tenant' existir
+                if tenants_filter and 'tenant' in processed_df_round.columns:
+                    processed_df_round = processed_df_round[processed_df_round['tenant'].isin(tenants_filter)]
+                    if exp_name == "comparison_exp_1" and metric_name == "memory_usage":
+                        print(f"DEBUG PREPROCESS [{exp_name}][{metric_name}][{round_name}]: After tenant filter. Empty: {processed_df_round.empty}, Shape: {processed_df_round.shape}")
+                
+                # Aplicar filtro de rounds, se fornecido e a coluna 'round' existir
+                if rounds_filter and 'round' in processed_df_round.columns:
+                    processed_df_round = processed_df_round[processed_df_round['round'].isin(rounds_filter)]
+                elif rounds_filter and round_name not in rounds_filter:
+                    if exp_name == "comparison_exp_1" and metric_name == "memory_usage":
+                        print(f"DEBUG PREPROCESS [{exp_name}][{metric_name}][{round_name}]: SKIPPED due to round_filter (round_name not in list).")
+                    continue
+
+                if processed_df_round.empty:
+                    if exp_name == "comparison_exp_1" and metric_name == "memory_usage":
+                        print(f"DEBUG PREPROCESS [{exp_name}][{metric_name}][{round_name}]: SKIPPED (empty after filters).")
+                    continue
+                
+                # Adicionar coluna de tempo decorrido em minutos
+                if 'datetime' not in processed_df_round.columns:
+                    print(f"Warning: 'datetime' column not found for metric '{metric_name}', round '{round_name}' in exp '{exp_name}'. Skipping elapsed time calculation.")
+                    if exp_name == "comparison_exp_1" and metric_name == "memory_usage":
+                        print(f"DEBUG PREPROCESS [{exp_name}][{metric_name}][{round_name}]: 'datetime' column missing for elapsed time.")
+                else:
+                    processed_df_round['elapsed_minutes'] = (
+                        processed_df_round['datetime'] - processed_df_round['datetime'].min()
+                    ).dt.total_seconds() / 60
+                    if exp_name == "comparison_exp_1" and metric_name == "memory_usage":
+                        print(f"DEBUG PREPROCESS [{exp_name}][{metric_name}][{round_name}]: After elapsed_minutes. Empty: {processed_df_round.empty}, Shape: {processed_df_round.shape}")
+                        if not processed_df_round.empty and 'elapsed_minutes' in processed_df_round.columns:
+                             print(f"DEBUG PREPROCESS [{exp_name}][{metric_name}][{round_name}]: 'elapsed_minutes' head:\n{processed_df_round['elapsed_minutes'].head().to_string()}")
+                
+                # Agregar dados se solicitado
+                if aggregate_data:
+                    if 'elapsed_minutes' not in processed_df_round.columns:
+                        print(f"Warning: 'elapsed_minutes' column not found for metric '{metric_name}', round '{round_name}' in exp '{exp_name}'. Skipping aggregation.")
+                        if exp_name == "comparison_exp_1" and metric_name == "memory_usage":
+                            print(f"DEBUG PREPROCESS [{exp_name}][{metric_name}][{round_name}]: 'elapsed_minutes' column missing for aggregation.")
+                    else:
+                        # Ensure 'value' column exists if it's the default for aggregation, or specify another
+                        value_col_for_agg = 'value' # Default assumption
+                        if value_col_for_agg not in processed_df_round.columns:
+                             print(f"Warning: Default value column '{value_col_for_agg}' not found for aggregation in metric '{metric_name}', round '{round_name}', exp '{exp_name}'. Columns: {processed_df_round.columns}. Skipping aggregation.")
+                             if exp_name == "comparison_exp_1" and metric_name == "memory_usage":
+                                 print(f"DEBUG PREPROCESS [{exp_name}][{metric_name}][{round_name}]: Default value col '{value_col_for_agg}' missing for aggregation.")
+                        else:
+                            processed_df_round = aggregate_by_time(
+                                processed_df_round,
+                                time_column='elapsed_minutes',
+                                agg_interval=agg_freq,
+                                value_column=value_col_for_agg # Explicitly pass value column
+                            )
+                            if exp_name == "comparison_exp_1" and metric_name == "memory_usage":
+                                print(f"DEBUG PREPROCESS [{exp_name}][{metric_name}][{round_name}]: After aggregate_by_time. Empty: {processed_df_round.empty}, Shape: {processed_df_round.shape}")
+                                if not processed_df_round.empty:
+                                    print(f"DEBUG PREPROCESS [{exp_name}][{metric_name}][{round_name}]: Columns after agg: {processed_df_round.columns.tolist()}")
+                else:
+                    if exp_name == "comparison_exp_1" and metric_name == "memory_usage":
+                        print(f"DEBUG PREPROCESS [{exp_name}][{metric_name}][{round_name}]: Aggregation skipped by flag.")
+                
+                # DEBUG: Check data for comparison_exp_1 and memory_usage after processing in preprocess_experiments
+                if exp_name == "comparison_exp_1" and metric_name == "memory_usage":
+                    print(f"DEBUG PREPROCESS FINAL [{exp_name}][{metric_name}][{round_name}]: df after ALL processing. Empty: {processed_df_round.empty}, Shape: {processed_df_round.shape}")
+                    if not processed_df_round.empty:
+                        print(f"DEBUG PREPROCESS FINAL [{exp_name}][{metric_name}][{round_name}]: Columns: {processed_df_round.columns.tolist()}")
+                        if 'mean' in processed_df_round.columns: # After aggregation, 'mean' is expected
+                            print(f"DEBUG PREPROCESS FINAL [{exp_name}][{metric_name}][{round_name}]: 'mean' column head:\n{processed_df_round['mean'].head().to_string()}")
+                        elif 'value' in processed_df_round.columns: # If no aggregation, 'value' might still be there
+                            print(f"DEBUG PREPROCESS FINAL [{exp_name}][{metric_name}][{round_name}]: 'value' column head (no 'mean' found):\n{processed_df_round['value'].head().to_string()}")
+                        else:
+                            print(f"DEBUG PREPROCESS FINAL [{exp_name}][{metric_name}][{round_name}]: Neither 'mean' nor 'value' column found in final processed_df_round.")
+                    else:
+                        print(f"DEBUG PREPROCESS FINAL [{exp_name}][{metric_name}][{round_name}]: DataFrame is empty.")
+
+                processed_rounds[round_name] = processed_df_round
             
-            # Adicionar coluna de tempo decorrido em minutos
-            processed_df['elapsed_minutes'] = (
-                processed_df['datetime'] - processed_df['datetime'].min()
-            ).dt.total_seconds() / 60
-            
-            # Agregar dados se solicitado
-            if aggregate_data:
-                processed_df = aggregate_by_time(
-                    processed_df,
-                    time_column='elapsed_minutes',
-                    freq=agg_freq
-                )
-            
-            processed_metrics[metric_name] = processed_df
+            if processed_rounds:
+                processed_metrics[metric_name] = processed_rounds
         
         # Armazenar resultados
         processed_experiments[exp_name] = {
@@ -148,37 +230,63 @@ def calculate_statistics_summary(
     results = {}
     
     for metric in metrics:
-        all_stats = []
+        all_stats_for_metric = []
         
         for exp_name, exp_data in experiments.items():
             if metric in exp_data['processed_metrics']:
-                df = exp_data['processed_metrics'][metric]
-                
-                # Estatísticas globais
-                stats = df.groupby(group_by)['value'].agg([
-                    ('média', 'mean'),
-                    ('mediana', 'median'),
-                    ('desvio_padrão', 'std'),
-                    ('mínimo', 'min'),
-                    ('máximo', 'max'),
-                    ('contagem', 'count')
-                ]) if group_by else pd.DataFrame({
-                    'média': [df['value'].mean()],
-                    'mediana': [df['value'].median()],
-                    'desvio_padrão': [df['value'].std()],
-                    'mínimo': [df['value'].min()],
-                    'máximo': [df['value'].max()],
-                    'contagem': [df['value'].count()]
-                })
-                
-                # Adicionar informações do experimento
-                stats = stats.reset_index() if group_by else stats
-                stats['experimento'] = exp_name
-                
-                all_stats.append(stats)
+                rounds_data_dict = exp_data['processed_metrics'][metric]
+                if not isinstance(rounds_data_dict, dict):
+                    print(f"Warning: Expected a dictionary of round DataFrames for metric '{metric}' in experiment '{exp_name}', but got {type(rounds_data_dict)}. Skipping this metric for this experiment.")
+                    continue
+
+                for round_name, df_round in rounds_data_dict.items():
+                    if not isinstance(df_round, pd.DataFrame):
+                        print(f"Warning: Expected a DataFrame for round '{round_name}' of metric '{metric}' in experiment '{exp_name}', but got {type(df_round)}. Skipping this round.")
+                        continue
+                    
+                    if df_round.empty:
+                        continue
+
+                    value_col_to_use = None
+                    if 'mean' in df_round.columns:
+                        value_col_to_use = 'mean'
+                    elif 'value' in df_round.columns:
+                        value_col_to_use = 'value'
+                    else:
+                        print(f"Warning: Neither 'mean' nor 'value' column found in DataFrame for round '{round_name}', metric '{metric}', experiment '{exp_name}'. Columns: {df_round.columns}. Skipping stats for this round.")
+                        continue
+
+                    current_group_by = group_by.copy() if group_by else []
+                    valid_group_by = [gb for gb in current_group_by if gb in df_round.columns]
+                    if not valid_group_by and current_group_by:
+                        print(f"Warning: Group_by columns {current_group_by} not found in df_round for metric '{metric}', round '{round_name}'. Calculating global stats.")
+
+                    if valid_group_by:
+                        stats = df_round.groupby(valid_group_by)[value_col_to_use].agg([
+                            ('média', 'mean'),
+                            ('mediana', 'median'),
+                            ('desvio_padrão', 'std'),
+                            ('mínimo', 'min'),
+                            ('máximo', 'max'),
+                            ('contagem', 'count')
+                        ]).reset_index()
+                    else:
+                        stats = pd.DataFrame({
+                            'média': [df_round[value_col_to_use].mean()],
+                            'mediana': [df_round[value_col_to_use].median()],
+                            'desvio_padrão': [df_round[value_col_to_use].std()],
+                            'mínimo': [df_round[value_col_to_use].min()],
+                            'máximo': [df_round[value_col_to_use].max()],
+                            'contagem': [df_round[value_col_to_use].count()]
+                        })
+                    
+                    stats['experimento'] = exp_name
+                    stats['round'] = round_name
+                    
+                    all_stats_for_metric.append(stats)
         
-        if all_stats:
-            results[metric] = pd.concat(all_stats, ignore_index=True)
+        if all_stats_for_metric:
+            results[metric] = pd.concat(all_stats_for_metric, ignore_index=True)
     
     return results
 
@@ -211,26 +319,103 @@ def compare_distributions(
     test_results = {}
     
     # Coletar séries temporais para comparação
+    print(f"DEBUG COMPARE_DIST: Entering for metric: {metric}, tenants_filter: {tenants_filter}, rounds_filter: {rounds_filter}, phase: {phase}")
     for exp_name, exp_data in experiments.items():
-        if metric in exp_data['processed_metrics']:
-            df = exp_data['processed_metrics'][metric]
-            
-            # Filtrar por tenants se especificados
-            if tenants_filter and 'tenant' in df.columns:
-                df = df[df['tenant'].isin(tenants_filter)]
-            
-            # Filtrar por rounds se especificados e a coluna 'round' existir
-            if rounds_filter and 'round' in df.columns:
-                df = df[df['round'].isin(rounds_filter)]
+        print(f"DEBUG COMPARE_DIST [{exp_name}][{metric}]: Processing experiment.")
+        if metric in exp_data.get('processed_metrics', {}):
+            rounds_data_dict = exp_data['processed_metrics'][metric]
+            if not isinstance(rounds_data_dict, dict):
+                print(f"Warning: Expected a dictionary of round DataFrames for metric '{metric}' in experiment '{exp_name}', but got {type(rounds_data_dict)}. Skipping this metric for this experiment.")
+                continue
 
-            # Filtrar por fase se especificada
-            if phase and 'phase' in df.columns:
-                df = df[df['phase'] == phase]
+            all_rounds_df_list = []
+            print(f"DEBUG COMPARE_DIST [{exp_name}][{metric}]: rounds_data_dict keys: {list(rounds_data_dict.keys())}")
+            for round_name, df_round in rounds_data_dict.items():
+                print(f"DEBUG COMPARE_DIST [{exp_name}][{metric}][{round_name}]: Processing round.")
+                if not isinstance(df_round, pd.DataFrame):
+                    print(f"Warning: Expected a DataFrame for round '{round_name}' of metric '{metric}' in experiment '{exp_name}', but got {type(df_round)}. Skipping this round.")
+                    continue
+                
+                print(f"DEBUG COMPARE_DIST [{exp_name}][{metric}][{round_name}]: Initial df_round (from preprocess_experiments). Empty: {df_round.empty}, Shape: {df_round.shape}, Columns: {df_round.columns.tolist()}")
+                if not df_round.empty:
+                    # Print head of value or mean column if they exist, before filtering
+                    if 'value' in df_round.columns:
+                        print(f"DEBUG COMPARE_DIST [{exp_name}][{metric}][{round_name}]: df_round 'value' column head BEFORE filters:\n{df_round['value'].head().to_string()}")
+                    elif 'mean' in df_round.columns: 
+                        print(f"DEBUG COMPARE_DIST [{exp_name}][{metric}][{round_name}]: df_round 'mean' column head BEFORE filters (value not found):\n{df_round['mean'].head().to_string()}")
+                    else:
+                        print(f"DEBUG COMPARE_DIST [{exp_name}][{metric}][{round_name}]: Neither 'value' nor 'mean' column found in df_round BEFORE filters.")
+
+
+                df_round_filtered = df_round.copy()
+                if tenants_filter and 'tenant' in df_round_filtered.columns:
+                    df_round_filtered = df_round_filtered[df_round_filtered['tenant'].isin(tenants_filter)]
+                    print(f"DEBUG COMPARE_DIST [{exp_name}][{metric}][{round_name}]: After tenant filter ({tenants_filter}). Empty: {df_round_filtered.empty}, Shape: {df_round_filtered.shape}")
+                
+                if rounds_filter:
+                    # Check if 'round' column exists for filtering, or if round_name itself should be used
+                    if 'round' in df_round_filtered.columns: # If 'round' column was added during preprocessing
+                        df_round_filtered = df_round_filtered[df_round_filtered['round'].isin(rounds_filter)]
+                        print(f"DEBUG COMPARE_DIST [{exp_name}][{metric}][{round_name}]: After round filter on 'round' column ({rounds_filter}). Empty: {df_round_filtered.empty}, Shape: {df_round_filtered.shape}")
+                    elif round_name not in rounds_filter: # Filter based on the round_name (key of the dict)
+                        print(f"DEBUG COMPARE_DIST [{exp_name}][{metric}][{round_name}]: Skipping round (round_name '{round_name}' not in rounds_filter {rounds_filter}).")
+                        continue 
+                    else: # round_name is in rounds_filter, no 'round' column to filter on, so proceed
+                         print(f"DEBUG COMPARE_DIST [{exp_name}][{metric}][{round_name}]: round_name '{round_name}' is in rounds_filter {rounds_filter}. No 'round' column for further filtering here.")
+
+
+                if phase and 'phase' in df_round_filtered.columns:
+                    df_round_filtered = df_round_filtered[df_round_filtered['phase'] == phase]
+                    print(f"DEBUG COMPARE_DIST [{exp_name}][{metric}][{round_name}]: After phase filter ({phase}). Empty: {df_round_filtered.empty}, Shape: {df_round_filtered.shape}")
+                
+                if not df_round_filtered.empty:
+                    all_rounds_df_list.append(df_round_filtered)
+                    print(f"DEBUG COMPARE_DIST [{exp_name}][{metric}][{round_name}]: Appended df_round_filtered to all_rounds_df_list. List size: {len(all_rounds_df_list)}")
+                else:
+                    print(f"DEBUG COMPARE_DIST [{exp_name}][{metric}][{round_name}]: df_round_filtered is EMPTY after filters. Not appending.")
             
-            if not df.empty:
-                plot_data['series'].append(df['value'])
-                plot_data['labels'].append(exp_name)
+            if not all_rounds_df_list:
+                print(f"DEBUG COMPARE_DIST [{exp_name}][{metric}]: all_rounds_df_list is EMPTY. Skipping experiment for this metric.")
+                continue
+            
+            df_combined = pd.concat(all_rounds_df_list, ignore_index=True)
+            print(f"DEBUG COMPARE_DIST [{exp_name}][{metric}]: df_combined after concat. Empty: {df_combined.empty}, Shape: {df_combined.shape}, Columns: {df_combined.columns.tolist()}")
+            if not df_combined.empty:
+                if 'value' in df_combined.columns:
+                    print(f"DEBUG COMPARE_DIST [{exp_name}][{metric}]: df_combined 'value' head:\n{df_combined['value'].head().to_string()}")
+                if 'mean' in df_combined.columns: 
+                    print(f"DEBUG COMPARE_DIST [{exp_name}][{metric}]: df_combined 'mean' head:\n{df_combined['mean'].head().to_string()}")
+            
+            value_col_for_dist = None
+            if 'mean' in df_combined.columns: 
+                value_col_for_dist = 'mean'
+            elif 'value' in df_combined.columns:
+                value_col_for_dist = 'value'
+            else:
+                print(f"Warning: Neither 'mean' nor 'value' column found for distribution comparison in metric '{metric}', experiment '{exp_name}'. Columns: {df_combined.columns}. Skipping this experiment for this metric.")
+                continue
+            print(f"DEBUG COMPARE_DIST [{exp_name}][{metric}]: Selected value_col_for_dist: '{value_col_for_dist}'")
+
+            if not df_combined.empty and value_col_for_dist in df_combined.columns:
+                # Ensure the selected column actually has data before trying to dropna and append
+                if df_combined[value_col_for_dist].isnull().all():
+                    print(f"DEBUG COMPARE_DIST [{exp_name}][{metric}]: The selected value_col_for_dist '{value_col_for_dist}' contains ALL NaN values. Not adding to plot_data.")
+                else:
+                    series_to_add = df_combined[value_col_for_dist].dropna()
+                    print(f"DEBUG COMPARE_DIST [{exp_name}][{metric}]: series_to_add (column '{value_col_for_dist}' after dropna). Length: {len(series_to_add)}")
+                    if not series_to_add.empty:
+                        print(f"DEBUG COMPARE_DIST [{exp_name}][{metric}]: series_to_add head:\n{series_to_add.head().to_string()}")
+                        plot_data['series'].append(series_to_add)
+                        plot_data['labels'].append(exp_name)
+                        print(f"DEBUG COMPARE_DIST [{exp_name}][{metric}]: Added data to plot_data. Current plot_data labels: {plot_data['labels']}, num_series: {len(plot_data['series'])}")
+                    else:
+                        print(f"DEBUG COMPARE_DIST [{exp_name}][{metric}]: series_to_add is EMPTY after dropna. Not adding to plot_data.")
+            else:
+                print(f"DEBUG COMPARE_DIST [{exp_name}][{metric}]: df_combined is empty OR value_col_for_dist ('{value_col_for_dist}') not in columns OR column contains all NaNs. df_combined columns: {df_combined.columns.tolist()}. Not adding to plot_data.")
+        else:
+            print(f"DEBUG COMPARE_DIST [{exp_name}][{metric}]: Metric not found in processed_metrics. Skipping.")
     
+    print(f"DEBUG COMPARE_DIST: Exiting for metric: {metric}. Final plot_data labels: {plot_data['labels']}, num_series: {len(plot_data['series'])}")
     # Realizar testes estatísticos entre pares de experimentos
     n_series = len(plot_data['series'])
     if n_series >= 2:
@@ -368,75 +553,6 @@ def summarize_anomalies(anomaly_results: Dict[str, Dict[str, Dict[str, Any]]]) -
                 })
     
     return pd.DataFrame(anomaly_summary)
-
-
-def extract_experiment_features(
-    experiments: Dict[str, Dict], 
-    metrics: List[str]
-) -> Dict[str, pd.DataFrame]:
-    """
-    Extrai características estatísticas dos experimentos para análise dimensional.
-    
-    Args:
-        experiments (Dict[str, Dict]): Dicionário com dados preprocessados
-        metrics (List[str]): Lista de métricas para análise
-        
-    Returns:
-        Dict[str, DataFrame]: DataFrames com características por métrica
-    """
-    features_by_metric = {}
-    
-    for metric in metrics:
-        features = []
-        
-        for exp_name, exp_data in experiments.items():
-            if metric in exp_data['processed_metrics']:
-                df = exp_data['processed_metrics'][metric]
-                
-                # Extrair características por tenant
-                for tenant in df['tenant'].unique():
-                    tenant_data = df[df['tenant'] == tenant]
-                    
-                    # Pular se não houver dados suficientes
-                    if len(tenant_data) < 5:
-                        continue
-                    
-                    # Calcular estatísticas
-                    try:
-                        mean_val = tenant_data['value'].mean()
-                        std_val = tenant_data['value'].std()
-                        max_val = tenant_data['value'].max()
-                        min_val = tenant_data['value'].min()
-                        median_val = tenant_data['value'].median()
-                        skew_val = tenant_data['value'].skew()
-                        kurtosis_val = tenant_data['value'].kurtosis()
-                        
-                        # Estatísticas de autocorrelação
-                        autocorr_1 = tenant_data['value'].autocorr(lag=1)
-                        autocorr_5 = tenant_data['value'].autocorr(lag=5) if len(tenant_data) > 5 else np.nan
-                        
-                        # Adicionar ao conjunto de características
-                        features.append({
-                            'experimento': exp_name,
-                            'métrica': metric,
-                            'tenant': tenant,
-                            'média': mean_val,
-                            'desvio_padrão': std_val,
-                            'máximo': max_val,
-                            'mínimo': min_val,
-                            'mediana': median_val,
-                            'assimetria': skew_val,
-                            'curtose': kurtosis_val,
-                            'autocorr_1': autocorr_1,
-                            'autocorr_5': autocorr_5
-                        })
-                    except Exception as e:
-                        print(f"Erro ao extrair características para {metric}, {exp_name}, {tenant}: {str(e)}")
-        
-        if features:
-            features_by_metric[metric] = pd.DataFrame(features)
-    
-    return features_by_metric
 
 
 def compare_experiment_phases(

@@ -1,7 +1,0 @@
-tenant1,tenant2,mutual_information,correlation,n_samples,phase,metric,round
-tenant-a,tenant-b,0.00,,131,all,disk_throughput_total,round-2
-tenant-a,tenant-c,0.00,,263,all,disk_throughput_total,round-2
-tenant-a,tenant-d,0.08,-0.35,263,all,disk_throughput_total,round-2
-tenant-b,tenant-c,0.00,,131,all,disk_throughput_total,round-2
-tenant-b,tenant-d,0.06,-0.46,131,all,disk_throughput_total,round-2
-tenant-c,tenant-d,0.00,,263,all,disk_throughput_total,round-2
