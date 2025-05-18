@@ -1,0 +1,7 @@
+tenant1,tenant2,mutual_information,correlation,n_samples,phase,metric,round
+tenant-a,tenant-b,0.27,-0.02,123,all,memory_usage,round-1
+tenant-a,tenant-c,0.36,0.06,257,all,memory_usage,round-1
+tenant-a,tenant-d,0.16,0.01,257,all,memory_usage,round-1
+tenant-b,tenant-c,0.13,-0.04,123,all,memory_usage,round-1
+tenant-b,tenant-d,0.24,-0.10,123,all,memory_usage,round-1
+tenant-c,tenant-d,0.27,0.10,257,all,memory_usage,round-1

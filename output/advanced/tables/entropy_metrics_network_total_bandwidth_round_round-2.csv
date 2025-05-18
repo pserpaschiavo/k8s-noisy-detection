@@ -1,0 +1,7 @@
+tenant1,tenant2,mutual_information,correlation,n_samples,phase,metric,round
+tenant-a,tenant-b,0.12,0.02,130,all,network_total_bandwidth,round-2
+tenant-a,tenant-c,0.14,0.48,263,all,network_total_bandwidth,round-2
+tenant-a,tenant-d,0.07,0.19,263,all,network_total_bandwidth,round-2
+tenant-b,tenant-c,0.10,-0.10,130,all,network_total_bandwidth,round-2
+tenant-b,tenant-d,0.02,0.44,130,all,network_total_bandwidth,round-2
+tenant-c,tenant-d,0.32,-0.17,263,all,network_total_bandwidth,round-2

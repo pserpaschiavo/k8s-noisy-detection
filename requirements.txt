@@ -7,6 +7,7 @@ scikit-learn>=1.0.0
 ruptures>=1.1.9
 pyinform>=0.2.0
 networkx>=3.0.0
+pyarrow>=14.0.0 # Added for Parquet support
 
 # Visualization
 matplotlib>=3.5.0
@@ -18,6 +19,8 @@ mpl_chord_diagram>=0.4.0
 
 # Time Series Analysis
 nolds>=0.5.2
+tslearn>=0.6.3
+h5py>=3.10.0
 
 # General utilities
 tqdm>=4.65.0
@@ -25,3 +28,6 @@ tqdm>=4.65.0
 # Jupyter notebooks (para visualizações interativas)
 jupyter>=1.0.0
 nbformat>=5.0.0
+
+# Environment configuration
+python-dotenv>=0.20.0
