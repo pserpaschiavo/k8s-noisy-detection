@@ -541,20 +541,22 @@ def plot_recovery_effectiveness(recovery_df, metric_name, figsize=None,
     return fig
 
 
-def plot_correlation_heatmap(correlation_matrix, title='Correlation between metrics', 
-                            figsize=None, cmap='viridis', clean_labels=True, annot=True,
-                            fmt='.2f'):
+def plot_correlation_heatmap(correlation_matrix, title='Correlation Heatmap',
+                            figsize=None, cmap='vlag', clean_labels=True, annot=True,
+                            fmt='.2f', cbar_label='Correlation Coefficient'):
     """
-    Creates a correlation heatmap between metrics of different tenants.
+    Creates a correlation heatmap. Can also be used for covariance matrices by adjusting title and cbar_label.
+    Uses a colorblind-friendly diverging palette (vlag - Blue-White-Red).
     
     Args:
-        correlation_matrix (DataFrame): Correlation matrix.
+        correlation_matrix (DataFrame): Matrix to plot (correlation or covariance).
         title (str): Plot title.
         figsize (tuple): Figure size (optional, uses config if None).
         cmap (str): Colormap name for the heatmap.
         clean_labels (bool): If True, clean metric_tenant names to more readable format.
         annot (bool): If True, write the data value in each cell.
         fmt (str): String formatting code to use when adding annotations.
+        cbar_label (str): Label for the color bar.
         
     Returns:
         Figure: Matplotlib figure object.
@@ -581,7 +583,7 @@ def plot_correlation_heatmap(correlation_matrix, title='Correlation between metr
         cm = correlation_matrix
     
     sns.heatmap(cm, annot=annot, fmt=fmt, cmap=cmap, center=0,
-               linewidths=0.5, ax=ax, cbar_kws={'label': 'Correlation Coefficient'})
+               linewidths=0.5, ax=ax, cbar_kws={'label': cbar_label})
     
     ax.set_title(title)
     
@@ -861,6 +863,132 @@ def plot_multivariate_anomalies(df, features, anomaly_column='is_anomaly', figsi
     ax.text(0.5, 0.5, 'plot_multivariate_anomalies not fully implemented', horizontalalignment='center', verticalalignment='center', transform=ax.transAxes)
     print(f"Placeholder plot_multivariate_anomalies called with features: {features}")
     return fig
+
+
+def plot_entropy_heatmap(entropy_results_df, metric_name, round_name, output_path):
+    """
+    Generates a heatmap of entropy (mutual information) results between tenant pairs.
+    Uses a colorblind-friendly diverging palette (vlag) for consistency, 
+    though sequential (like viridis or plasma) could also be used if preferred for MI.
+
+    Args:
+        entropy_results_df (pd.DataFrame): DataFrame with entropy results. 
+                                           Expected columns: 'tenant1', 'tenant2', 'mutual_information'.
+        metric_name (str): The name of the metric for which entropy was calculated.
+        round_name (str): The name of the round/experiment.
+        output_path (str): Path to save the generated heatmap.
+    """
+    set_publication_style()
+    
+    if entropy_results_df.empty:
+        print(f"No entropy data to plot for heatmap (Metric: {metric_name}, Round: {round_name}).")
+        return
+
+    # Pivot the table to create a matrix for the heatmap
+    heatmap_data = entropy_results_df.pivot(index='tenant1', columns='tenant2', values='mutual_information')
+    
+    # Fill NaN values - typically diagonal or where pairs are not present/make sense
+    heatmap_data = heatmap_data.fillna(0)
+
+    # Ensure the matrix is symmetric if MI(A,B) = MI(B,A) was assumed during calculation
+    all_tenants = sorted(list(set(entropy_results_df['tenant1']).union(set(entropy_results_df['tenant2']))))
+    heatmap_data = heatmap_data.reindex(index=all_tenants, columns=all_tenants, fill_value=0)
+    
+    for i in range(len(all_tenants)):
+        for j in range(i + 1, len(all_tenants)):
+            t1, t2 = all_tenants[i], all_tenants[j]
+            # Check if value exists in one direction and fill the other
+            val_t1_t2 = heatmap_data.loc[t1, t2] if t1 in heatmap_data.index and t2 in heatmap_data.columns else np.nan
+            val_t2_t1 = heatmap_data.loc[t2, t1] if t2 in heatmap_data.index and t1 in heatmap_data.columns else np.nan
+
+            if pd.isna(val_t1_t2) and not pd.isna(val_t2_t1):
+                heatmap_data.loc[t1, t2] = val_t2_t1
+            elif not pd.isna(val_t1_t2) and pd.isna(val_t2_t1):
+                heatmap_data.loc[t2, t1] = val_t1_t2
+                
+    heatmap_data = heatmap_data.fillna(0) # Fill any remaining NaNs (e.g. if a tenant had no pairs)
+
+
+    plt.figure(figsize=(VISUALIZATION_CONFIG.get('figure_width', 10), 
+                        VISUALIZATION_CONFIG.get('figure_height', 8)))
+    
+    # Using 'vlag' for entropy heatmap as well for consistency with correlation/covariance
+    # For mutual information (non-negative), a sequential palette like 'viridis' or 'plasma' 
+    # might be more conventional, but 'vlag' can work if we consider 0 as the center.
+    sns.heatmap(heatmap_data, annot=True, fmt=".3f", cmap="vlag", center=0, linewidths=.5,
+                cbar_kws={'label': 'Mutual Information'})
+    
+    plt.title(f'Mutual Information between Tenant Pairs\nMetric: {metric_name} - Round: {round_name}')
+    plt.xlabel('Tenant 2')
+    plt.ylabel('Tenant 1')
+    plt.xticks(rotation=45, ha='right')
+    plt.yticks(rotation=0)
+    plt.tight_layout()
+    
+    try:
+        plt.savefig(output_path, dpi=VISUALIZATION_CONFIG.get('dpi', 300))
+        print(f"Entropy heatmap saved to {output_path}")
+    except Exception as e:
+        print(f"Error saving entropy heatmap to {output_path}: {e}")
+    plt.close()
+
+
+def plot_entropy_top_pairs_barplot(entropy_results_df, metric_name, round_name, output_path, top_n=10):
+    """
+    Generates a bar plot of the top N tenant pairs with the highest mutual information.
+
+    Args:
+        entropy_results_df (pd.DataFrame): DataFrame with entropy results.
+                                           Expected columns: 'tenant1', 'tenant2', 'mutual_information'.
+        metric_name (str): The name of the metric for which entropy was calculated.
+        round_name (str): The name of the round/experiment.
+        output_path (str): Path to save the generated bar plot.
+        top_n (int): Number of top pairs to display.
+    """
+    set_publication_style()
+    
+    if entropy_results_df.empty:
+        print(f"No entropy data to plot for top pairs barplot (Metric: {metric_name}, Round: {round_name}).")
+        return
+
+    # Sort by mutual information and select top N
+    # Create a canonical representation of the pair to avoid duplicates like (A,B) and (B,A)
+    # if mutual information is symmetric.
+    entropy_results_df['pair'] = entropy_results_df.apply(
+        lambda row: tuple(sorted((row['tenant1'], row['tenant2']))), axis=1
+    )
+    # Keep the one with highest MI if there are multiple entries for the same pair (should not happen with current logic)
+    # or just drop duplicates if MI is symmetric.
+    top_pairs = entropy_results_df.sort_values('mutual_information', ascending=False)\
+                                  .drop_duplicates(subset=['pair'])\
+                                  .head(top_n)
+    
+    if top_pairs.empty:
+        print(f"No entropy data to plot for top pairs barplot (Metric: {metric_name}, Round: {round_name}).")
+        return
+
+    plt.figure(figsize=(VISUALIZATION_CONFIG.get('figure_width', 12), 
+                        VISUALIZATION_CONFIG.get('figure_height', 7)))
+    
+    pair_labels = [f"{p[0]} - {p[1]}" for p in top_pairs['pair']]
+    
+    barplot = sns.barplot(x='mutual_information', y=pair_labels, data=top_pairs, palette='mako', orient='h')
+    
+    plt.xlabel('Mutual Information')
+    plt.ylabel('Tenant Pair')
+    plt.title(f'Top {top_n} Tenant Pairs by Mutual Information\nMetric: {metric_name} - Round: {round_name}')
+    
+    for index, value in enumerate(top_pairs['mutual_information']):
+        barplot.text(value, index, f'{value:.3f}', color='black', ha="left", va="center", fontsize=10)
+        
+    plt.tight_layout()
+    
+    try:
+        plt.savefig(output_path, dpi=VISUALIZATION_CONFIG.get('dpi', 300))
+        print(f"Entropy top pairs barplot saved to {output_path}")
+    except Exception as e:
+        print(f"Error saving entropy top pairs barplot to {output_path}: {e}")
+    plt.close()
 
 
 if __name__ == '__main__':

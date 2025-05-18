@@ -25,17 +25,21 @@ VISUALIZATION_CONFIG = {
     "legend_size": 12
 }
 
-# Mapeamento de cores para tenants - Esquema mais formal/acadêmico
+# Mapeamento de cores para tenants - Usando paleta "Paired" do Seaborn (colorblind-friendly)
 TENANT_COLORS = {
-    'tenant-a': '#4472C4',  # Azul formal (estilo acadêmico)
-    'tenant-b': '#ED7D31',  # Laranja formal
-    'tenant-c': '#70AD47',  # Verde formal
-    'tenant-d': '#5B9BD5',  # Azul claro formal
-    'ingress-nginx': '#7030A0',  # Roxo formal
-    # Cores adicionais para outros possíveis tenants
-    'unknown': '#A5A5A5',  # Cinza
-    'waiting': '#FFC000',  # Amarelo
-    'active': '#833C0C',   # Marrom
+    'tenant-a':      '#a6cee3',  # Light Blue
+    'tenant-b':      '#1f78b4',  # Dark Blue
+    'tenant-c':      '#b2df8a',  # Light Green
+    'tenant-d':      '#33a02c',  # Dark Green
+    'ingress-nginx': '#fb9a99',  # Light Red
+    'unknown':       '#e31a1c',  # Dark Red
+    'waiting':       '#fdbf6f',  # Light Orange
+    'active':        '#ff7f00',  # Dark Orange
+    # Cores adicionais da paleta "Paired" se necessário:
+    # '#cab2d6',  # Light Purple
+    # '#6a3d9a',  # Dark Purple
+    # '#ffff99',  # Light Yellow (usar com cautela)
+    # '#b15928'   # Brown
 }
 
 # Tenant configurado como gerador de ruído (noisy neighbor)

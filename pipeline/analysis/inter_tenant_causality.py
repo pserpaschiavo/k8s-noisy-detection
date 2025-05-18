@@ -206,8 +206,8 @@ def visualize_causal_graph(
     output_path: Optional[str] = None,
     metric_colors: Optional[Dict[str, str]] = None,
     figsize: Tuple[int, int] = (15, 12),
-    node_size: int = 3000,
-    font_size: int = 10,
+    node_size: int = 4500,
+    font_size: int = 16, # MODIFIED default font_size from 14 to 16
     arrow_size: int = 20,
     layout_type: str = 'spring', # e.g., spring, circular, kamada_kawai
     **kwargs
@@ -267,7 +267,7 @@ def visualize_causal_graph(
 
     # Escolher layout
     if layout_type == 'spring':
-        pos = nx.spring_layout(G, k=kwargs.get('k', 0.7), iterations=kwargs.get('iterations', 50), seed=kwargs.get('seed', 42))
+        pos = nx.spring_layout(G, k=kwargs.get('k', 1.1), iterations=kwargs.get('iterations', 75), seed=kwargs.get('seed', 42)) # MODIFIED k
     elif layout_type == 'circular':
         pos = nx.circular_layout(G)
     elif layout_type == 'kamada_kawai':
@@ -292,11 +292,13 @@ def visualize_causal_graph(
     nx.draw(G, pos, with_labels=True, node_size=node_size, node_color="skyblue", 
             font_size=font_size, font_weight='bold',
             arrows=True, arrowstyle='-|>', arrowsize=arrow_size,
-            edge_color=edge_colors, width=2) # width é a espessura da linha da aresta
+            edge_color=edge_colors, width=2, # width é a espessura da linha da aresta
+            connectionstyle='arc3,rad=0.1')
 
     current_edge_labels = {(u,v): d['label'] for u,v,d in G.edges(data=True)}
-    nx.draw_networkx_edge_labels(G, pos, edge_labels=current_edge_labels, font_size=font_size-2, 
-                                 bbox=dict(facecolor='white', edgecolor='none', alpha=0.7))
+    nx.draw_networkx_edge_labels(G, pos, edge_labels=current_edge_labels, font_size=font_size-4, # MODIFIED font_size
+                                 label_pos=0.35, # ADDED label_pos to shift labels
+                                 bbox=dict(facecolor='white', edgecolor='none', alpha=0.85))
 
     plt.title("Grafo de Causalidade Direcionada entre Tenants", fontsize=font_size + 4)
     

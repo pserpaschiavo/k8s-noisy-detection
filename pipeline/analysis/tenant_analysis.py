@@ -133,3 +133,49 @@ def compare_tenant_metrics(df, baseline_tenant='tenant-a', metric_column='value'
             })
     
     return pd.DataFrame(results)
+
+
+def calculate_inter_tenant_correlation_per_metric(metric_df_single_round: pd.DataFrame) -> pd.DataFrame:
+    """
+    Calcula a matriz de correlação inter-tenant para uma única métrica e um único round.
+
+    Args:
+        metric_df_single_round (pd.DataFrame): DataFrame contendo dados de uma métrica
+                                                 para múltiplos tenants em um único round.
+                                                 Deve conter colunas 'datetime', 'tenant', 'value'.
+    Returns:
+        pd.DataFrame: Matriz de correlação inter-tenant.
+    """
+    pivot_df = metric_df_single_round.pivot_table(
+        index='datetime',
+        columns='tenant',
+        values='value'
+    )
+    # Preencher NaNs que podem surgir se tenants não tiverem dados em todos os timestamps
+    pivot_df.fillna(method='ffill', inplace=True)
+    pivot_df.fillna(method='bfill', inplace=True) # Para NaNs no início
+    pivot_df.fillna(0, inplace=True) # Para tenants sem dados
+    return pivot_df.corr()
+
+
+def calculate_inter_tenant_covariance_per_metric(metric_df_single_round: pd.DataFrame) -> pd.DataFrame:
+    """
+    Calcula a matriz de covariância inter-tenant para uma única métrica e um único round.
+
+    Args:
+        metric_df_single_round (pd.DataFrame): DataFrame contendo dados de uma métrica
+                                                 para múltiplos tenants em um único round.
+                                                 Deve conter colunas 'datetime', 'tenant', 'value'.
+    Returns:
+        pd.DataFrame: Matriz de covariância inter-tenant.
+    """
+    pivot_df = metric_df_single_round.pivot_table(
+        index='datetime',
+        columns='tenant',
+        values='value'
+    )
+    # Preencher NaNs que podem surgir se tenants não tiverem dados em todos os timestamps
+    pivot_df.fillna(method='ffill', inplace=True)
+    pivot_df.fillna(method='bfill', inplace=True) # Para NaNs no início
+    pivot_df.fillna(0, inplace=True) # Para tenants sem dados
+    return pivot_df.cov()

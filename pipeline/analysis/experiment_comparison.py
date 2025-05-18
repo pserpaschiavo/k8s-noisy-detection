@@ -57,7 +57,9 @@ def preprocess_experiments(
     metrics_of_interest: List[str],
     normalize_timestamps: bool = True,
     aggregate_data: bool = True,
-    agg_freq: str = '1min'
+    agg_freq: str = '1min',
+    rounds_filter: Optional[List[str]] = None,
+    tenants_filter: Optional[List[str]] = None
 ) -> Dict[str, Dict]:
     """
     Preprocessa dados de experimentos para comparação.
@@ -68,6 +70,8 @@ def preprocess_experiments(
         normalize_timestamps (bool): Se True, normaliza os timestamps
         aggregate_data (bool): Se True, agrega os dados
         agg_freq (str): Frequência de agregação (ex: '1min', '5min')
+        rounds_filter (Optional[List[str]]): Lista de rounds para filtrar.
+        tenants_filter (Optional[List[str]]): Lista de tenants para filtrar.
         
     Returns:
         Dict[str, Dict]: Dicionário com dados preprocessados
@@ -88,6 +92,17 @@ def preprocess_experiments(
                 processed_df = normalize_time(df.copy(), exp_data['info'])
             else:
                 processed_df = df.copy()
+
+            # Aplicar filtro de tenants, se fornecido e a coluna 'tenant' existir
+            if tenants_filter and 'tenant' in processed_df.columns:
+                processed_df = processed_df[processed_df['tenant'].isin(tenants_filter)]
+            
+            # Aplicar filtro de rounds, se fornecido e a coluna 'round' existir
+            if rounds_filter and 'round' in processed_df.columns:
+                processed_df = processed_df[processed_df['round'].isin(rounds_filter)]
+
+            if processed_df.empty: # Pular se o DataFrame ficar vazio após os filtros
+                continue
             
             # Adicionar coluna de tempo decorrido em minutos
             processed_df['elapsed_minutes'] = (
@@ -171,9 +186,10 @@ def calculate_statistics_summary(
 def compare_distributions(
     experiments: Dict[str, Dict],
     metric: str,
-    tenant: Optional[str] = None,
+    tenants_filter: Optional[List[str]] = None,
     phase: Optional[str] = None,
-    test_method: str = 'ks'
+    test_method: str = 'ks',
+    rounds_filter: Optional[List[str]] = None
 ) -> Tuple[Dict[str, Any], Dict[str, Dict]]:
     """
     Compara distribuições estatísticas entre experimentos para uma métrica.
@@ -181,9 +197,10 @@ def compare_distributions(
     Args:
         experiments (Dict[str, Dict]): Dicionário com dados preprocessados
         metric (str): Métrica para comparação
-        tenant (str, optional): Tenant específico para filtrar
+        tenants_filter (Optional[List[str]]): Lista de tenants específicos para filtrar
         phase (str, optional): Fase específica para filtrar
         test_method (str): Método de teste estatístico ('ks' ou 'mw')
+        rounds_filter (Optional[List[str]]): Lista de rounds para filtrar.
         
     Returns:
         Tuple[Dict[str, Any], Dict[str, Dict]]: 
@@ -198,10 +215,16 @@ def compare_distributions(
         if metric in exp_data['processed_metrics']:
             df = exp_data['processed_metrics'][metric]
             
-            # Filtrar por tenant ou fase se especificados
-            if tenant:
-                df = df[df['tenant'] == tenant]
-            if phase:
+            # Filtrar por tenants se especificados
+            if tenants_filter and 'tenant' in df.columns:
+                df = df[df['tenant'].isin(tenants_filter)]
+            
+            # Filtrar por rounds se especificados e a coluna 'round' existir
+            if rounds_filter and 'round' in df.columns:
+                df = df[df['round'].isin(rounds_filter)]
+
+            # Filtrar por fase se especificada
+            if phase and 'phase' in df.columns:
                 df = df[df['phase'] == phase]
             
             if not df.empty:

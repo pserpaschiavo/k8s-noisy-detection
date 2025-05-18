@@ -10,6 +10,7 @@ import argparse
 import pandas as pd
 import numpy as np
 import matplotlib.pyplot as plt
+import seaborn as sns
 from datetime import datetime
 import scipy.stats as stats
 
@@ -32,6 +33,7 @@ from pipeline.analysis.tenant_analysis import calculate_correlation_matrix, comp
 from pipeline.analysis.phase_analysis import compare_phases_ttest, analyze_recovery_effectiveness
 from pipeline.analysis.advanced_analysis import calculate_covariance_matrix, calculate_entropy_metrics
 from pipeline.analysis.advanced_analysis import granger_causality_test, analyze_causal_relationships, calculate_normalized_impact_score
+from pipeline.analysis.tenant_analysis import calculate_inter_tenant_correlation_per_metric, calculate_inter_tenant_covariance_per_metric
 from pipeline.analysis.anomaly_detection import (
     detect_anomalies_ensemble, detect_pattern_changes
 )
@@ -49,7 +51,8 @@ from pipeline.visualization.plots import (plot_metric_by_phase, plot_phase_compa
                                 plot_tenant_impact_heatmap, plot_recovery_effectiveness,
                                 plot_impact_score_barplot, plot_impact_score_trend,
                                 plot_metric_with_anomalies, plot_change_points,
-                                create_heatmap, plot_multivariate_anomalies, plot_correlation_heatmap)
+                                create_heatmap, plot_multivariate_anomalies, plot_correlation_heatmap,
+                                plot_entropy_heatmap, plot_entropy_top_pairs_barplot)
 from pipeline.visualization.table_generator import (export_to_latex, export_to_csv,
                                          create_phase_comparison_table, create_impact_summary_table,
                                          convert_df_to_markdown, create_causality_results_table)
@@ -75,8 +78,9 @@ def parse_arguments():
     parser = argparse.ArgumentParser(description='Pipeline de análise de dados do experimento de noisy neighbors.')
     parser.add_argument('--data-dir', type=str, default='/home/phil/Projects/k8s-noisy-detection/demo-data/demo-experiment-3-rounds',
                         help='Diretório com os dados do experimento')
-    parser.add_argument('--compare-dir', type=str, nargs='+',
-                        help='Diretório(s) adicional(is) para comparar múltiplos experimentos')
+    # Add the new argument for comparison directories
+    parser.add_argument('--data-dir-comparison', type=str, nargs='+',
+                        help='Diretório(s) adicional(is) para comparar múltiplos experimentos. Usado com --compare-experiments.')
     parser.add_argument('--output-dir', type=str, default='output',
                         help='Diretório para salvar os resultados')
     parser.add_argument('--tenants', type=str, nargs='+',
@@ -121,6 +125,13 @@ def parse_arguments():
                         help='Executar comparação formal entre rodadas do mesmo experimento.')
     parser.add_argument('--compare-tenants-directly', action='store_true',
                         help='Executar comparação estatística direta entre tenants.')
+    parser.add_argument('--entropy-plot-type', type=str, default='all',
+                        choices=['heatmap', 'barplot', 'all'],
+                        help='Tipo de gráfico para resultados de entropia: heatmap, barplot (top N), ou all.')
+    parser.add_argument('--compare-experiments-rounds', type=str, nargs='+',
+                        help='Round(s) específico(s) a usar para --compare-experiments')
+    parser.add_argument('--compare-experiments-tenants', type=str, nargs='+',
+                        help='Tenant(s) específico(s) a usar para --compare-experiments')
     
     return parser.parse_args()
 
@@ -141,6 +152,7 @@ def setup_output_directories(output_dir):
     os.makedirs(tables_dir, exist_ok=True)
     os.makedirs(advanced_dir, exist_ok=True)
     os.makedirs(os.path.join(advanced_dir, 'tables'), exist_ok=True)
+    os.makedirs(os.path.join(advanced_dir, 'plots'), exist_ok=True) # Ensure advanced plots directory is created
     os.makedirs(anomaly_dir, exist_ok=True)
     os.makedirs(os.path.join(anomaly_dir, 'plots'), exist_ok=True)
     os.makedirs(os.path.join(anomaly_dir, 'tables'), exist_ok=True)
@@ -148,6 +160,7 @@ def setup_output_directories(output_dir):
     os.makedirs(reports_dir, exist_ok=True)
     os.makedirs(causality_dir, exist_ok=True)
     os.makedirs(os.path.join(causality_dir, 'tables'), exist_ok=True)  # Ensure causality tables directory is created
+    os.makedirs(os.path.join(causality_dir, 'plots'), exist_ok=True)  # Ensure causality plots directory is created
     os.makedirs(rounds_comparison_intra_dir, exist_ok=True)
     os.makedirs(os.path.join(rounds_comparison_intra_dir, 'plots'), exist_ok=True)
     os.makedirs(tenant_comparison_dir, exist_ok=True) # Create new directory
@@ -739,6 +752,8 @@ def main():
         print("\nExecutando Análises Avançadas e Gerando Plots...")
         advanced_plots_dir = os.path.join(advanced_dir, 'plots')
         os.makedirs(advanced_plots_dir, exist_ok=True)
+        advanced_tables_dir = os.path.join(advanced_dir, 'tables')
+        os.makedirs(advanced_tables_dir, exist_ok=True)
         
         advanced_analysis_results = experiment_results.get('advanced_analysis', {})
 
@@ -818,6 +833,76 @@ def main():
                 except Exception as e:
                     print(f"    Erro ao calcular ou plotar matriz de covariância para o round {round_name_to_analyze}: {e}")
         
+        # Inter-Tenant Correlation and Covariance per Metric
+        print("\n  Calculando correlação e covariância Inter-Tenant por Métrica...")
+        for metric_name_inter_tenant, rounds_data_inter_tenant in metrics_data.items():
+            if isinstance(rounds_data_inter_tenant, dict):
+                for round_name_inter_tenant, df_round_inter_tenant in rounds_data_inter_tenant.items():
+                    if isinstance(df_round_inter_tenant, pd.DataFrame) and not df_round_inter_tenant.empty and 'tenant' in df_round_inter_tenant.columns and df_round_inter_tenant['tenant'].nunique() > 1:
+                        
+                        # Filter by args.tenants if provided
+                        df_to_analyze = df_round_inter_tenant
+                        if args.tenants:
+                            df_to_analyze = df_round_inter_tenant[df_round_inter_tenant['tenant'].isin(args.tenants)]
+                        
+                        if df_to_analyze['tenant'].nunique() < 2:
+                            print(f"    Pulando correlação/covariância inter-tenant para {metric_name_inter_tenant}, round {round_name_inter_tenant}: Menos de 2 tenants após filtragem por args.tenants.")
+                            continue
+
+                        # Inter-Tenant Correlation
+                        try:
+                            print(f"    Calculando correlação inter-tenant para métrica: {metric_name_inter_tenant}, round: {round_name_inter_tenant}")
+                            inter_tenant_corr_matrix = calculate_inter_tenant_correlation_per_metric(df_to_analyze)
+                            if inter_tenant_corr_matrix is not None and not inter_tenant_corr_matrix.empty:
+                                # Save CSV
+                                csv_path_inter_tenant_corr = os.path.join(advanced_tables_dir, f'inter_tenant_correlation_{metric_name_inter_tenant}_round_{round_name_inter_tenant}.csv')
+                                export_to_csv(inter_tenant_corr_matrix, csv_path_inter_tenant_corr)
+                                print(f"      Matriz de correlação inter-tenant (CSV) salva em: {csv_path_inter_tenant_corr}")
+                                
+                                # Plot Heatmap
+                                plot_path_inter_tenant_corr = os.path.join(advanced_plots_dir, f'inter_tenant_correlation_heatmap_{metric_name_inter_tenant}_round_{round_name_inter_tenant}.png')
+                                fig_inter_tenant_corr = plot_correlation_heatmap(
+                                    inter_tenant_corr_matrix,
+                                    title=f'Inter-Tenant Correlation - {METRIC_DISPLAY_NAMES.get(metric_name_inter_tenant, metric_name_inter_tenant)} (Round: {round_name_inter_tenant})',
+                                    cbar_label='Correlation Coefficient'
+                                )
+                                fig_inter_tenant_corr.savefig(plot_path_inter_tenant_corr)
+                                plt.close(fig_inter_tenant_corr)
+                                print(f"      Heatmap de correlação inter-tenant salvo em: {plot_path_inter_tenant_corr}")
+                                advanced_analysis_results.setdefault('inter_tenant_correlation_matrices', {}).setdefault(metric_name_inter_tenant, {})[round_name_inter_tenant] = inter_tenant_corr_matrix
+                            else:
+                                print(f"      Matriz de correlação inter-tenant vazia ou None para {metric_name_inter_tenant}, round {round_name_inter_tenant}.")
+                        except Exception as e_inter_corr:
+                            print(f"      Erro ao calcular/plotar correlação inter-tenant para {metric_name_inter_tenant}, round {round_name_inter_tenant}: {e_inter_corr}")
+
+                        # Inter-Tenant Covariance
+                        try:
+                            print(f"    Calculando covariância inter-tenant para métrica: {metric_name_inter_tenant}, round: {round_name_inter_tenant}")
+                            inter_tenant_cov_matrix = calculate_inter_tenant_covariance_per_metric(df_to_analyze)
+                            if inter_tenant_cov_matrix is not None and not inter_tenant_cov_matrix.empty:
+                                # Save CSV
+                                csv_path_inter_tenant_cov = os.path.join(advanced_tables_dir, f'inter_tenant_covariance_{metric_name_inter_tenant}_round_{round_name_inter_tenant}.csv')
+                                export_to_csv(inter_tenant_cov_matrix, csv_path_inter_tenant_cov)
+                                print(f"      Matriz de covariância inter-tenant (CSV) salva em: {csv_path_inter_tenant_cov}")
+
+                                # Plot Heatmap
+                                plot_path_inter_tenant_cov = os.path.join(advanced_plots_dir, f'inter_tenant_covariance_heatmap_{metric_name_inter_tenant}_round_{round_name_inter_tenant}.png')
+                                fig_inter_tenant_cov = plot_correlation_heatmap(
+                                    inter_tenant_cov_matrix,
+                                    title=f'Inter-Tenant Covariance - {METRIC_DISPLAY_NAMES.get(metric_name_inter_tenant, metric_name_inter_tenant)} (Round: {round_name_inter_tenant})',
+                                    cbar_label='Covariance' # Use the new cbar_label argument
+                                )
+                                fig_inter_tenant_cov.savefig(plot_path_inter_tenant_cov)
+                                plt.close(fig_inter_tenant_cov)
+                                print(f"      Heatmap de covariância inter-tenant salvo em: {plot_path_inter_tenant_cov}")
+                                advanced_analysis_results.setdefault('inter_tenant_covariance_matrices', {}).setdefault(metric_name_inter_tenant, {})[round_name_inter_tenant] = inter_tenant_cov_matrix
+                            else:
+                                print(f"      Matriz de covariância inter-tenant vazia ou None para {metric_name_inter_tenant}, round {round_name_inter_tenant}.")
+                        except Exception as e_inter_cov:
+                            print(f"      Erro ao calcular/plotar covariância inter-tenant para {metric_name_inter_tenant}, round {round_name_inter_tenant}: {e_inter_cov}")
+                    elif isinstance(df_round_inter_tenant, pd.DataFrame) and df_round_inter_tenant['tenant'].nunique() <= 1:
+                        print(f"    Pulando correlação/covariância inter-tenant para {metric_name_inter_tenant}, round {round_name_inter_tenant}: Menos de 2 tenants nos dados originais.")
+
         # 3. Entropy Analysis (Example: for each metric, across tenants, per round)
         print(f"\n  Calculando métricas de entropia...")
         all_entropy_results = []
@@ -841,6 +926,35 @@ def main():
                                 entropy_table_path = os.path.join(advanced_dir, 'tables', entropy_table_filename)
                                 export_to_csv(entropy_results_df, entropy_table_path)
                                 print(f"      Tabela de entropia salva em: {entropy_table_path}")
+
+                                # Generate and save entropy plots based on user choice
+                                plot_type = args.entropy_plot_type.lower()
+                                adv_plots_dir = os.path.join(advanced_dir, 'plots')
+
+                                if not entropy_results_df.empty:
+                                    metric_name_for_file = metric_name_entropy.replace(" ", "_")
+                                    round_name_for_file = round_name_entropy.replace(" ", "_")
+
+                                    if plot_type == 'heatmap' or plot_type == 'all':
+                                        heatmap_filename = f"entropy_heatmap_{metric_name_for_file}_{round_name_for_file}.png"
+                                        heatmap_path = os.path.join(adv_plots_dir, heatmap_filename)
+                                        try:
+                                            plot_entropy_heatmap(entropy_results_df, metric_name_entropy, round_name_entropy, heatmap_path)
+                                            advanced_analysis_results.setdefault(round_name_entropy, {}).setdefault(metric_name_entropy, {})['entropy_heatmap_plot'] = heatmap_path
+                                        except Exception as e:
+                                            print(f"Erro ao gerar heatmap de entropia para {metric_name_entropy} (Round: {round_name_entropy}): {e}")
+
+                                    if plot_type == 'barplot' or plot_type == 'all':
+                                        barplot_filename = f"entropy_top_pairs_barplot_{metric_name_for_file}_{round_name_for_file}.png"
+                                        barplot_path = os.path.join(adv_plots_dir, barplot_filename)
+                                        try:
+                                            # Você pode ajustar top_n conforme necessário ou torná-lo um argumento
+                                            plot_entropy_top_pairs_barplot(entropy_results_df, metric_name_entropy, round_name_entropy, barplot_path, top_n=10)
+                                            advanced_analysis_results.setdefault(round_name_entropy, {}).setdefault(metric_name_entropy, {})['entropy_barplot_plot'] = barplot_path
+                                        except Exception as e:
+                                            print(f"Erro ao gerar barplot de entropia para {metric_name_entropy} (Round: {round_name_entropy}): {e}")
+                                else:
+                                    print(f"DataFrame de entropia vazio para {metric_name_entropy} (Round: {round_name_entropy}). Pulando geração de gráficos de entropia.")
                             else:
                                 print(f"      Nenhum resultado de entropia gerado para {metric_name_entropy}, round {round_name_entropy}.")
                         except Exception as e_entropy:
@@ -854,21 +968,16 @@ def main():
         # 4. Granger Causality Analysis (Example: for each metric, between tenant pairs, per round)
         print(f"\n  Analisando relações de causalidade de Granger...")
         all_causality_results = []
-        # Determine tenant pairs for causality analysis
-        # If specific tenants are given, analyze pairs within that subset
-        # Otherwise, analyze all pairs (or pairs involving noisy_tenant)
         tenants_for_causality = args.tenants
         if not tenants_for_causality and args.noisy_tenant:
-            # If no specific tenants, but noisy_tenant is defined, focus on it
-            # This requires a list of all tenants to form pairs with noisy_tenant
-            # For simplicity, if args.tenants is None, analyze_causal_relationships will use all unique tenants from the df.
-            pass 
+            pass
+
+        all_causal_links_per_round = {}
 
         for metric_name_causality, rounds_data_causality in metrics_data.items():
             if isinstance(rounds_data_causality, dict):
                 for round_name_causality, df_round_causality in rounds_data_causality.items():
                     if isinstance(df_round_causality, pd.DataFrame) and not df_round_causality.empty and 'tenant' in df_round_causality.columns:
-                        # Filter df_round_causality by args.tenants if provided, before passing to analyze_causal_relationships
                         df_for_causality_analysis = df_round_causality
                         if args.tenants:
                             df_for_causality_analysis = df_round_causality[df_round_causality['tenant'].isin(args.tenants)]
@@ -881,23 +990,62 @@ def main():
                         try:
                             causality_results_df = analyze_causal_relationships(
                                 df_for_causality_analysis, 
-                                metric_column='value', 
-                                # tenant_pairs can be inferred by the function if None
+                                metric_column='value',
                             )
                             if causality_results_df is not None and not causality_results_df.empty:
                                 causality_results_df['metric'] = metric_name_causality
                                 causality_results_df['round'] = round_name_causality
                                 all_causality_results.append(causality_results_df)
-                                # Save to CSV
                                 causality_table_filename = f'granger_causality_{metric_name_causality}_round_{round_name_causality}.csv'
-                                # Save in the dedicated causality tables directory
                                 causality_table_path = os.path.join(causality_dir, 'tables', causality_table_filename)
                                 export_to_csv(causality_results_df, causality_table_path)
                                 print(f"      Tabela de causalidade salva em: {causality_table_path}")
+
+                                if not causality_results_df[causality_results_df['significant_causal_relationship']].empty:
+                                    if round_name_causality not in all_causal_links_per_round:
+                                        all_causal_links_per_round[round_name_causality] = []
+                                    
+                                    for _, row in causality_results_df[causality_results_df['significant_causal_relationship']].iterrows():
+                                        min_p = 1.0
+                                        best_l = -1
+                                        if isinstance(row.get('detail'), dict):
+                                            for lag_key, lag_data in row['detail'].items():
+                                                if lag_data['p_value'] < min_p:
+                                                    min_p = lag_data['p_value']
+                                                    best_l = int(lag_key.split('_')[-1])
+                                        if best_l != -1:
+                                            all_causal_links_per_round[round_name_causality].append((
+                                                row['cause_tenant'], 
+                                                row['effect_tenant'], 
+                                                metric_name_causality,
+                                                min_p, 
+                                                best_l
+                                            ))
+                                else:
+                                    print(f"      Nenhum relacionamento causal significativo encontrado para {metric_name_causality}, round {round_name_causality}.")
                             else:
                                 print(f"      Nenhum resultado de causalidade gerado para {metric_name_causality}, round {round_name_causality}.")
                         except Exception as e_causality:
                             print(f"      Erro ao analisar causalidade para {metric_name_causality}, round {round_name_causality}: {e_causality}")
+
+        for round_name_plot, causal_links_for_round_plot in all_causal_links_per_round.items():
+            if causal_links_for_round_plot:
+                causality_plot_filename = f'causality_graph_ALL_METRICS_round_{round_name_plot}.png'
+                causality_plot_path = os.path.join(causality_dir, 'plots', causality_plot_filename)
+                print(f"    Gerando grafo de causalidade combinado para round {round_name_plot} em {causality_plot_path}")
+                try:
+                    visualize_causal_graph(
+                        causal_links_for_round_plot,
+                        output_path=causality_plot_path,
+                        metric_colors=CAUSALITY_METRIC_COLORS,
+                        layout_type='kamada_kawai'
+                    )
+                    print(f"        Grafo de causalidade combinado salvo em: {causality_plot_path}")
+                except Exception as e_graph_combined:
+                    print(f"        Erro ao gerar grafo de causalidade combinado para round {round_name_plot}: {e_graph_combined}")
+            else:
+                print(f"    Nenhum link causal significativo encontrado para round {round_name_plot} para o grafo combinado.")
+
         if all_causality_results:
             final_causality_df = pd.concat(all_causality_results, ignore_index=True)
             advanced_analysis_results['granger_causality'] = final_causality_df
@@ -1001,6 +1149,107 @@ def main():
                 print(f"    Dados insuficientes ou coluna 'tenant' ausente para a métrica {metric_name}. Pulando comparação de tenants.")
         print("=== Comparação Direta Entre Tenants Concluída ===")
     
+    if args.compare_experiments:
+        print("\n=== Comparação Entre Experimentos ===")
+        if not args.data_dir_comparison:
+            print("A flag --compare-experiments requer que --data-dir-comparison seja especificado.")
+            return
+
+        print(f"Carregando dados do experimento base: {args.data_dir}")
+        base_experiment_data = load_experiment_data(args.data_dir, rounds=args.rounds) # Use args.rounds for base
+
+        print(f"Carregando dados dos experimentos para comparação: {args.data_dir_comparison}")
+        comparison_experiments_data_dict = {}
+        for i, comp_dir in enumerate(args.data_dir_comparison):
+            exp_name = f"comparison_exp_{i+1}" # Simple naming, can be improved
+            print(f"  Carregando {exp_name} de {comp_dir}")
+            # Use --compare-experiments-rounds for comparison experiments
+            comparison_experiments_data_dict[exp_name] = load_experiment_data(comp_dir, rounds=args.compare_experiments_rounds)
+
+
+        if not base_experiment_data or not comparison_experiments_data_dict:
+            print("Não foi possível carregar dados para todos os experimentos. Pulando comparação.")
+            return
+
+        # Consolidar todos os experimentos para pré-processamento
+        all_exps_for_comp = {'base_experiment': {'metrics': base_experiment_data, 'info': {'name': 'Base Experiment'}}}
+        for name, data in comparison_experiments_data_dict.items():
+            all_exps_for_comp[name] = {'metrics': data, 'info': {'name': name}}
+
+        metrics_for_comparison = args.metrics if args.metrics else DEFAULT_METRICS
+        
+        print(f"Pré-processando experimentos para comparação. Métricas: {metrics_for_comparison}")
+        # Pass tenant and round filters for comparison experiments
+        processed_comparison_experiments = preprocess_experiments(
+            all_exps_for_comp,
+            metrics_of_interest=metrics_for_comparison,
+            rounds_filter=args.compare_experiments_rounds, 
+            tenants_filter=args.compare_experiments_tenants 
+        )
+
+        if not processed_comparison_experiments:
+            print("Nenhum dado processado para comparação de experimentos. Pulando.")
+            return
+
+        # 1. Calcular Estatísticas Resumidas
+        print("\nCalculando estatísticas resumidas entre experimentos...")
+        stats_summary = calculate_statistics_summary(
+            processed_comparison_experiments,
+            metrics=metrics_for_comparison,
+            group_by=['tenant'] if args.compare_experiments_tenants else None 
+        )
+        for metric_name, summary_df in stats_summary.items():
+            if not summary_df.empty:
+                summary_filename = f"comparison_stats_summary_{metric_name}.csv"
+                summary_path = os.path.join(comparison_dir, summary_filename)
+                export_to_csv(summary_df, summary_path)
+                print(f"  Resumo estatístico para {metric_name} salvo em: {summary_path}")
+                print(convert_df_to_markdown(summary_df.head()))
+
+        # 2. Comparar Distribuições
+        print("\nComparando distribuições de métricas entre experimentos...")
+        for metric_name in metrics_for_comparison:
+            print(f"  Comparando distribuições para a métrica: {metric_name}")
+            plot_data, test_results = compare_distributions(
+                processed_comparison_experiments,
+                metric=metric_name,
+                tenants_filter=args.compare_experiments_tenants, 
+                rounds_filter=args.compare_experiments_rounds 
+            )
+            
+            if test_results:
+                dist_comp_filename = f"comparison_distribution_test_{metric_name}.csv"
+                dist_comp_path = os.path.join(comparison_dir, dist_comp_filename)
+                test_results_df = pd.DataFrame.from_dict(test_results, orient='index')
+                export_to_csv(test_results_df, dist_comp_path)
+                print(f"    Resultados do teste de distribuição para {metric_name} salvos em: {dist_comp_path}")
+                print(convert_df_to_markdown(test_results_df.head()))
+
+            if plot_data and plot_data['series']:
+                plt.figure(figsize=VISUALIZATION_CONFIG.get('figure_size', (10, 6)))
+                sns.boxplot(data=plot_data['series'])
+                plt.xticks(ticks=range(len(plot_data['labels'])), labels=plot_data['labels'], rotation=45, ha="right")
+                plt.title(f"Distribuição de {METRIC_DISPLAY_NAMES.get(metric_name, metric_name)} Entre Experimentos")
+                
+                title_suffix = []
+                if args.compare_experiments_rounds:
+                    title_suffix.append(f"Rounds: {', '.join(args.compare_experiments_rounds)}")
+                if args.compare_experiments_tenants:
+                    title_suffix.append(f"Tenants: {', '.join(args.compare_experiments_tenants)}")
+                if title_suffix:
+                    plt.title(f"Distribuição de {METRIC_DISPLAY_NAMES.get(metric_name, metric_name)} Entre Experimentos\n({'; '.join(title_suffix)})")
+
+                plot_filename = f"comparison_distribution_plot_{metric_name}.png"
+                plot_path = os.path.join(comparison_dir, plot_filename)
+                try:
+                    plt.tight_layout()
+                    plt.savefig(plot_path)
+                    print(f"    Gráfico de comparação de distribuição para {metric_name} salvo em: {plot_path}")
+                except Exception as e:
+                    print(f"    Erro ao salvar gráfico de comparação de distribuição: {e}")
+                plt.close()
+        print("Comparação Entre Experimentos concluída.")
+
     print("\nPipeline de análise concluído com sucesso!")
     
     return experiment_results
