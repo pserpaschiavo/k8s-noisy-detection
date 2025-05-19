@@ -1,20 +1,19 @@
 """
-Arquivo de configuração para o pipeline de análise de dados do experimento de noisy neighbors.
+Configuration file for the data analysis pipeline of the noisy neighbors experiment.
 """
 
-# Configurações gerais
+# General settings
 DEFAULT_DATA_DIR = "/home/phil/Projects/k8s-noisy-detection/demo-data/demo-experiment-3-rounds"
 DEFAULT_OUTPUT_DIR = "output"
 
-# Configurações de métricas
+# Metric settings
 DEFAULT_METRICS = [
     "cpu_usage",
     "memory_usage",
-    "disk_throughput_total",
     "network_total_bandwidth"
 ]
 
-# Configurações de visualização
+# Visualization settings
 VISUALIZATION_CONFIG = {
     "dpi": 300,
     "figure_width": 10,
@@ -25,7 +24,7 @@ VISUALIZATION_CONFIG = {
     "legend_size": 12
 }
 
-# Mapeamento de cores para tenants - Usando paleta "Paired" do Seaborn (colorblind-friendly)
+# Color mapping for tenants - Using Seaborn's "Paired" palette (colorblind-friendly)
 TENANT_COLORS = {
     'tenant-a':      '#a6cee3',  # Light Blue
     'tenant-b':      '#1f78b4',  # Dark Blue
@@ -35,14 +34,14 @@ TENANT_COLORS = {
     'unknown':       '#e31a1c',  # Dark Red
     'waiting':       '#fdbf6f',  # Light Orange
     'active':        '#ff7f00',  # Dark Orange
-    # Cores adicionais da paleta "Paired" se necessário:
+    # Additional colors from the "Paired" palette if needed:
     # '#cab2d6',  # Light Purple
     # '#6a3d9a',  # Dark Purple
-    # '#ffff99',  # Light Yellow (usar com cautela)
+    # '#ffff99',  # Light Yellow (use with caution)
     # '#b15928'   # Brown
 }
 
-# Tenant configurado como gerador de ruído (noisy neighbor)
+# Tenant configured as a noisy neighbor
 DEFAULT_NOISY_TENANT = 'tenant-b'
 
 # Formatted names for metrics (for graph titles and tables)
@@ -70,7 +69,7 @@ PHASE_DISPLAY_NAMES = {
     "3 - Recovery": "Recovery"
 }
 
-# Configurações para análise estatística
+# Settings for statistical analysis
 STATISTICAL_CONFIG = {
     "significance_level": 0.05,
     "effect_size_thresholds": {
@@ -81,21 +80,21 @@ STATISTICAL_CONFIG = {
     "outlier_z_threshold": 3.0
 }
 
-# Configurações para exportação de tabelas
+# Settings for table export
 TABLE_EXPORT_CONFIG = {
     "float_format": ".2f",
     "include_index": False,
     "longtable": False
 }
 
-# Configurações para agregação de dados
+# Settings for data aggregation
 AGGREGATION_CONFIG = {
-    "aggregation_keys": ["tenant", "phase"],  # Elementos pelos quais os dados serão agrupados
-    "elements_to_aggregate": None,  # Lista específica de elementos para focar, ex: ["tenant-a", "ingress-nginx"]. None para todos.
-    "metrics_for_aggregation": DEFAULT_METRICS # Métricas a serem consideradas na agregação. Usa DEFAULT_METRICS se None.
+    "aggregation_keys": ["tenant", "phase"],  # Elements by which data will be grouped
+    "elements_to_aggregate": None,  # Specific list of elements to focus on, e.g., ["tenant-a", "ingress-nginx"]. None for all.
+    "metrics_for_aggregation": DEFAULT_METRICS # Metrics to consider in aggregation. Uses DEFAULT_METRICS if None.
 }
 
-# Configurações dos Limites de Recursos do Nó
+# Node Resource Limit Settings
 NODE_RESOURCE_CONFIGS = {
     "Default": {
         "CPUS": 8,
@@ -109,7 +108,7 @@ NODE_RESOURCE_CONFIGS = {
     }
 }
 
-DEFAULT_NODE_CONFIG_NAME = "Default"  # Configuração padrão do nó se não especificada
+DEFAULT_NODE_CONFIG_NAME = "Default"  # Default node configuration if not specified
 
 # Configuration defaults for Impact Score Calculation
 IMPACT_CALCULATION_DEFAULTS = {
@@ -149,12 +148,12 @@ DEFAULT_METRICS_FOR_CAUSALITY = [
 ]
 
 # Colors for metrics in causality graph (can be expanded)
-# Usando cores mais formais para publicações acadêmicas
+# Using more formal colors for academic publications
 CAUSALITY_METRIC_COLORS = {
-    "cpu_usage": "#4472C4",      # Azul formal
-    "memory_usage": "#ED7D31",   # Laranja formal
-    "network_total_bandwidth": "#70AD47", # Verde formal
-    "disk_throughput_total": "#5B9BD5",  # Azul claro formal
-    "pod_restarts": "#7030A0",  # Roxo formal
-    "oom_kills": "#C00000"      # Vermelho formal
+    "cpu_usage": "#4472C4",      # Formal Blue
+    "memory_usage": "#ED7D31",   # Formal Orange
+    "network_total_bandwidth": "#70AD47", # Formal Green
+    "disk_throughput_total": "#5B9BD5",  # Formal Light Blue
+    "pod_restarts": "#7030A0",  # Formal Purple
+    "oom_kills": "#C00000"      # Formal Red
 }

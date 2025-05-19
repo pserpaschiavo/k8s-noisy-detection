@@ -1,8 +1,8 @@
 """
-Módulo de consolidação de dados do experimento de noisy neighbors.
+Data consolidation module for the noisy neighbors experiment.
 
-Este módulo fornece funções para carregar e consolidar dados de métricas
-de diferentes tenants, fases e rounds do experimento.
+This module provides functions to load and consolidate metric data
+from different tenants, phases, and rounds of the experiment.
 """
 
 import os
@@ -15,27 +15,27 @@ import re
 
 def list_available_tenants(experiment_dir):
     """
-    Lista todos os tenants disponíveis no diretório do experimento.
+    Lists all available tenants in the experiment directory.
     
     Args:
-        experiment_dir (str): Caminho para o diretório do experimento
+        experiment_dir (str): Path to the experiment directory
         
     Returns:
-        list: Lista de nomes de tenants
+        list: List of tenant names
     """
     tenants = set()
     
-    # Procura por diretórios de tenants em todas as fases e rounds
-    # Corrigido para iterar corretamente sobre a estrutura de diretórios
+    # Search for tenant directories in all phases and rounds
+    # Corrected to iterate correctly over the directory structure
     for round_folder_name in os.listdir(experiment_dir):
         round_dir_path = os.path.join(experiment_dir, round_folder_name)
         if os.path.isdir(round_dir_path) and round_folder_name.startswith("round-"):
             for phase_folder_name in os.listdir(round_dir_path):
                 phase_dir_path = os.path.join(round_dir_path, phase_folder_name)
-                if os.path.isdir(phase_dir_path): # Assume que qualquer subdiretório aqui é uma fase
+                if os.path.isdir(phase_dir_path): # Assume any subdirectory here is a phase
                     for tenant_folder_name in os.listdir(phase_dir_path):
                         tenant_dir_path = os.path.join(phase_dir_path, tenant_folder_name)
-                        if os.path.isdir(tenant_dir_path): # Assume que qualquer subdiretório aqui é um tenant
+                        if os.path.isdir(tenant_dir_path): # Assume any subdirectory here is a tenant
                             tenants.add(tenant_folder_name)
     
     return sorted(list(tenants))
@@ -43,27 +43,27 @@ def list_available_tenants(experiment_dir):
 
 def list_available_metrics(experiment_dir, tenant="tenant-a"):
     """
-    Lista todas as métricas disponíveis para um tenant específico.
+    Lists all available metrics for a specific tenant.
     
     Args:
-        experiment_dir (str): Caminho para o diretório do experimento
-        tenant (str): Nome do tenant para listar métricas (pode ser None para buscar em todos)
+        experiment_dir (str): Path to the experiment directory
+        tenant (str): Name of the tenant to list metrics for (can be None to search in all)
         
     Returns:
-        list: Lista de nomes de métricas
+        list: List of metric names
     """
     metrics = set()
     
-    # Procura arquivos CSV dentro dos diretórios do tenant especificado
-    # Se tenant for None, busca em qualquer diretório de tenant
-    # Corrigido para iterar corretamente sobre a estrutura de diretórios
+    # Search for CSV files within the specified tenant's directories
+    # If tenant is None, search in any tenant directory
+    # Corrected to iterate correctly over the directory structure
     for round_folder_name in os.listdir(experiment_dir):
         round_dir_path = os.path.join(experiment_dir, round_folder_name)
         if os.path.isdir(round_dir_path) and round_folder_name.startswith("round-"):
             for phase_folder_name in os.listdir(round_dir_path):
                 phase_dir_path = os.path.join(round_dir_path, phase_folder_name)
                 if os.path.isdir(phase_dir_path):
-                    # Se um tenant específico for fornecido, procurar apenas nele
+                    # If a specific tenant is provided, search only in it
                     search_tenants_in_phase = [tenant] if tenant else os.listdir(phase_dir_path)
                     for tenant_folder_name in search_tenants_in_phase:
                         tenant_dir_path = os.path.join(phase_dir_path, tenant_folder_name)
@@ -78,35 +78,35 @@ def list_available_metrics(experiment_dir, tenant="tenant-a"):
 
 def parse_timestamp(timestamp_str):
     """
-    Converte string de timestamp no formato usado nos arquivos CSV para objeto datetime.
+    Converts a timestamp string in the format used in CSV files to a datetime object.
     
     Args:
-        timestamp_str (str): String de timestamp no formato "YYYYMMDD_HHMMSS"
+        timestamp_str (str): Timestamp string in "YYYYMMDD_HHMMSS" format
         
     Returns:
-        datetime: Objeto datetime correspondente
+        datetime: Corresponding datetime object
     """
     return datetime.strptime(timestamp_str, "%Y%m%d_%H%M%S")
 
 
 def load_metric_data(experiment_dir, metric_name, tenants=None, phases=None, rounds=None):
     """
-    Carrega dados de uma métrica específica para os tenants, fases e rounds selecionados.
+    Loads data for a specific metric for the selected tenants, phases, and rounds.
     
     Args:
-        experiment_dir (str): Caminho para o diretório do experimento
-        metric_name (str): Nome da métrica a ser carregada
-        tenants (list): Lista de tenants a incluir (None = todos)
-        phases (list): Lista de fases a incluir (None = todas)
-        rounds (list): Lista de rounds a incluir (None = todos)
+        experiment_dir (str): Path to the experiment directory
+        metric_name (str): Name of the metric to load
+        tenants (list): List of tenants to include (None = all)
+        phases (list): List of phases to include (None = all)
+        rounds (list): List of rounds to include (None = all)
         
     Returns:
-        DataFrame: DataFrame consolidado com os dados da métrica
+        DataFrame: Consolidated DataFrame with the metric data
     """
     all_data = []
     
-    # Se nenhuma lista específica for fornecida, incluir tudo
-    # Corrigido para listar corretamente os rounds e fases se forem None
+    # If no specific list is provided, include everything
+    # Corrected to correctly list rounds and phases if they are None
     if rounds is None:
         rounds_to_scan = [r for r in os.listdir(experiment_dir) if os.path.isdir(os.path.join(experiment_dir, r)) and r.startswith("round-")]
     else:
@@ -123,18 +123,18 @@ def load_metric_data(experiment_dir, metric_name, tenants=None, phases=None, rou
             continue
 
         phases_to_scan_for_round = []
-        if phases is None: # Se phases é None, lista todos os subdiretórios de round_path
+        if phases is None: # If phases is None, list all subdirectories of round_path
             phases_to_scan_for_round = [p for p in os.listdir(round_path) if os.path.isdir(os.path.join(round_path, p))]
-        else: # Se phases é uma lista, usa essa lista
+        else: # If phases is a list, use that list
             phases_to_scan_for_round = phases
 
-        for phase_name_pattern in phases_to_scan_for_round: # phase_name_pattern pode ser um nome exato ou um glob
+        for phase_name_pattern in phases_to_scan_for_round: # phase_name_pattern can be an exact name or a glob
             phase_dir_actual_path = os.path.join(round_path, phase_name_pattern)
             
             if not os.path.isdir(phase_dir_actual_path):
                 continue
 
-            phase_name_actual = os.path.basename(phase_dir_actual_path) # Nome real da fase
+            phase_name_actual = os.path.basename(phase_dir_actual_path) # Actual phase name
             phase_number_match = re.search(r'^(\d+)', phase_name_actual)
             phase_number = int(phase_number_match.group(1)) if phase_number_match else 0
                 
@@ -146,15 +146,15 @@ def load_metric_data(experiment_dir, metric_name, tenants=None, phases=None, rou
                         df = pd.read_csv(csv_path)
                         df['tenant'] = tenant_name
                         df['round'] = round_name
-                        df['phase'] = phase_name_actual # Usar o nome real da fase
+                        df['phase'] = phase_name_actual # Use the actual phase name
                         df['phase_number'] = phase_number
                         df['datetime'] = df['timestamp'].apply(parse_timestamp)
                         all_data.append(df)
                     except Exception as e:
-                        print(f"Erro ao carregar {csv_path}: {e}")
+                        print(f"Error loading {csv_path}: {e}")
     
     if not all_data:
-        print(f"Nenhum dado encontrado para métrica '{metric_name}' com os filtros aplicados.")
+        print(f"No data found for metric '{metric_name}' with the applied filters.")
         return pd.DataFrame()
     
     return pd.concat(all_data, ignore_index=True)
@@ -162,19 +162,19 @@ def load_metric_data(experiment_dir, metric_name, tenants=None, phases=None, rou
 
 def load_multiple_metrics(experiment_dir, metric_names, tenants=None, phases=None, rounds=None):
     """
-    Carrega dados de múltiplas métricas para os tenants, fases e rounds selecionados.
+    Loads data for multiple metrics for the selected tenants, phases, and rounds.
     
     Args:
-        experiment_dir (str): Caminho para o diretório do experimento
-        metric_names (list): Lista de nomes de métricas a serem carregadas
-        tenants (list): Lista de tenants a incluir (None = todos)
-        phases (list): Lista de fases a incluir (None = todas)
-        rounds (list): Lista de rounds a incluir (None = todos)
+        experiment_dir (str): Path to the experiment directory
+        metric_names (list): List of metric names to load
+        tenants (list): List of tenants to include (None = all)
+        phases (list): List of phases to include (None = all)
+        rounds (list): List of rounds to include (None = all)
         
     Returns:
-        dict: Dicionário onde as chaves são nomes de métricas. 
-              Cada valor é outro dicionário onde as chaves são nomes de rounds 
-              e os valores são DataFrames com os dados da métrica para aquele round.
+        dict: Dictionary where keys are metric names. 
+              Each value is another dictionary where keys are round names 
+              and values are DataFrames with the metric data for that round.
     """
     metrics_data_final_structure = {}
     
@@ -188,51 +188,51 @@ def load_multiple_metrics(experiment_dir, metric_names, tenants=None, phases=Non
                     rounds_data_for_metric[round_name] = group_df.copy()
             else:
                 # This case should ideally not happen if load_metric_data correctly adds the 'round' column.
-                print(f"Aviso: Coluna 'round' não encontrada para a métrica {metric} após carregar. Verifique a função load_metric_data.")
+                print(f"Warning: 'round' column not found for metric {metric} after loading. Check the load_metric_data function.")
                 # Fallback: Store the entire DataFrame under a generic key if 'round' column is missing.
                 rounds_data_for_metric['unknown_round_data'] = df_all_rounds_for_metric
             
             if rounds_data_for_metric: 
                 metrics_data_final_structure[metric] = rounds_data_for_metric
             elif not df_all_rounds_for_metric.empty:
-                 print(f"Aviso: Nenhum dado de round foi agrupado para a métrica {metric}, embora o DataFrame não estivesse vazio.")
+                 print(f"Warning: No round data was grouped for metric {metric}, although the DataFrame was not empty.")
     
     return metrics_data_final_structure
 
 
 def load_experiment_data(experiment_dir, tenants=None, metrics=None, phases=None, rounds=None):
     """
-    Carrega todos os dados relevantes de um experimento, potencialmente todas as métricas disponíveis.
+    Loads all relevant data from an experiment, potentially all available metrics.
 
     Args:
-        experiment_dir (str): Diretório base do experimento.
-        tenants (list, optional): Lista de tenants a incluir. Defaults to all available.
-        metrics (list, optional): Lista de métricas a carregar. Defaults to all available for the first tenant.
-        phases (list, optional): Lista de fases a incluir. Defaults to all.
-        rounds (list, optional): Lista de rounds a incluir. Defaults to all.
+        experiment_dir (str): Base directory of the experiment.
+        tenants (list, optional): List of tenants to include. Defaults to all available.
+        metrics (list, optional): List of metrics to load. Defaults to all available for the first tenant.
+        phases (list, optional): List of phases to include. Defaults to all.
+        rounds (list, optional): List of rounds to include. Defaults to all.
 
     Returns:
-        dict: Dicionário com DataFrames para cada métrica carregada.
+        dict: Dictionary with DataFrames for each loaded metric.
     """
-    print(f"Carregando dados do experimento de: {experiment_dir}")
+    print(f"Loading experiment data from: {experiment_dir}")
 
     if tenants is None:
         tenants = list_available_tenants(experiment_dir)
         if not tenants:
-            print("Nenhum tenant encontrado.")
+            print("No tenants found.")
             return {}
-        print(f"Tenants a serem carregados: {tenants}")
+        print(f"Tenants to be loaded: {tenants}")
 
     if metrics is None:
-        # Tenta listar métricas do primeiro tenant encontrado como representativo
+        # Try to list metrics from the first found tenant as representative
         if tenants:
             metrics = list_available_metrics(experiment_dir, tenant=tenants[0])
         if not metrics:
-            print("Nenhuma métrica encontrada para os tenants especificados.")
+            print("No metrics found for the specified tenants.")
             return {}
-        print(f"Métricas a serem carregadas: {metrics}")
+        print(f"Metrics to be loaded: {metrics}")
 
-    # Utiliza load_multiple_metrics para carregar os dados
+    # Use load_multiple_metrics to load the data
     experiment_data = load_multiple_metrics(
         experiment_dir,
         metric_names=metrics,
@@ -242,24 +242,24 @@ def load_experiment_data(experiment_dir, tenants=None, metrics=None, phases=None
     )
 
     if not experiment_data:
-        print("Nenhum dado foi carregado para o experimento.")
+        print("No data was loaded for the experiment.")
     
     return experiment_data
 
 
 def select_tenants(metrics_data, selected_tenants):
     """
-    Filtra os dados de métricas para incluir apenas os tenants selecionados.
+    Filters metric data to include only the selected tenants.
 
     Args:
-        metrics_data (dict): Dicionário de DataFrames por métrica.
-        selected_tenants (list): Lista de tenants para manter.
+        metrics_data (dict): Dictionary of DataFrames by metric.
+        selected_tenants (list): List of tenants to keep.
 
     Returns:
-        dict: Dicionário de DataFrames filtrado.
+        dict: Filtered dictionary of DataFrames.
     """
     if not selected_tenants:
-        return metrics_data # Retorna original se nenhuma seleção for feita
+        return metrics_data # Return original if no selection is made
 
     filtered_data = {}
     for metric_name, df in metrics_data.items():
@@ -268,6 +268,6 @@ def select_tenants(metrics_data, selected_tenants):
             if not filtered_df.empty:
                 filtered_data[metric_name] = filtered_df
         else:
-            # Se a coluna tenant não existir, mantém o DataFrame (ou decide outra lógica)
+            # If the tenant column does not exist, keep the DataFrame (or decide other logic)
             filtered_data[metric_name] = df 
     return filtered_data

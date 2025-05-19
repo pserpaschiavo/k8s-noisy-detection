@@ -1,5 +1,0 @@
-média,mediana,desvio_padrão,mínimo,máximo,contagem,experimento,round
-1.48,1.14,1.47,0.04,6.11,113,base_experiment,round-1
-1.48,1.15,1.47,0.05,6.38,116,base_experiment,round-2
-657.21,76.30,1371.42,1.59,5660.15,116,base_experiment,round-3
-1.40,1.15,1.32,0.07,5.75,221,comparison_exp_1,round-1

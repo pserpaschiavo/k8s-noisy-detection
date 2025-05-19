@@ -1,8 +1,8 @@
 """
-Módulo para análise comparativa entre tenants para o experimento de noisy neighbors.
+Module for comparative analysis between tenants for the noisy neighbors experiment.
 
-Este módulo fornece funções para comparar métricas entre diferentes tenants
-e analisar o impacto do tenant barulhento nos demais.
+This module provides functions to compare metrics between different tenants
+and analyze the impact of the noisy tenant on others.
 """
 
 import pandas as pd
@@ -12,57 +12,57 @@ from scipy import stats
 
 def calculate_correlation_matrix(metrics_dict, tenants=None, round_name='round-1', noisy_tenant=None):
     """
-    Calcula uma matriz de correlação entre métricas de diferentes tenants.
+    Calculates a correlation matrix between metrics of different tenants.
     
     Args:
-        metrics_dict (dict): Dicionário com DataFrames para cada métrica
-        tenants (list): Lista de tenants a incluir (None = todos)
-        round_name (str): Round a ser analisado
-        noisy_tenant (str): Tenant específico que gera ruído (por padrão: DEFAULT_NOISY_TENANT da configuração)
+        metrics_dict (dict): Dictionary with DataFrames for each metric.
+        tenants (list): List of tenants to include (None = all).
+        round_name (str): Round to be analyzed.
+        noisy_tenant (str): Specific tenant generating noise (default: DEFAULT_NOISY_TENANT from configuration).
         
     Returns:
-        DataFrame: Matriz de correlação entre métricas dos tenants
+        DataFrame: Correlation matrix between tenant metrics.
     """
     from pipeline.config import DEFAULT_NOISY_TENANT
     
-    # Determinar qual é o tenant gerador de ruído
-    noisy_tenant = noisy_tenant if noisy_tenant else DEFAULT_NOISY_TENANT
+    # Determine which tenant is generating noise
+    noisy_tenant_id = noisy_tenant if noisy_tenant else DEFAULT_NOISY_TENANT
     
-    # Preparar dados para correlação
+    # Prepare data for correlation
     correlation_data = {}
     
     for metric_name, metric_df in metrics_dict.items():
-        # Filtrar pelo round especificado
+        # Filter by the specified round
         round_df = metric_df[metric_df['round'] == round_name]
         
         if tenants:
             round_df = round_df[round_df['tenant'].isin(tenants)]
         
-        # Verificar se o tenant gerador de ruído está presente
-        has_noisy_tenant = noisy_tenant in round_df['tenant'].unique()
+        # Check if the noise-generating tenant is present
+        has_noisy_tenant = noisy_tenant_id in round_df['tenant'].unique()
         
-        # Pivotar para ter uma coluna para cada tenant
+        # Pivot to have one column for each tenant
         pivot = round_df.pivot_table(
             index='datetime',
             columns='tenant',
             values='value'
         )
         
-        # Preencher valores NaN com 0
+        # Fill NaN values with 0
         pivot.fillna(0, inplace=True)
         
-        # Garantir que tenant gerador de ruído esteja presente para consistência nas análises
-        if not has_noisy_tenant and noisy_tenant not in pivot.columns:
-            pivot[noisy_tenant] = 0  # Adicionar tenant gerador de ruído com valores zero
+        # Ensure noise-generating tenant is present for consistency in analyses
+        if not has_noisy_tenant and noisy_tenant_id not in pivot.columns:
+            pivot[noisy_tenant_id] = 0  # Add noise-generating tenant with zero values
         
-        # Adicionar ao dicionário com prefixo da métrica
-        for tenant in pivot.columns:
-            correlation_data[f"{metric_name}_{tenant}"] = pivot[tenant]
+        # Add to dictionary with metric prefix
+        for tenant_col_name in pivot.columns:
+            correlation_data[f"{metric_name}_{tenant_col_name}"] = pivot[tenant_col_name]
     
-    # Criar DataFrame com todas as séries
+    # Create DataFrame with all series
     corr_df = pd.DataFrame(correlation_data)
     
-    # Calcular correlação
+    # Calculate correlation
     correlation_matrix = corr_df.corr()
     
     return correlation_matrix
@@ -70,25 +70,25 @@ def calculate_correlation_matrix(metrics_dict, tenants=None, round_name='round-1
 
 def compare_tenant_metrics(df, baseline_tenant='tenant-a', metric_column='value'):
     """
-    Compara métricas de diferentes tenants com um tenant de referência.
+    Compares metrics of different tenants with a reference tenant.
     
     Args:
-        df (DataFrame): DataFrame com dados de métricas
-        baseline_tenant (str): Tenant de referência para comparação
-        metric_column (str): Coluna com os valores da métrica
+        df (DataFrame): DataFrame with metrics data.
+        baseline_tenant (str): Reference tenant for comparison.
+        metric_column (str): Column with metric values.
         
     Returns:
-        DataFrame: DataFrame com comparações entre tenants
+        DataFrame: DataFrame with comparisons between tenants.
     """
-    # Filtrar apenas o tenant de referência
+    # Filter only the reference tenant
     baseline_df = df[df['tenant'] == baseline_tenant].copy()
     
-    # Preparar um DataFrame para armazenar os resultados
+    # Prepare a DataFrame to store the results
     results = []
     
-    # Para cada combinação de round e phase
+    # For each combination of round and phase
     for (round_name, phase_name), group in df.groupby(['round', 'phase']):
-        # Dados do tenant de referência para esta combinação
+        # Reference tenant data for this combination
         base = baseline_df[(baseline_df['round'] == round_name) & 
                           (baseline_df['phase'] == phase_name)]
         
@@ -98,7 +98,7 @@ def compare_tenant_metrics(df, baseline_tenant='tenant-a', metric_column='value'
         base_mean = base[metric_column].mean()
         base_std = base[metric_column].std()
         
-        # Para cada tenant
+        # For each tenant
         for tenant, tenant_group in group.groupby('tenant'):
             if tenant == baseline_tenant:
                 continue  # Skip baseline tenant
@@ -106,17 +106,17 @@ def compare_tenant_metrics(df, baseline_tenant='tenant-a', metric_column='value'
             tenant_mean = tenant_group[metric_column].mean()
             tenant_std = tenant_group[metric_column].std()
             
-            # Calcular diferença percentual
+            # Calculate percentage difference
             percent_diff = ((tenant_mean - base_mean) / base_mean) * 100 if base_mean != 0 else np.nan
             
-            # Teste estatístico (t-test para duas amostras independentes)
+            # Statistical test (t-test for two independent samples)
             t_stat, p_value = stats.ttest_ind(
                 base[metric_column].dropna(),
                 tenant_group[metric_column].dropna(),
-                equal_var=False  # Assume variâncias diferentes (Welch's t-test)
+                equal_var=False  # Assume different variances (Welch's t-test)
             )
             
-            # Adicionar aos resultados
+            # Add to results
             results.append({
                 'round': round_name,
                 'phase': phase_name,
@@ -129,53 +129,59 @@ def compare_tenant_metrics(df, baseline_tenant='tenant-a', metric_column='value'
                 'percent_difference': percent_diff,
                 't_statistic': t_stat,
                 'p_value': p_value,
-                'significant_difference': p_value < 0.05  # Significância estatística
+                'significant_difference': p_value < 0.05  # Statistical significance
             })
     
     return pd.DataFrame(results)
 
 
-def calculate_inter_tenant_correlation_per_metric(metric_df_single_round: pd.DataFrame) -> pd.DataFrame:
+def calculate_inter_tenant_correlation_per_metric(metric_df_single_round: pd.DataFrame, value_col='value', time_col='datetime', tenant_col='tenant') -> pd.DataFrame:
     """
-    Calcula a matriz de correlação inter-tenant para uma única métrica e um único round.
+    Calculates the inter-tenant correlation matrix for a single metric and a single round.
 
     Args:
-        metric_df_single_round (pd.DataFrame): DataFrame contendo dados de uma métrica
-                                                 para múltiplos tenants em um único round.
-                                                 Deve conter colunas 'datetime', 'tenant', 'value'.
+        metric_df_single_round (pd.DataFrame): DataFrame containing data for one metric
+                                                 for multiple tenants in a single round.
+        value_col (str): Name of the column with metric values.
+        time_col (str): Name of the column with timestamps.
+        tenant_col (str): Name of the column with tenant identifiers.
+                                                 
     Returns:
-        pd.DataFrame: Matriz de correlação inter-tenant.
+        pd.DataFrame: Inter-tenant correlation matrix.
     """
     pivot_df = metric_df_single_round.pivot_table(
-        index='datetime',
-        columns='tenant',
-        values='value'
+        index=time_col,
+        columns=tenant_col,
+        values=value_col
     )
-    # Preencher NaNs que podem surgir se tenants não tiverem dados em todos os timestamps
-    pivot_df.fillna(method='ffill', inplace=True)
-    pivot_df.fillna(method='bfill', inplace=True) # Para NaNs no início
-    pivot_df.fillna(0, inplace=True) # Para tenants sem dados
+    # Fill NaNs that may arise if tenants do not have data at all timestamps
+    pivot_df.ffill(inplace=True) # Forward fill
+    pivot_df.bfill(inplace=True) # Backward fill
+    pivot_df.fillna(0, inplace=True) # For tenants with no data at all
     return pivot_df.corr()
 
 
-def calculate_inter_tenant_covariance_per_metric(metric_df_single_round: pd.DataFrame) -> pd.DataFrame:
+def calculate_inter_tenant_covariance_per_metric(metric_df_single_round: pd.DataFrame, value_col='value', time_col='datetime', tenant_col='tenant') -> pd.DataFrame:
     """
-    Calcula a matriz de covariância inter-tenant para uma única métrica e um único round.
+    Calculates the inter-tenant covariance matrix for a single metric and a single round.
 
     Args:
-        metric_df_single_round (pd.DataFrame): DataFrame contendo dados de uma métrica
-                                                 para múltiplos tenants em um único round.
-                                                 Deve conter colunas 'datetime', 'tenant', 'value'.
+        metric_df_single_round (pd.DataFrame): DataFrame containing data for one metric
+                                                 for multiple tenants in a single round.
+        value_col (str): Name of the column with metric values.
+        time_col (str): Name of the column with timestamps.
+        tenant_col (str): Name of the column with tenant identifiers.
+
     Returns:
-        pd.DataFrame: Matriz de covariância inter-tenant.
+        pd.DataFrame: Inter-tenant covariance matrix.
     """
     pivot_df = metric_df_single_round.pivot_table(
-        index='datetime',
-        columns='tenant',
-        values='value'
+        index=time_col,
+        columns=tenant_col,
+        values=value_col
     )
-    # Preencher NaNs que podem surgir se tenants não tiverem dados em todos os timestamps
-    pivot_df.fillna(method='ffill', inplace=True)
-    pivot_df.fillna(method='bfill', inplace=True) # Para NaNs no início
-    pivot_df.fillna(0, inplace=True) # Para tenants sem dados
+    # Fill NaNs that may arise if tenants do not have data at all timestamps
+    pivot_df.ffill(inplace=True) # Forward fill
+    pivot_df.bfill(inplace=True) # Backward fill
+    pivot_df.fillna(0, inplace=True) # For tenants with no data at all
     return pivot_df.cov()

@@ -1,8 +1,8 @@
 """
-Módulo para comparação entre experimentos com diferentes tecnologias (vCluster, Kata Containers, etc).
+Module for comparison between experiments with different technologies (vCluster, Kata Containers, etc.).
 
-Este módulo implementa funções para análise comparativa de diferentes tecnologias
-de containerização, focando em métricas de desempenho, isolamento e interferência.
+This module implements functions for comparative analysis of different
+containerization technologies, focusing on performance, isolation, and interference metrics.
 """
 
 import pandas as pd
@@ -16,43 +16,43 @@ import os
 
 def normalize_metrics_between_experiments(exp1_data, exp2_data, metrics_list=None):
     """
-    Normaliza métricas entre dois experimentos para permitir comparação justa.
+    Normalizes metrics between two experiments to allow fair comparison.
     
     Args:
-        exp1_data (dict): Dados do primeiro experimento (dicionário de DataFrames)
-        exp2_data (dict): Dados do segundo experimento  
-        metrics_list (list): Lista de métricas para normalizar (None = todas comuns)
+        exp1_data (dict): Data from the first experiment (dictionary of DataFrames).
+        exp2_data (dict): Data from the second experiment.
+        metrics_list (list): List of metrics to normalize (None = all common).
         
     Returns:
-        tuple: Dicionário de métricas normalizadas para cada experimento
+        tuple: Dictionary of normalized metrics for each experiment and normalization statistics.
     """
-    # Identificar métricas comuns se não especificadas
+    # Identify common metrics if not specified
     if metrics_list is None:
         metrics_list = [m for m in exp1_data.keys() if m in exp2_data.keys()]
     
-    # Dicionários para resultados normalizados
+    # Dictionaries for normalized results
     exp1_normalized = {}
     exp2_normalized = {}
     
-    # Estatísticas para normalização
+    # Statistics for normalization
     normalization_stats = {}
     
     for metric in metrics_list:
         if metric not in exp1_data or metric not in exp2_data:
             continue
             
-        # Obter DataFrames
+        # Get DataFrames
         df1 = exp1_data[metric]
         df2 = exp2_data[metric]
         
-        # Estatísticas globais para normalização
+        # Global statistics for normalization
         combined_values = pd.concat([df1['value'], df2['value']])
         global_min = combined_values.min()
         global_max = combined_values.max()
         global_mean = combined_values.mean()
         global_std = combined_values.std()
         
-        # Salvar estatísticas
+        # Save statistics
         normalization_stats[metric] = {
             'min': global_min,
             'max': global_max,
@@ -60,21 +60,21 @@ def normalize_metrics_between_experiments(exp1_data, exp2_data, metrics_list=Non
             'std': global_std
         }
         
-        # Normalizar usando Min-Max ou Z-score conforme necessário
-        # Usamos Min-Max para a maioria das métricas (mantém proporções)
+        # Normalize using Min-Max or Z-score as needed
+        # We use Min-Max for most metrics (maintains proportions)
         if global_max > global_min:
-            # Criar cópias para não modificar os originais
+            # Create copies to avoid modifying originals
             df1_norm = df1.copy()
             df2_norm = df2.copy()
             
-            # Normalização Min-Max (valores entre 0 e 1)
+            # Min-Max normalization (values between 0 and 1)
             df1_norm['value'] = (df1['value'] - global_min) / (global_max - global_min)
             df2_norm['value'] = (df2['value'] - global_min) / (global_max - global_min)
             
             exp1_normalized[metric] = df1_norm
             exp2_normalized[metric] = df2_norm
         else:
-            # Se min=max (valores constantes), manter originais
+            # If min=max (constant values), keep originals
             exp1_normalized[metric] = df1.copy()
             exp2_normalized[metric] = df2.copy()
     
@@ -84,24 +84,24 @@ def calculate_relative_efficiency(exp1_data, exp2_data, metrics_list=None, tenan
                                  phase_filter=None, rounds_filter: Optional[Union[str, List[str]]] = None, 
                                  exp1_name="Experiment 1", exp2_name="Experiment 2"):
     """
-    Calcula métricas de eficiência relativa entre dois experimentos.
+    Calculates relative efficiency metrics between two experiments.
     
     Args:
-        exp1_data (dict): Dados do primeiro experimento
-        exp2_data (dict): Dados do segundo experimento
-        metrics_list (list): Lista de métricas a comparar
-        tenants_list (list): Lista de tenants a incluir
-        phase_filter (str): Filtro opcional para fase específica
-        rounds_filter (Optional[Union[str, List[str]]]): Filtro opcional para round(s) específico(s).
-        exp1_name (str): Nome do primeiro experimento para resultados
-        exp2_name (str): Nome do segundo experimento para resultados
+        exp1_data (dict): Data from the first experiment.
+        exp2_data (dict): Data from the second experiment.
+        metrics_list (list): List of metrics to compare.
+        tenants_list (list): List of tenants to include.
+        phase_filter (str): Optional filter for a specific phase.
+        rounds_filter (Optional[Union[str, List[str]]]): Optional filter for specific round(s).
+        exp1_name (str): Name of the first experiment for results.
+        exp2_name (str): Name of the second experiment for results.
         
     Returns:
-        DataFrame: DataFrame com métricas de eficiência relativa
+        DataFrame: DataFrame with relative efficiency metrics.
     """
     results = []
     
-    # Identificar métricas comuns se não especificadas
+    # Identify common metrics if not specified
     if metrics_list is None:
         metrics_list = [m for m in exp1_data.keys() if m in exp2_data.keys()]
     
@@ -112,18 +112,18 @@ def calculate_relative_efficiency(exp1_data, exp2_data, metrics_list=None, tenan
         df1 = exp1_data[metric_name].copy() # Use .copy() to avoid modifying original dict data
         df2 = exp2_data[metric_name].copy() # Use .copy() to avoid modifying original dict data
         
-        # Aplicar filtro de fase se especificado
+        # Apply phase filter if specified
         if phase_filter:
             if 'phase' in df1.columns:
                 df1 = df1[df1['phase'] == phase_filter]
             if 'phase' in df2.columns:
                 df2 = df2[df2['phase'] == phase_filter]
 
-        # Aplicar filtro de round se especificado
+        # Apply round filter if specified
         if rounds_filter:
             if isinstance(rounds_filter, str):
                 rounds_to_keep = [rounds_filter]
-            else: # Assumindo que é uma lista
+            else: # Assuming it's a list
                 rounds_to_keep = rounds_filter
             
             if 'round' in df1.columns:
@@ -131,29 +131,29 @@ def calculate_relative_efficiency(exp1_data, exp2_data, metrics_list=None, tenan
             if 'round' in df2.columns:
                 df2 = df2[df2['round'].isin(rounds_to_keep)]
         
-        # Filtrar tenants se especificado
+        # Filter tenants if specified
         if tenants_list and 'tenant' in df1.columns and 'tenant' in df2.columns:
             df1_filtered_tenants = df1[df1['tenant'].isin(tenants_list)]
             df2_filtered_tenants = df2[df2['tenant'].isin(tenants_list)]
             
-            # Carregar configurações
+            # Load configurations
             from pipeline.config import DEFAULT_NOISY_TENANT
             
-            # Determinar o tenant gerador de ruído
+            # Determine the noisy tenant
             noisy_tenant = DEFAULT_NOISY_TENANT
                 
-            # Verificar se o tenant gerador de ruído está presente em ambos os experimentos
+            # Check if the noisy tenant is present in both experiments
             has_noisy_tenant_exp1 = noisy_tenant in df1_filtered_tenants['tenant'].unique()
             has_noisy_tenant_exp2 = noisy_tenant in df2_filtered_tenants['tenant'].unique()
             
-            # Para cada tenant, calcular estatísticas
+            # For each tenant, calculate statistics
             for tenant in tenants_list:
-                # Tratamento especial para o tenant gerador de ruído
+                # Special handling for the noisy tenant
                 if tenant == noisy_tenant:
                     tenant_df1 = df1_filtered_tenants[df1_filtered_tenants['tenant'] == tenant] if has_noisy_tenant_exp1 else pd.DataFrame()
                     tenant_df2 = df2_filtered_tenants[df2_filtered_tenants['tenant'] == tenant] if has_noisy_tenant_exp2 else pd.DataFrame()
                     
-                    # Se o tenant gerador de ruído não existe em algum experimento mas está na lista de tenants
+                    # If the noisy tenant does not exist in an experiment but is in the tenants list
                     if tenant_df1.empty and noisy_tenant in tenants_list:
                         other_tenant_df1 = df1_filtered_tenants[df1_filtered_tenants['tenant'] != noisy_tenant]
                         if not other_tenant_df1.empty:
@@ -173,17 +173,17 @@ def calculate_relative_efficiency(exp1_data, exp2_data, metrics_list=None, tenan
                     tenant_df1 = df1_filtered_tenants[df1_filtered_tenants['tenant'] == tenant]
                     tenant_df2 = df2_filtered_tenants[df2_filtered_tenants['tenant'] == tenant]
                 
-                # Pular se não houver dados suficientes
+                # Skip if not enough data
                 if tenant_df1.empty or tenant_df2.empty or len(tenant_df1['value'].dropna()) < 2 or len(tenant_df2['value'].dropna()) < 2:
                     continue
                 
-                # Estatísticas básicas
+                # Basic statistics
                 mean1 = tenant_df1['value'].mean()
                 mean2 = tenant_df2['value'].mean()
                 std1 = tenant_df1['value'].std()
                 std2 = tenant_df2['value'].std()
                 
-                # Cálculo de diferenças relativas
+                # Calculation of relative differences
                 if mean2 != 0:
                     percent_diff = ((mean1 - mean2) / abs(mean2)) * 100
                 elif mean1 != 0:
@@ -191,7 +191,7 @@ def calculate_relative_efficiency(exp1_data, exp2_data, metrics_list=None, tenan
                 else:
                     percent_diff = 0.0
                 
-                # T-test para significância estatística
+                # T-test for statistical significance
                 t_stat, p_value = stats.ttest_ind(
                     tenant_df1['value'].dropna(), 
                     tenant_df2['value'].dropna(),
@@ -199,7 +199,7 @@ def calculate_relative_efficiency(exp1_data, exp2_data, metrics_list=None, tenan
                     nan_policy='omit'
                 )
                 
-                # Adicionar resultados
+                # Add results
                 results.append({
                     'metric': metric_name,
                     'tenant': tenant,
@@ -214,9 +214,10 @@ def calculate_relative_efficiency(exp1_data, exp2_data, metrics_list=None, tenan
                     't_statistic': t_stat,
                     'p_value': p_value,
                     'statistically_significant': p_value < 0.05,
-                    'better_experiment': exp1_name if mean1 < mean2 else exp2_name if mean2 < mean1 else 'equal'
+                    'better_experiment': exp1_name if mean1 < mean2 else exp2_name if mean2 < mean1 else 'equal' # Assuming lower is better
                 })
         else:
+            # If no tenant list is provided, aggregate across all tenants
             if df1.empty or df2.empty or len(df1['value'].dropna()) < 2 or len(df2['value'].dropna()) < 2:
                 continue
 
@@ -253,7 +254,7 @@ def calculate_relative_efficiency(exp1_data, exp2_data, metrics_list=None, tenan
                 't_statistic': t_stat,
                 'p_value': p_value,
                 'statistically_significant': p_value < 0.05,
-                'better_experiment': exp1_name if mean1 < mean2 else exp2_name if mean2 < mean1 else 'equal'
+                'better_experiment': exp1_name if mean1 < mean2 else exp2_name if mean2 < mean1 else 'equal' # Assuming lower is better
             })
     
     return pd.DataFrame(results)
@@ -262,18 +263,18 @@ def plot_experiment_comparison(efficiency_data, exp1_name, exp2_name,
                               metric_filter=None, tenant_filter=None,
                               figsize=(14, 10)):
     """
-    Plota comparação visual entre experimentos com diferentes tecnologias.
+    Plots visual comparison between experiments with different technologies.
     
     Args:
-        efficiency_data (DataFrame): DataFrame com métricas de eficiência relativa
-        exp1_name (str): Nome do primeiro experimento
-        exp2_name (str): Nome do segundo experimento
-        metric_filter (str): Filtrar para uma métrica específica
-        tenant_filter (str): Filtrar para um tenant específico
-        figsize (tuple): Tamanho da figura
+        efficiency_data (DataFrame): DataFrame with relative efficiency metrics.
+        exp1_name (str): Name of the first experiment.
+        exp2_name (str): Name of the second experiment.
+        metric_filter (str): Filter for a specific metric.
+        tenant_filter (str): Filter for a specific tenant.
+        figsize (tuple): Figure size.
         
     Returns:
-        matplotlib.figure.Figure: Figura com a comparação
+        matplotlib.figure.Figure: Figure with the comparison.
     """
     plot_data = efficiency_data.copy()
     
@@ -284,17 +285,18 @@ def plot_experiment_comparison(efficiency_data, exp1_name, exp2_name,
         plot_data = plot_data[plot_data['tenant'] == tenant_filter]
     
     if plot_data.empty:
-        print("Dados filtrados insuficientes para gerar visualização")
+        print("Filtered data insufficient to generate visualization.")
         fig, ax = plt.subplots()
-        ax.text(0.5, 0.5, "Dados insuficientes para plotar", ha='center', va='center')
+        ax.text(0.5, 0.5, "Insufficient data to plot", ha='center', va='center')
         return fig
 
     fig, axes = plt.subplots(2, 2, figsize=figsize)
-    fig.suptitle(f'Comparação entre {exp1_name} e {exp2_name}', fontsize=16)
+    fig.suptitle(f'Comparison between {exp1_name} and {exp2_name}', fontsize=16)
     
     ax1 = axes[0, 0]
     
-    if 'tenant' not in plot_data.columns:
+    if 'tenant' not in plot_data.columns or plot_data['tenant'].nunique() <= 1:
+        # Simplified plot if only one tenant or tenant column is missing
         plot_data_pivot = plot_data.set_index('metric')[[f'{exp1_name}_mean', f'{exp2_name}_mean']]
     else:
         plot_data_pivot = plot_data.pivot_table(
@@ -307,9 +309,9 @@ def plot_experiment_comparison(efficiency_data, exp1_name, exp2_name,
     
     sns.set_style("whitegrid")
     plot_data_pivot.plot(kind='bar', ax=ax1)
-    ax1.set_title('Comparação de Médias por Métrica')
-    ax1.set_ylabel('Valor Médio')
-    ax1.legend(bbox_to_anchor=(1.05, 1), loc='upper left', title='Tenant / Média')
+    ax1.set_title('Mean Comparison by Metric')
+    ax1.set_ylabel('Mean Value')
+    ax1.legend(bbox_to_anchor=(1.05, 1), loc='upper left', title='Tenant / Mean')
     ax1.tick_params(axis='x', rotation=45)
     
     ax2 = axes[0, 1]
@@ -322,7 +324,7 @@ def plot_experiment_comparison(efficiency_data, exp1_name, exp2_name,
             data=significant,
             x='metric',
             y='percent_difference',
-            hue='tenant' if 'tenant' in significant.columns and len(significant['tenant'].unique()) > 1 else None,
+            hue='tenant' if 'tenant' in significant.columns and significant['tenant'].nunique() > 1 else None,
             ax=ax2,
             alpha=0.8
         )
@@ -333,16 +335,18 @@ def plot_experiment_comparison(efficiency_data, exp1_name, exp2_name,
 
         for _, row in not_significant.iterrows():
             x_pos = metric_map.get(row['metric'], 0)
+            # Adjust x_pos slightly if hue is used to avoid overlap, or handle differently
+            # For simplicity, this example doesn't perfectly align scatter with barplot hues.
             ax2.scatter(
                 x_pos,
                 row['percent_difference'],
                 marker='o', s=100, color='gray', alpha=0.5,
-                label='Não Significativo' if 'Não Significativo' not in [h.get_label() for h in ax2.get_legend_handles_labels()[0]] else ""
+                label='Not Significant' if 'Not Significant' not in [h.get_label() for h in ax2.get_legend_handles_labels()[0]] else ""
             )
         ax2.set_xticks(range(len(metric_categories)))
         ax2.set_xticklabels(metric_categories, rotation=45)
 
-    ax2.set_title('Diferença Percentual (%)')
+    ax2.set_title('Percentage Difference (%)')
     ax2.axhline(y=0, color='r', linestyle='-', alpha=0.3)
     ax2.tick_params(axis='x', rotation=45)
     handles, labels = ax2.get_legend_handles_labels()
@@ -354,7 +358,7 @@ def plot_experiment_comparison(efficiency_data, exp1_name, exp2_name,
     
     ax3 = axes[1, 0]
     
-    if 'tenant' in plot_data.columns and len(plot_data['tenant'].unique()) > 1 and plot_data['tenant'].nunique() > 1:
+    if 'tenant' in plot_data.columns and plot_data['tenant'].nunique() > 1:
         try:
             heatmap_data = plot_data.pivot_table(
                 index='metric',
@@ -362,7 +366,7 @@ def plot_experiment_comparison(efficiency_data, exp1_name, exp2_name,
                 values='percent_difference'
             )
             
-            cmap = sns.diverging_palette(240, 10, as_cmap=True)
+            cmap = sns.diverging_palette(240, 10, as_cmap=True) # Blue-Red diverging palette
             sns.heatmap(
                 heatmap_data,
                 cmap=cmap,
@@ -371,21 +375,21 @@ def plot_experiment_comparison(efficiency_data, exp1_name, exp2_name,
                 fmt=".1f",
                 linewidths=.5,
                 ax=ax3,
-                cbar_kws={'label': 'Diferença Percentual (%)'}
+                cbar_kws={'label': 'Percentage Difference (%)'}
             )
-            ax3.set_title('Heatmap de Diferenças por Tenant e Métrica')
+            ax3.set_title('Heatmap of Differences by Tenant and Metric')
         except Exception as e:
-            ax3.text(0.5, 0.5, f'Erro ao gerar heatmap:\n{e}', 
+            ax3.text(0.5, 0.5, f'Error generating heatmap:\n{e}', 
                 horizontalalignment='center', verticalalignment='center')
-            ax3.set_title('Heatmap de Diferenças (Erro)')
+            ax3.set_title('Heatmap of Differences (Error)')
 
     else:
-        ax3.text(0.5, 0.5, 'Dados insuficientes para heatmap\n(necessário múltiplos tenants com dados válidos)', 
+        ax3.text(0.5, 0.5, 'Insufficient data for heatmap\n(requires multiple tenants with valid data)', 
                 horizontalalignment='center', verticalalignment='center')
-        ax3.set_title('Heatmap de Diferenças (indisponível)')
+        ax3.set_title('Heatmap of Differences (unavailable)')
     
     ax4 = axes[1, 1]
-    if not plot_data.empty:
+    if not plot_data.empty and 'p_value' in plot_data.columns and 'percent_difference' in plot_data.columns:
         sns.scatterplot(
             data=plot_data,
             x='p_value',
@@ -398,48 +402,52 @@ def plot_experiment_comparison(efficiency_data, exp1_name, exp2_name,
         )
         
         ax4.axhline(y=0, color='r', linestyle='-', alpha=0.3)
-        ax4.axvline(x=0.05, color='r', linestyle='--', alpha=0.3)
-        ax4.set_title('Significância Estatística vs Diferença')
-        ax4.set_xlabel('p-value (menor = mais significativo)')
-        ax4.set_ylabel('Diferença Percentual (%)')
-        ax4.set_xscale('log')
+        ax4.axvline(x=0.05, color='r', linestyle='--', alpha=0.3) # Significance line
+        ax4.set_title('Statistical Significance vs. Difference')
+        ax4.set_xlabel('p-value (lower = more significant)')
+        ax4.set_ylabel('Percentage Difference (%)')
+        ax4.set_xscale('log') # p-values are often skewed, log scale helps
         
-        min_p_val_for_text = max(plot_data['p_value'].min() * 0.9, 1e-10)
-        ax4.text(min_p_val_for_text if min_p_val_for_text < 0.05 else 0.001, ax4.get_ylim()[1]*0.8, 'Estatisticamente\nSignificativo', fontsize=9, ha='left')
-        ax4.text(0.06, ax4.get_ylim()[1]*0.8, 'Não\nSignificativo', fontsize=9, ha='left')
-        ax4.legend(bbox_to_anchor=(1.05, 1), loc='upper left', title='Métrica')
+        # Add text for significance regions if data exists
+        min_p_val_for_text = max(plot_data['p_value'].min() * 0.9, 1e-10) if not plot_data['p_value'].empty else 0.001
+        y_pos_text = ax4.get_ylim()[1]*0.8 if ax4.get_ylim()[1] > ax4.get_ylim()[0] else 0.8
+
+        ax4.text(min_p_val_for_text if min_p_val_for_text < 0.05 else 0.001, y_pos_text, 'Statistically\nSignificant', fontsize=9, ha='left')
+        ax4.text(0.06, y_pos_text, 'Not\nSignificant', fontsize=9, ha='left')
+        ax4.legend(bbox_to_anchor=(1.05, 1), loc='upper left', title='Metric')
     else:
-        ax4.text(0.5, 0.5, "Dados insuficientes para gráfico de dispersão", ha='center', va='center')
-        ax4.set_title('Significância Estatística vs Diferença (indisponível)')
+        ax4.text(0.5, 0.5, "Insufficient data for scatter plot", ha='center', va='center')
+        ax4.set_title('Statistical Significance vs. Difference (unavailable)')
 
     plt.tight_layout()
-    fig.subplots_adjust(top=0.92)
+    fig.subplots_adjust(top=0.92) # Adjust for suptitle
     
     return fig
 
 def compare_technologies(exp1_data, exp2_data, metrics_list=None, tenants_list=None,
                         rounds_list: Optional[Union[str, List[str]]] = None, 
-                        exp1_name="Tecnologia 1", exp2_name="Tecnologia 2",
+                        exp1_name="Technology 1", exp2_name="Technology 2",
                         output_dir=None, generate_plots=True):
     """
-    Função principal para comparação entre experimentos com diferentes tecnologias.
+    Main function for comparison between experiments with different technologies.
     
     Args:
-        exp1_data (dict): Dados do primeiro experimento (dicionário de DataFrames por métrica)
-        exp2_data (dict): Dados do segundo experimento (dicionário de DataFrames por métrica)
-        metrics_list (list): Lista de métricas para análise
-        tenants_list (list): Lista de tenants para filtrar
-        rounds_list (Optional[Union[str, List[str]]]): Lista de rounds para filtrar ou round específico.
-        exp1_name (str): Nome da primeira tecnologia
-        exp2_name (str): Nome da segunda tecnologia
-        output_dir (str): Diretório para salvar resultados
-        generate_plots (bool): Se True, gera visualizações
+        exp1_data (dict): Data from the first experiment (dictionary of DataFrames by metric).
+        exp2_data (dict): Data from the second experiment (dictionary of DataFrames by metric).
+        metrics_list (list): List of metrics for analysis.
+        tenants_list (list): List of tenants to filter.
+        rounds_list (Optional[Union[str, List[str]]]): List of rounds to filter or a specific round.
+        exp1_name (str): Name of the first technology.
+        exp2_name (str): Name of the second technology.
+        output_dir (str): Directory to save results.
+        generate_plots (bool): If True, generates visualizations.
         
     Returns:
-        dict: Resultados da comparação
+        dict: Comparison results.
     """
     results = {}
     
+    # Normalize data first
     exp1_norm, exp2_norm, norm_stats = normalize_metrics_between_experiments(
         exp1_data, exp2_data, metrics_list
     )
@@ -450,19 +458,25 @@ def compare_technologies(exp1_data, exp2_data, metrics_list=None, tenants_list=N
     }
     results['normalization_stats'] = norm_stats
     
+    # Define phase names based on typical experiment structure
+    # This could be made more dynamic if phases vary greatly
     phase_names = ['1 - Baseline', '2 - Attack', '3 - Recovery'] 
     
+    # Calculate efficiency across all specified rounds and phases (overall comparison)
     all_metrics_eff = calculate_relative_efficiency(
         exp1_data, exp2_data, metrics_list, tenants_list,
-        phase_filter=None, rounds_filter=rounds_list, 
+        phase_filter=None, # Analyze across all phases together
+        rounds_filter=rounds_list, 
         exp1_name=exp1_name, exp2_name=exp2_name
     )
     
+    # Calculate efficiency for each phase separately, across specified rounds
     phase_metrics_eff = {}
     for phase in phase_names:
         phase_metrics_eff[phase] = calculate_relative_efficiency(
             exp1_data, exp2_data, metrics_list, tenants_list,
-            phase_filter=phase, rounds_filter=rounds_list, 
+            phase_filter=phase, 
+            rounds_filter=rounds_list, 
             exp1_name=exp1_name, exp2_name=exp2_name
         )
     
@@ -472,81 +486,51 @@ def compare_technologies(exp1_data, exp2_data, metrics_list=None, tenants_list=N
     }
     
     if generate_plots and output_dir:
-        plots_dir = os.path.join(output_dir, 'technology_comparison')
+        plots_dir = os.path.join(output_dir, 'technology_comparison_plots') # Changed folder name for clarity
         os.makedirs(plots_dir, exist_ok=True)
         
+        # Create a suffix for filenames based on rounds to avoid overwriting
         rounds_suffix = ""
         if rounds_list:
             if isinstance(rounds_list, list):
-                rounds_suffix = "_rounds_" + "_".join(sorted(list(set(rounds_list))))
+                # Ensure unique, sorted round names for consistent suffix
+                rounds_suffix = "_rounds_" + "_".join(sorted(list(set(str(r) for r in rounds_list))))
             else:
-                rounds_suffix = "_round_" + rounds_list
+                rounds_suffix = "_round_" + str(rounds_list)
         
+        # Plot for overall comparison (all phases)
         fig_all = plot_experiment_comparison(
             all_metrics_eff, exp1_name, exp2_name,
-            figsize=(14, 10)
+            figsize=(16, 12) # Slightly larger figure for better readability
         )
         
         if fig_all:
             plot_filename = f'comparison_{exp1_name}_vs_{exp2_name}_all_phases{rounds_suffix}.png'
             try:
                 fig_all.savefig(os.path.join(plots_dir, plot_filename))
-                print(f"Plot geral salvo em: {os.path.join(plots_dir, plot_filename)}")
+                print(f"Overall comparison plot saved to: {os.path.join(plots_dir, plot_filename)}")
             except Exception as e:
-                print(f"Erro ao salvar plot geral: {e}")
-            plt.close(fig_all)
+                print(f"Error saving overall comparison plot: {e}")
+            plt.close(fig_all) # Close figure to free memory
         
+        # Plots for each phase
         for phase, phase_data in phase_metrics_eff.items():
-            phase_label = phase.replace(' ', '_').lower()
-            
+            if phase_data.empty:
+                print(f"No data to plot for phase: {phase}{rounds_suffix}")
+                continue
+
+            phase_label = phase.replace(' ', '_').replace('-','').lower() # Sanitize phase name for filename
             fig_phase = plot_experiment_comparison(
                 phase_data, exp1_name, exp2_name,
-                figsize=(14, 10)
+                figsize=(16, 12)
             )
-            
             if fig_phase:
                 plot_filename = f'comparison_{exp1_name}_vs_{exp2_name}_{phase_label}{rounds_suffix}.png'
                 try:
                     fig_phase.savefig(os.path.join(plots_dir, plot_filename))
-                    print(f"Plot da fase {phase} salvo em: {os.path.join(plots_dir, plot_filename)}")
+                    print(f"Plot for phase '{phase}' saved to: {os.path.join(plots_dir, plot_filename)}")
                 except Exception as e:
-                    print(f"Erro ao salvar plot da fase {phase}: {e}")
+                    print(f"Error saving plot for phase '{phase}': {e}")
                 plt.close(fig_phase)
-        
-        active_metrics_list = metrics_list if metrics_list else list(exp1_data.keys())
-
-        for metric in active_metrics_list:
-            metric_specific_eff_data = all_metrics_eff[all_metrics_eff['metric'] == metric]
-            if metric_specific_eff_data.empty:
-                print(f"Sem dados de eficiência para a métrica {metric} para o plot individual.")
-                continue
-
-            fig_metric = plot_experiment_comparison(
-                metric_specific_eff_data,
-                exp1_name, exp2_name,
-                metric_filter=metric,
-                figsize=(14, 10)
-            )
-            
-            if fig_metric:
-                plot_filename = f'comparison_{exp1_name}_vs_{exp2_name}_{metric}{rounds_suffix}.png'
-                try:
-                    fig_metric.savefig(os.path.join(plots_dir, plot_filename))
-                    print(f"Plot da métrica {metric} salvo em: {os.path.join(plots_dir, plot_filename)}")
-                except Exception as e:
-                    print(f"Erro ao salvar plot da métrica {metric}: {e}")
-                plt.close(fig_metric)
-        
-        results['plot_paths'] = {
-            'all_phases_and_specified_rounds': os.path.join(plots_dir, f'comparison_{exp1_name}_vs_{exp2_name}_all_phases{rounds_suffix}.png'),
-            'by_phase_with_specified_rounds': {
-                phase: os.path.join(plots_dir, f'comparison_{exp1_name}_vs_{exp2_name}_{phase.replace(" ", "_").lower()}{rounds_suffix}.png') 
-                for phase in phase_names if not phase_metrics_eff.get(phase, pd.DataFrame()).empty
-            },
-            'by_metric_with_specified_rounds': {
-                metric: os.path.join(plots_dir, f'comparison_{exp1_name}_vs_{exp2_name}_{metric}{rounds_suffix}.png')
-                for metric in active_metrics_list if not all_metrics_eff[all_metrics_eff['metric'] == metric].empty
-            }
-        }
-    
+                
     return results

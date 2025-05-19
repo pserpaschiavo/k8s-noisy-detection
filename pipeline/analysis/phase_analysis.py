@@ -1,8 +1,8 @@
 """
-Módulo para análise entre diferentes fases do experimento de noisy neighbors.
+Module for analysis between different phases of the noisy neighbor experiment.
 
-Este módulo fornece funções para analisar e comparar métricas entre as
-diferentes fases (Baseline, Attack, Recovery) do experimento.
+This module provides functions to analyze and compare metrics between the
+different phases (Baseline, Attack, Recovery) of the experiment.
 """
 
 import pandas as pd
@@ -12,46 +12,46 @@ from scipy import stats
 
 def compare_phases_ttest(df, metric_column='value', alpha=0.05):
     """
-    Compara métricas entre diferentes fases usando teste t de Student.
+    Compares metrics between different phases using Student's t-test.
     
     Args:
-        df (DataFrame): DataFrame com dados de métricas
-        metric_column (str): Coluna com os valores da métrica
-        alpha (float): Nível de significância para o teste estatístico
+        df (DataFrame): DataFrame with metric data.
+        metric_column (str): Column with metric values.
+        alpha (float): Significance level for the statistical test.
         
     Returns:
-        DataFrame: DataFrame com resultados dos testes estatísticos
+        DataFrame: DataFrame with results of the statistical tests.
     """
-    # Lista para armazenar os resultados
+    # List to store results
     results = []
     
-    # Para cada tenant e round
+    # For each tenant and round
     for (tenant, round_name), group in df.groupby(['tenant', 'round']):
         phases = sorted(group['phase'].unique())
         
-        # Comparar cada par de fases
+        # Compare each pair of phases
         for i, phase1 in enumerate(phases):
             for phase2 in phases[i+1:]:
-                # Dados das duas fases
+                # Data from the two phases
                 data1 = group[group['phase'] == phase1][metric_column].dropna()
                 data2 = group[group['phase'] == phase2][metric_column].dropna()
                 
                 if len(data1) < 2 or len(data2) < 2:
-                    continue  # Pular se não houver dados suficientes
+                    continue  # Skip if not enough data
                 
-                # Calcular estatísticas
+                # Calculate statistics
                 mean1, mean2 = data1.mean(), data2.mean()
                 std1, std2 = data1.std(), data2.std()
                 
-                # Teste t para duas amostras independentes
+                # T-test for two independent samples
                 t_stat, p_value = stats.ttest_ind(data1, data2, equal_var=False)
                 
-                # Tamanho do efeito (Cohen's d)
+                # Effect size (Cohen's d)
                 pooled_std = np.sqrt(((len(data1) - 1) * std1**2 + (len(data2) - 1) * std2**2) / 
                                      (len(data1) + len(data2) - 2))
                 cohen_d = abs(mean1 - mean2) / pooled_std if pooled_std != 0 else np.nan
                 
-                # Adicionar resultados
+                # Add results
                 results.append({
                     'tenant': tenant,
                     'round': round_name,
@@ -80,51 +80,63 @@ def analyze_recovery_effectiveness(df, metric_column='value',
                                   attack_phase='2 - Attack', 
                                   recovery_phase='3 - Recovery'):
     """
-    Analisa a efetividade da recuperação após a fase de ataque.
+    Analyzes the effectiveness of recovery after the attack phase.
     
     Args:
-        df (DataFrame): DataFrame com dados de métricas
-        metric_column (str): Coluna com os valores da métrica
-        baseline_phase (str): Nome da fase de baseline
-        attack_phase (str): Nome da fase de ataque
-        recovery_phase (str): Nome da fase de recuperação
+        df (DataFrame): DataFrame with metric data.
+        metric_column (str): Column with metric values.
+        baseline_phase (str): Name of the baseline phase.
+        attack_phase (str): Name of the attack phase.
+        recovery_phase (str): Name of the recovery phase.
         
     Returns:
-        DataFrame: DataFrame com análise da recuperação
+        DataFrame: DataFrame with recovery analysis.
     """
-    # Lista para armazenar resultados
+    # List to store results
     results = []
     
-    # Para cada tenant e round
+    # For each tenant and round
     for (tenant, round_name), group in df.groupby(['tenant', 'round']):
-        # Obter dados para cada fase
+        # Get data for each phase
         baseline_data = group[group['phase'] == baseline_phase][metric_column]
         attack_data = group[group['phase'] == attack_phase][metric_column]
         recovery_data = group[group['phase'] == recovery_phase][metric_column]
         
         if len(baseline_data) == 0 or len(attack_data) == 0 or len(recovery_data) == 0:
-            continue  # Pular se alguma fase não tiver dados
+            continue  # Skip if any phase has no data
         
-        # Calcular estatísticas
+        # Calculate statistics
         baseline_mean = baseline_data.mean()
         attack_mean = attack_data.mean()
         recovery_mean = recovery_data.mean()
         
-        # Calcular índices de degradação e recuperação
+        # Calculate degradation and recovery indices
         degradation = attack_mean - baseline_mean
         recovery_delta = recovery_mean - attack_mean
         
-        # Calcular percentual de recuperação
+        # Calculate recovery percentage
         if degradation != 0:
-            recovery_percent = (recovery_delta / abs(degradation)) * 100
+            # Recovery percentage relative to the degradation experienced
+            # If degradation was positive (metric increased), recovery_delta should be negative to recover.
+            # If degradation was negative (metric decreased), recovery_delta should be positive.
+            # We want to see how much of the absolute degradation was reversed.
+            recovery_percent = (-recovery_delta / degradation) * 100 
         else:
-            recovery_percent = np.nan
+            # If there was no degradation, recovery is not applicable in this context,
+            # or could be considered 100% if recovery_mean is close to baseline_mean.
+            # For simplicity, assign NaN or handle as a special case based on requirements.
+            if recovery_mean == baseline_mean:
+                recovery_percent = 100.0
+            elif attack_mean == baseline_mean and recovery_mean != baseline_mean:
+                 recovery_percent = 0.0 # No degradation, but recovery changed from baseline
+            else:
+                recovery_percent = np.nan
         
-        # Distância do valor de recuperação em relação ao baseline
+        # Difference of recovery value relative to baseline
         baseline_diff = recovery_mean - baseline_mean
         baseline_diff_percent = (baseline_diff / baseline_mean) * 100 if baseline_mean != 0 else np.nan
         
-        # Adicionar resultados
+        # Add results
         results.append({
             'tenant': tenant,
             'round': round_name,

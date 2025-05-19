@@ -1,9 +1,9 @@
 """
-Módulo para detecção automática do tenant ruidoso (noisy neighbor).
+Module for automatic detection of the noisy tenant (noisy neighbor).
 
-Este módulo fornece funções para identificar automaticamente qual tenant
-é provavelmente o gerador de interferência nos outros tenants, sem necessidade
-de especificar o tenant ruidoso antecipadamente.
+This module provides functions to automatically identify which tenant
+is likely the generator of interference on other tenants, without needing
+to specify the noisy tenant beforehand.
 """
 
 import pandas as pd
@@ -13,28 +13,28 @@ from sklearn.preprocessing import MinMaxScaler
 
 def detect_noisy_tenant_from_correlation(correlation_matrix, tenant_metrics):
     """
-    Detecta o tenant mais provável de ser ruidoso com base na matriz de correlação.
-    Um tenant ruidoso geralmente tem correlações negativas com os outros tenants
-    para métricas como CPU e memória.
+    Detects the most likely noisy tenant based on the correlation matrix.
+    A noisy tenant usually has negative correlations with other tenants
+    for metrics like CPU and memory.
     
     Args:
-        correlation_matrix (pd.DataFrame): Matriz de correlação entre métricas de tenants
-        tenant_metrics (List[str]): Lista de strings no formato "metrica_tenant"
+        correlation_matrix (pd.DataFrame): Correlation matrix between tenant metrics.
+        tenant_metrics (List[str]): List of strings in the format "metric_tenant".
         
     Returns:
-        Dict[str, float]: Dicionário com scores de cada tenant, maior = mais provável de ser ruidoso
+        Dict[str, float]: Dictionary with scores for each tenant, higher = more likely to be noisy.
     """
     tenant_scores = {}
     
-    # Retornar um dicionário vazio se a matriz de correlação for None ou estiver vazia
+    # Return an empty dictionary if the correlation matrix is None or empty
     if correlation_matrix is None or correlation_matrix.empty:
         return tenant_scores
         
-    # Verificar se tenant_metrics é uma lista válida
+    # Check if tenant_metrics is a valid list
     if tenant_metrics is None or len(tenant_metrics) == 0:
         return tenant_scores
     
-    # Mapear os tenants diretamente a partir das colunas da matriz de correlação
+    # Map tenants directly from the correlation matrix columns
     tenants = []
     
     for col in correlation_matrix.columns:
@@ -45,7 +45,7 @@ def detect_noisy_tenant_from_correlation(correlation_matrix, tenant_metrics):
                 if tenant_name not in tenants:
                     tenants.append(tenant_name)
     
-    # Se não encontramos tenants no formato "tenant-X", usamos as próprias colunas
+    # If we didn't find tenants in the "tenant-X" format, use the columns themselves
     if not tenants:
         tenants = list(correlation_matrix.columns)
     
@@ -53,17 +53,17 @@ def detect_noisy_tenant_from_correlation(correlation_matrix, tenant_metrics):
         tenant_score = 0
         count = 0
         
-        # Define as métricas que queremos analisar
+        # Define the metrics we want to analyze
         metrics_to_analyze = ['cpu_usage', 'memory_usage', 'network_total_bandwidth', 'disk_throughput_total']
 
-        # Para cada métrica que estamos analisando
+        # For each metric we are analyzing
         for metric in metrics_to_analyze:
             tenant_metric = f"{metric}_{tenant}"
             
             if tenant_metric not in correlation_matrix.columns:
                 continue
                 
-            # Verificar correlações com outros tenants para esta métrica
+            # Check correlations with other tenants for this metric
             for other_tenant in tenants:
                 if other_tenant == tenant:
                     continue
@@ -72,17 +72,17 @@ def detect_noisy_tenant_from_correlation(correlation_matrix, tenant_metrics):
                 if other_metric not in correlation_matrix.columns:
                     continue
                 
-                # Correlação negativa em CPU/memória significa que quando um aumenta, o outro diminui
-                # Isso é indicativo de um tenant ruidoso afetando outros
+                # Negative correlation in CPU/memory means that when one increases, the other decreases
+                # This is indicative of a noisy tenant affecting others
                 correlation = correlation_matrix.loc[tenant_metric, other_metric]
                 
-                # Um valor negativo indica possível relação de noisy neighbor
+                # A negative value indicates a possible noisy neighbor relationship
                 if correlation < 0:
-                    # Quanto mais negativa a correlação, maior o score
+                    # The more negative the correlation, the higher the score
                     tenant_score += abs(correlation)
                 count += 1
         
-        # Normalizar pelo número de comparações
+        # Normalize by the number of comparisons
         if count > 0:
             tenant_scores[tenant] = tenant_score / count
         else:
@@ -93,33 +93,33 @@ def detect_noisy_tenant_from_correlation(correlation_matrix, tenant_metrics):
 
 def detect_noisy_tenant_from_causality(causality_results):
     """
-    Detecta o tenant mais provável de ser ruidoso com base nos testes de causalidade de Granger.
-    Um tenant ruidoso geralmente causa mudanças nos outros tenants mais do que é afetado por eles.
+    Detects the most likely noisy tenant based on Granger causality tests.
+    A noisy tenant generally causes changes in other tenants more than it is affected by them.
     
     Args:
-        causality_results (List[Dict]): Resultados dos testes de causalidade entre tenants
+        causality_results (List[Dict]): Results of causality tests between tenants.
         
     Returns:
-        Dict[str, float]: Dicionário com scores de cada tenant, maior = mais provável de ser ruidoso
+        Dict[str, float]: Dictionary with scores for each tenant, higher = more likely to be noisy.
     """
-    # Se não temos resultados de causalidade, retornar um dicionário vazio
+    # If we have no causality results, return an empty dictionary
     if causality_results is None or not causality_results:
         return {}
         
-    # Verificar o tipo de dados, se for string, retornar um dicionário vazio
+    # Check the data type, if it's a string, return an empty dictionary
     if isinstance(causality_results, str):
         return {}
         
-    # Contar quantas vezes cada tenant é identificado como causador
-    # e quantas vezes é identificado como afetado
+    # Count how many times each tenant is identified as a causer
+    # and how many times it is identified as affected
     tenant_causality_scores = {}
     
     for result in causality_results:
-        # Verificar se result é um dicionário
+        # Check if result is a dictionary
         if not isinstance(result, dict):
             continue
             
-        # Usar get() para dicionários e acessar diretamente se for um objeto com atributos
+        # Use get() for dictionaries and access directly if it's an object with attributes
         try:
             if hasattr(result, 'get'):
                 source = result.get('source_tenant')
@@ -130,13 +130,13 @@ def detect_noisy_tenant_from_causality(causality_results):
                 target = result.target_tenant if hasattr(result, 'target_tenant') else None
                 p_value = result.min_p_value if hasattr(result, 'min_p_value') else None
         except Exception:
-            # Se houver qualquer problema, pular este resultado
+            # If there's any problem, skip this result
             continue
         
         if not source or not target or p_value is None:
             continue
             
-        # Inicializar scores se necessário
+        # Initialize scores if necessary
         if source not in tenant_causality_scores:
             tenant_causality_scores[source] = {
                 'caused_others': 0,
@@ -151,25 +151,25 @@ def detect_noisy_tenant_from_causality(causality_results):
                 'total_relations': 0
             }
         
-        # Verifica se há uma relação causal significativa (p < 0.05)
+        # Check if there is a significant causal relationship (p < 0.05)
         if p_value < 0.05:
-            # Incrementa o score do tenant causador
+            # Increment the score of the causing tenant
             tenant_causality_scores[source]['caused_others'] += 1
-            # Incrementa o contador do tenant afetado
+            # Increment the counter of the affected tenant
             tenant_causality_scores[target]['affected_by_others'] += 1
         
-        # Incrementa o contador total de relações analisadas
+        # Increment the total counter of analyzed relations
         tenant_causality_scores[source]['total_relations'] += 1
         tenant_causality_scores[target]['total_relations'] += 1
     
-    # Calcular score final para cada tenant
+    # Calculate final score for each tenant
     tenant_scores = {}
     for tenant, scores in tenant_causality_scores.items():
-        # Um tenant ruidoso deve causar mais do que ser afetado
+        # A noisy tenant should cause more than be affected
         if scores['total_relations'] > 0:
-            # Razão entre causar e ser afetado
+            # Ratio between causing and being affected
             causality_ratio = scores['caused_others'] / max(1, scores['affected_by_others'])
-            # Multiplicamos pela quantidade de relações causais identificadas
+            # We multiply by the quantity of identified causal relations
             tenant_scores[tenant] = causality_ratio * scores['caused_others']
         else:
             tenant_scores[tenant] = 0
@@ -179,61 +179,61 @@ def detect_noisy_tenant_from_causality(causality_results):
 
 def detect_noisy_tenant_from_anomalies(anomaly_results, phase_df):
     """
-    Detecta o tenant mais provável de ser ruidoso com base na quantidade e severidade
-    das anomalias detectadas, especialmente durante a fase de ataque.
+    Detects the most likely noisy tenant based on the quantity and severity
+    of detected anomalies, especially during the attack phase.
     
     Args:
-        anomaly_results (pd.DataFrame): DataFrame com resultados da detecção de anomalias
-        phase_df (pd.DataFrame): DataFrame com informações das fases do experimento
+        anomaly_results (pd.DataFrame): DataFrame with anomaly detection results.
+        phase_df (pd.DataFrame): DataFrame with experiment phase information.
         
     Returns:
-        Dict[str, float]: Dicionário com scores de cada tenant, maior = mais provável de ser ruidoso
+        Dict[str, float]: Dictionary with scores for each tenant, higher = more likely to be noisy.
     """
     tenant_scores = {}
     
-    # Verificar se anomaly_results é um DataFrame
+    # Check if anomaly_results is a DataFrame
     if anomaly_results is None or not isinstance(anomaly_results, pd.DataFrame):
         return tenant_scores
         
-    # Verificar se o DataFrame tem as colunas necessárias
+    # Check if the DataFrame has the necessary columns
     required_columns = ['tenant', 'is_anomaly_if', 'is_anomaly_lof']
     if not all(col in anomaly_results.columns for col in required_columns):
         return tenant_scores
         
-    # Verificar se temos a coluna 'phase' ou se precisamos adicionar com base no phase_df
+    # Check if we have the 'phase' column or if we need to add it based on phase_df
     if 'phase' not in anomaly_results.columns:
-        # Se não temos a fase no DataFrame de anomalias, podemos tentar analisar por tenant somente
-        # e verificar quais tenants têm mais anomalias em geral
+        # If we don't have the phase in the anomalies DataFrame, we can try to analyze by tenant only
+        # and check which tenants have more anomalies in general
         
-        # Agrupar por tenant e contar anomalias
+        # Group by tenant and count anomalies
         tenant_anomalies = anomaly_results.groupby('tenant')[['is_anomaly_if', 'is_anomaly_lof']].sum().reset_index()
         
-        # Calcular score baseado na quantidade de anomalias
+        # Calculate score based on the quantity of anomalies
         for _, row in tenant_anomalies.iterrows():
             tenant = row['tenant']
-            # Somar os diferentes tipos de anomalias
+            # Sum the different types of anomalies
             total_anomalies = row['is_anomaly_if'] + row['is_anomaly_lof']
             tenant_scores[tenant] = total_anomalies
             
         return tenant_scores
     
-    # Se temos a fase, filtrar apenas a fase de ataque
+    # If we have the phase, filter only the attack phase
     attack_phase = anomaly_results[anomaly_results['phase'].str.contains('Attack', case=False, na=False)]
     
     if len(attack_phase) == 0:
         return tenant_scores
     
-    # Agrupar por tenant e contar anomalias
+    # Group by tenant and count anomalies
     tenant_anomalies = attack_phase.groupby('tenant')[['is_anomaly_if', 'is_anomaly_lof']].sum().reset_index()
     
-    # Calcular score baseado na quantidade de anomalias
+    # Calculate score based on the quantity of anomalies
     for _, row in tenant_anomalies.iterrows():
         tenant = row['tenant']
-        # Somar os diferentes tipos de anomalias
+        # Sum the different types of anomalies
         total_anomalies = row['is_anomaly_if'] + row['is_anomaly_lof']
         tenant_scores[tenant] = total_anomalies
     
-    # Normalizar scores
+    # Normalize scores
     if tenant_scores:
         max_score = max(tenant_scores.values())
         if max_score > 0:
@@ -244,18 +244,18 @@ def detect_noisy_tenant_from_anomalies(anomaly_results, phase_df):
 
 def detect_noisy_tenant_from_impact(impact_scores):
     """
-    Detecta o tenant mais provável de ser ruidoso com base no impacto causado em outros tenants.
+    Detects the most likely noisy tenant based on the impact caused on other tenants.
     
     Args:
-        impact_scores (Dict): Dicionário com scores de impacto entre tenants
+        impact_scores (Dict): Dictionary with impact scores between tenants.
         
     Returns:
-        Dict[str, float]: Dicionário com scores de cada tenant, maior = mais provável de ser ruidoso
+        Dict[str, float]: Dictionary with scores for each tenant, higher = more likely to be noisy.
     """
     tenant_scores = {}
     
     for tenant, impacts in impact_scores.items():
-        # Calcular o impacto médio causado nos outros tenants
+        # Calculate the average impact caused on other tenants
         impact_values = [v for k, v in impacts.items() if k != tenant]
         if impact_values:
             tenant_scores[tenant] = sum(impact_values) / len(impact_values)
@@ -267,20 +267,20 @@ def detect_noisy_tenant_from_impact(impact_scores):
 
 def combine_detection_results(correlation_scores, causality_scores, anomaly_scores, impact_scores, weights=None):
     """
-    Combina os resultados de diferentes métodos de detecção para obter um score final.
+    Combines the results of different detection methods to obtain a final score.
     
     Args:
-        correlation_scores (Dict[str, float]): Scores baseados em correlação
-        causality_scores (Dict[str, float]): Scores baseados em causalidade
-        anomaly_scores (Dict[str, float]): Scores baseados em anomalias
-        impact_scores (Dict[str, float]): Scores baseados em impacto
-        weights (Dict[str, float]): Pesos para cada método (opcional)
+        correlation_scores (Dict[str, float]): Scores based on correlation.
+        causality_scores (Dict[str, float]): Scores based on causality.
+        anomaly_scores (Dict[str, float]): Scores based on anomalies.
+        impact_scores (Dict[str, float]): Scores based on impact.
+        weights (Dict[str, float]): Weights for each method (optional).
         
     Returns:
-        Dict[str, float]: Scores finais combinados
-        Dict[str, Dict[str, float]]: Scores detalhados por método
+        Dict[str, float]: Final combined scores.
+        Dict[str, Dict[str, float]]: Detailed scores by method.
     """
-    # Definir pesos padrão se não fornecidos
+    # Define default weights if not provided
     if weights is None:
         weights = {
             'correlation': 0.2,
@@ -289,35 +289,35 @@ def combine_detection_results(correlation_scores, causality_scores, anomaly_scor
             'impact': 0.3
         }
     
-    # Mapear todos os nomes de tenants para o formato padrão (ex: "tenant-a", "tenant-b")
-    # isso ajuda a consolidar tenants que podem aparecer com diferentes prefixos em diferentes métodos
+    # Map all tenant names to the standard format (e.g., "tenant-a", "tenant-b")
+    # this helps consolidate tenants that may appear with different prefixes in different methods
     def normalize_tenant_name(tenant_name):
-        # Se o nome já estiver no formato "tenant-X", retorná-lo
+        # If the name is already in "tenant-X" format, return it
         if tenant_name.startswith("tenant-"):
             return tenant_name
             
-        # Se o nome tiver um prefixo e depois "tenant-X", extrair apenas "tenant-X"
+        # If the name has a prefix and then "tenant-X", extract only "tenant-X"
         if "_tenant-" in tenant_name:
             parts = tenant_name.split("_tenant-")
             return f"tenant-{parts[1]}"
             
-        # Se não conseguirmos normalizar, retornar o nome original
+        # If we can't normalize, return the original name
         return tenant_name
     
-    # Normalizar os nomes dos tenants nas pontuações
+    # Normalize tenant names in the scores
     normalized_correlation_scores = {normalize_tenant_name(k): v for k, v in correlation_scores.items()}
     normalized_causality_scores = {normalize_tenant_name(k): v for k, v in causality_scores.items()}
     normalized_anomaly_scores = {normalize_tenant_name(k): v for k, v in anomaly_scores.items()}
     normalized_impact_scores = {normalize_tenant_name(k): v for k, v in impact_scores.items()}
     
-    # Coletar todos os tenants únicos após normalização
+    # Collect all unique tenants after normalization
     all_tenants = set()
     all_tenants.update(normalized_correlation_scores.keys())
     all_tenants.update(normalized_causality_scores.keys())
     all_tenants.update(normalized_anomaly_scores.keys())
     all_tenants.update(normalized_impact_scores.keys())
     
-    # Normalizar scores dentro de cada método
+    # Normalize scores within each method
     methods = {
         'correlation': normalized_correlation_scores,
         'causality': normalized_causality_scores,
@@ -330,16 +330,16 @@ def combine_detection_results(correlation_scores, causality_scores, anomaly_scor
         if not scores:
             continue
         
-        # Encontrar o maior score para normalizar
+        # Find the highest score to normalize
         max_score = max(scores.values()) if scores else 1
         
-        # Normalizar scores para [0, 1]
+        # Normalize scores to [0, 1]
         if max_score > 0:
             normalized_scores[method] = {k: v / max_score for k, v in scores.items()}
         else:
             normalized_scores[method] = scores
     
-    # Combinar scores ponderados
+    # Combine weighted scores
     final_scores = {}
     detailed_scores = {}
     
@@ -371,73 +371,73 @@ def identify_noisy_tenant(
     real_tenants=None
 ):
     """
-    Identifica automaticamente qual tenant é provavelmente o "noisy neighbor"
-    baseado em múltiplos critérios de análise.
+    Automatically identifies which tenant is likely the "noisy neighbor"
+    based on multiple analysis criteria.
     
     Args:
-        metrics_dict (Dict): Dicionário com DataFrames para cada métrica
-        causality_results (List[Dict]): Resultados de análise de causalidade (opcional)
-        anomaly_results (pd.DataFrame): Resultados de detecção de anomalias (opcional)
-        impact_scores (Dict): Scores de impacto entre tenants (opcional)
-        round_name (str): Round a ser analisado
-        weights (Dict[str, float]): Pesos para cada método de detecção
-        real_tenants (List[str]): Lista dos nomes reais dos tenants no ambiente
+        metrics_dict (Dict): Dictionary with DataFrames for each metric.
+        causality_results (List[Dict]): Causality analysis results (optional).
+        anomaly_results (pd.DataFrame): Anomaly detection results (optional).
+        impact_scores (Dict): Impact scores between tenants (optional).
+        round_name (str): Round to be analyzed.
+        weights (Dict[str, float]): Weights for each detection method.
+        real_tenants (List[str]): List of actual tenant names in the environment.
         
     Returns:
-        str: Nome do tenant identificado como provável noisy neighbor
-        Dict: Scores finais para cada tenant
-        Dict: Scores detalhados por método de detecção
+        str: Name of the tenant identified as the likely noisy neighbor.
+        Dict: Final scores for each tenant.
+        Dict: Detailed scores by detection method.
     """
     from pipeline.analysis.tenant_analysis import calculate_correlation_matrix
     
     try:
-        # Calcular matriz de correlação
+        # Calculate correlation matrix
         correlation_matrix = calculate_correlation_matrix(metrics_dict, round_name=round_name)
         
-        # Extrair nomes das métricas/tenant das colunas da matriz
+        # Extract metric/tenant names from matrix columns
         tenant_metrics = list(correlation_matrix.columns)
         
-        # Detectar tenant ruidoso usando diferentes métodos
+        # Detect noisy tenant using different methods
         correlation_scores = detect_noisy_tenant_from_correlation(correlation_matrix, tenant_metrics)
     except Exception as e:
-        print(f"  Erro ao calcular correlação: {e}")
+        print(f"  Error calculating correlation: {e}")
         correlation_scores = {}
     
-    # Inicializar scores para métodos opcionais
+    # Initialize scores for optional methods
     causality_scores = {}
     anomaly_scores = {}
     impact_scores_processed = {}
     
-    # Adicionar resultados de causalidade se disponíveis
+    # Add causality results if available
     try:
         if causality_results:
             causality_scores = detect_noisy_tenant_from_causality(causality_results)
     except Exception as e:
-        print(f"  Erro ao processar dados de causalidade: {e}")
+        print(f"  Error processing causality data: {e}")
         causality_scores = {}
     
-    # Adicionar resultados de anomalias se disponíveis
+    # Add anomaly results if available
     try:
         if anomaly_results is not None:
-            # Precisamos também do DataFrame com as fases
-            # Vamos extrair as informações de fase do primeiro DataFrame de métricas
+            # We also need the DataFrame with phases
+            # Let's extract phase information from the first metrics DataFrame
             first_metric_df = next(iter(metrics_dict.values()))
             phase_df = first_metric_df[['datetime', 'phase']].drop_duplicates() if 'phase' in first_metric_df.columns else None
             
             anomaly_scores = detect_noisy_tenant_from_anomalies(anomaly_results, phase_df)
     except Exception as e:
-        print(f"  Erro ao processar dados de anomalias: {e}")
+        print(f"  Error processing anomaly data: {e}")
         anomaly_scores = {}
     
-    # Adicionar resultados de impacto se disponíveis
+    # Add impact results if available
     try:
         if impact_scores:
             impact_scores_processed = detect_noisy_tenant_from_impact(impact_scores)
     except Exception as e:
-        print(f"  Erro ao processar scores de impacto: {e}")
+        print(f"  Error processing impact scores: {e}")
         impact_scores_processed = {}
     
-    # Combinar todos os resultados
+    # Combine all results
     final_scores, detailed_scores = combine_detection_results(
         correlation_scores, 
         causality_scores, 
@@ -446,31 +446,31 @@ def identify_noisy_tenant(
         weights
     )
     
-    # Identificar o tenant com o maior score final
+    # Identify the tenant with the highest final score
     if final_scores:
-        # Se temos a lista de real_tenants, filtramos os resultados para mostrar apenas tenants reais
+        # If we have the list of real_tenants, filter the results to show only real tenants
         if real_tenants:
             filtered_scores = {k: v for k, v in final_scores.items() if k in real_tenants or any(k.endswith(t) for t in real_tenants)}
             if filtered_scores:
-                # Se ainda temos scores após a filtragem, usamos apenas os tenants reais
+                # If we still have scores after filtering, use only real tenants
                 sorted_tenants = sorted(filtered_scores.items(), key=lambda x: x[1], reverse=True)
                 most_likely_noisy_tenant = sorted_tenants[0][0]
-                # Se o nome contém um prefixo, vamos tentar extrair apenas o tenant real
+                # If the name contains a prefix, let's try to extract only the real tenant
                 if not most_likely_noisy_tenant.startswith('tenant-') and 'tenant-' in most_likely_noisy_tenant:
-                    # Extrair o tenant-X do nome
+                    # Extract tenant-X from the name
                     for real_tenant in real_tenants:
                         if real_tenant in most_likely_noisy_tenant:
                             most_likely_noisy_tenant = real_tenant
                             break
             else:
-                # Se não temos scores para tenants reais, usamos todos os scores
+                # If we don't have scores for real tenants, use all scores
                 sorted_tenants = sorted(final_scores.items(), key=lambda x: x[1], reverse=True)
                 most_likely_noisy_tenant = sorted_tenants[0][0]
         else:
-            # Ordenar do maior para o menor score
+            # Sort from highest to lowest score
             sorted_tenants = sorted(final_scores.items(), key=lambda x: x[1], reverse=True)
             most_likely_noisy_tenant = sorted_tenants[0][0]
-            # Se o tenant identificado tem um formato como "metrica_tenant", tentar extrair apenas o tenant
+            # If the identified tenant has a format like "metric_tenant", try to extract only the tenant
             if '_tenant-' in most_likely_noisy_tenant:
                 most_likely_noisy_tenant = 'tenant-' + most_likely_noisy_tenant.split('_tenant-')[1]
     else:

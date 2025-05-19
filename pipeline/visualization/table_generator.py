@@ -1,8 +1,8 @@
 """
-Módulo para geração de tabelas em formatos LaTeX e CSV para o experimento de noisy neighbors.
+Module for generating tables in LaTeX and CSV formats for the noisy neighbors experiment.
 
-Este módulo fornece funções para criar tabelas bem formatadas com os resultados
-do experimento, adequadas para publicações acadêmicas.
+This module provides functions to create well-formatted tables with the results
+of the experiment, suitable for academic publications.
 """
 
 import pandas as pd
@@ -13,19 +13,19 @@ from pipeline.config import TABLE_EXPORT_CONFIG  # Import TABLE_EXPORT_CONFIG
 
 def format_float_columns(df, float_format='.2f'):
     """
-    Formata colunas de ponto flutuante em um DataFrame.
+    Formats float columns in a DataFrame.
     
     Args:
-        df (DataFrame): DataFrame a ser formatado
-        float_format (str): Formato a ser aplicado (ex: '.2f', '.3f')
+        df (DataFrame): DataFrame to be formatted
+        float_format (str): Format to be applied (e.g., '.2f', '.3f')
         
     Returns:
-        DataFrame: DataFrame com colunas formatadas
+        DataFrame: DataFrame with formatted columns
     """
-    # Fazer uma cópia para não modificar o original
+    # Make a copy to avoid modifying the original
     result = df.copy()
     
-    # Para cada coluna, verificar se é ponto flutuante
+    # For each column, check if it is float
     for col in result.columns:
         if result[col].dtype in [np.float32, np.float64]:
             result[col] = result[col].map(lambda x: f"{x:{float_format}}" if not pd.isna(x) else "")
@@ -35,24 +35,24 @@ def format_float_columns(df, float_format='.2f'):
 
 def convert_df_to_markdown(df, float_format=None, index=None):
     """
-    Converte um DataFrame para uma tabela em formato Markdown.
+    Converts a DataFrame to a Markdown formatted table.
     
     Args:
-        df (DataFrame): DataFrame a ser convertido
-        float_format (str, optional): Formato para valores de ponto flutuante. Usa config se None.
-        index (bool, optional): Se deve incluir o índice na tabela. Usa config se None.
+        df (DataFrame): DataFrame to be converted
+        float_format (str, optional): Format for float values. Uses config if None.
+        index (bool, optional): Whether to include the index in the table. Uses config if None.
         
     Returns:
-        str: String contendo a tabela em formato Markdown
+        str: String containing the Markdown formatted table
     """
-    # Usar valores do TABLE_EXPORT_CONFIG se não fornecidos
+    # Use values from TABLE_EXPORT_CONFIG if not provided
     final_float_format = float_format if float_format is not None else TABLE_EXPORT_CONFIG.get('float_format', '.2f')
     final_index = index if index is not None else TABLE_EXPORT_CONFIG.get('include_index', False)
 
-    # Formatar float columns antes de converter
+    # Format float columns before converting
     formatted_df = format_float_columns(df, final_float_format)
     
-    # Converter para Markdown
+    # Convert to Markdown
     markdown_table = formatted_df.to_markdown(index=final_index)
     
     return markdown_table
@@ -61,42 +61,42 @@ def convert_df_to_markdown(df, float_format=None, index=None):
 def export_to_latex(df, caption, label, filename, float_format=None, index=None, 
                    column_format=None, escape=True, longtable=None):
     """
-    Exporta um DataFrame para uma tabela LaTeX formatada.
+    Exports a DataFrame to a formatted LaTeX table.
     
     Args:
-        df (DataFrame): DataFrame a ser exportado
-        caption (str): Legenda da tabela
-        label (str): Identificador para referência cruzada
-        filename (str): Nome do arquivo de saída
-        float_format (str, optional): Formato para valores de ponto flutuante. Usa config se None.
-        index (bool, optional): Se deve incluir o índice na tabela. Usa config se None.
-        column_format (str): Formato de coluna personalizado para LaTeX
-        escape (bool): Se deve escapar caracteres especiais
-        longtable (bool, optional): Se deve usar o ambiente longtable. Usa config se None.
+        df (DataFrame): DataFrame to be exported
+        caption (str): Table caption
+        label (str): Identifier for cross-referencing
+        filename (str): Output filename
+        float_format (str, optional): Format for float values. Uses config if None.
+        index (bool, optional): Whether to include the index in the table. Uses config if None.
+        column_format (str): Custom column format for LaTeX
+        escape (bool): Whether to escape special characters
+        longtable (bool, optional): Whether to use the longtable environment. Uses config if None.
     """
-    # Garantir que o diretório existe
+    # Ensure the directory exists
     os.makedirs(os.path.dirname(os.path.abspath(filename)), exist_ok=True)
 
-    # Usar valores do TABLE_EXPORT_CONFIG se não fornecidos
+    # Use values from TABLE_EXPORT_CONFIG if not provided
     final_float_format_str = float_format if float_format is not None else TABLE_EXPORT_CONFIG.get('float_format', '.2f')
     final_index = index if index is not None else TABLE_EXPORT_CONFIG.get('include_index', False)
     final_longtable = longtable if longtable is not None else TABLE_EXPORT_CONFIG.get('longtable', False)
 
-    # Formatar colunas de ponto flutuante para string ANTES de to_latex
+    # Format float columns to string BEFORE to_latex
     formatted_df = format_float_columns(df, final_float_format_str)
     
-    # Exportar para LaTeX
+    # Export to LaTeX
     latex_table = formatted_df.to_latex(
         index=final_index,
         caption=caption,
         label=label,
-        float_format=None,  # Floats já são strings formatadas
+        float_format=None,  # Floats are already formatted strings
         column_format=column_format,
         escape=escape,
         longtable=final_longtable
     )
     
-    # Adicionar pacotes e formatação adicional
+    # Add packages and additional formatting
     latex_preamble = """\\documentclass{article}
 \\usepackage{booktabs}
 \\usepackage{siunitx}
@@ -114,73 +114,73 @@ def export_to_latex(df, caption, label, filename, float_format=None, index=None,
         f.write(latex_table)
         f.write(latex_end)
     
-    print(f"Tabela exportada como LaTeX para {filename}")
+    print(f"Table exported as LaTeX to {filename}")
 
 
 def export_to_csv(df, filename, float_format=None):
     """
-    Exporta um DataFrame para um arquivo CSV formatado.
+    Exports a DataFrame to a formatted CSV file.
     
     Args:
-        df (DataFrame): DataFrame a ser exportado
-        filename (str): Nome do arquivo de saída
-        float_format (str, optional): Formato para valores de ponto flutuante. Usa config se None.
+        df (DataFrame): DataFrame to be exported
+        filename (str): Output filename
+        float_format (str, optional): Format for float values. Uses config if None.
     """
-    # Garantir que o diretório existe
+    # Ensure the directory exists
     os.makedirs(os.path.dirname(os.path.abspath(filename)), exist_ok=True)
     
-    # Usar valor do TABLE_EXPORT_CONFIG se não fornecido
+    # Use value from TABLE_EXPORT_CONFIG if not provided
     final_float_format = float_format if float_format is not None else TABLE_EXPORT_CONFIG.get('float_format', '.2f')
 
-    # Formatar float columns antes de exportar
+    # Format float columns before exporting
     formatted_df = format_float_columns(df, final_float_format)
     
-    # Exportar para CSV
+    # Export to CSV
     formatted_df.to_csv(filename, index=False)
     
-    print(f"Tabela exportada como CSV para {filename}")
+    print(f"Table exported as CSV to {filename}")
 
 
 def create_phase_comparison_table(df, metric_name, phases=None, tenants=None, 
                                  value_column='mean', std_column='std'):
     """
-    Cria uma tabela formatada comparando métricas entre fases para cada tenant.
+    Creates a formatted table comparing metrics between phases for each tenant.
     
     Args:
-        df (DataFrame): DataFrame com dados agregados
-        metric_name (str): Nome da métrica para o título da tabela
-        phases (list): Lista de fases a incluir (None = todas)
-        tenants (list): Lista de tenants a incluir (None = todos)
-        value_column (str): Nome da coluna com valores médios
-        std_column (str): Nome da coluna com desvios padrão
+        df (DataFrame): DataFrame with aggregated data
+        metric_name (str): Name of the metric for the table title
+        phases (list): List of phases to include (None = all)
+        tenants (list): List of tenants to include (None = all)
+        value_column (str): Name of the column with mean values
+        std_column (str): Name of the column with standard deviations
         
     Returns:
-        DataFrame: DataFrame formatado para exportação
+        DataFrame: Formatted DataFrame for export
     """
-    # Filtrar dados se necessário
+    # Filter data if necessary
     data = df.copy()
     if phases:
         data = data[data['phase'].isin(phases)]
     if tenants:
         data = data[data['tenant'].isin(tenants)]
     
-    # Criar uma tabela formatada
+    # Create a formatted table
     formatted_table = pd.DataFrame()
     
-    # Para cada tenant, adicionar uma linha
+    # For each tenant, add a row
     for tenant, tenant_data in data.groupby('tenant'):
         row = {'Tenant': tenant}
         
-        # Para cada fase, adicionar média ± desvio padrão
+        # For each phase, add mean ± standard deviation
         for phase, phase_data in tenant_data.groupby('phase'):
             if len(phase_data) > 0:
                 mean_val = phase_data[value_column].iloc[0]
                 std_val = phase_data[std_column].iloc[0] if std_column in phase_data.columns else 0
                 
-                # Formatar como "média ± desvio"
+                # Format as "mean ± std_dev"
                 row[phase] = f"{mean_val:.2f} ± {std_val:.2f}"
         
-        # Adicionar linha ao DataFrame
+        # Add row to DataFrame
         formatted_table = pd.concat([formatted_table, pd.DataFrame([row])], ignore_index=True)
     
     return formatted_table
@@ -189,29 +189,29 @@ def create_phase_comparison_table(df, metric_name, phases=None, tenants=None,
 def create_impact_summary_table(impact_df, metric_name, round_column='round', 
                               tenant_column='tenant', impact_column='impact_percent'):
     """
-    Cria uma tabela resumida do impacto percentual em cada tenant durante a fase de ataque.
+    Creates a summary table of the percentage impact on each tenant during the attack phase.
     
     Args:
-        impact_df (DataFrame): DataFrame com impacto calculado por tenant
-        metric_name (str): Nome da métrica para o título da tabela
-        round_column (str): Nome da coluna com os nomes dos rounds
-        tenant_column (str): Nome da coluna com os nomes dos tenants
-        impact_column (str): Nome da coluna com os valores percentuais de impacto
+        impact_df (DataFrame): DataFrame with calculated impact per tenant
+        metric_name (str): Name of the metric for the table title
+        round_column (str): Name of the column with round names
+        tenant_column (str): Name of the column with tenant names
+        impact_column (str): Name of the column with percentage impact values
         
     Returns:
-        DataFrame: DataFrame formatado para exportação
+        DataFrame: Formatted DataFrame for export
     """
-    # Criar tabela pivotada com rounds nas colunas e tenants nas linhas
+    # Create a pivot table with rounds in columns and tenants in rows
     pivot_table = impact_df.pivot_table(
         index=tenant_column,
         columns=round_column,
         values=impact_column
     )
     
-    # Adicionar média de impacto entre rounds
-    pivot_table['Média'] = pivot_table.mean(axis=1)
+    # Add mean impact across rounds
+    pivot_table['Mean'] = pivot_table.mean(axis=1) # Changed 'Média' to 'Mean'
     
-    # Formatar a tabela para exportação
+    # Format the table for export
     formatted_table = pivot_table.copy()
     
     for col in formatted_table.columns:

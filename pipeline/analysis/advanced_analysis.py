@@ -1,122 +1,200 @@
 """
-Módulo para análises avançadas, incluindo covariância, causalidade e entropia.
+Module for advanced analyses, including covariance, causality, and entropy.
 
-Este módulo implementa métodos avançados para análise de dados do experimento de 
-noisy neighbors, focando em relações complexas entre tenants e fases.
+This module implements advanced methods for analyzing data from the noisy neighbors
+experiment, focusing on complex relationships between tenants and phases.
 """
 
 import numpy as np
 import pandas as pd
 from scipy import stats
-from statsmodels.tsa.stattools import grangercausalitytests
+# from statsmodels.tsa.stattools import grangercausalitytests # Not currently used, consider removing if not planned
 from sklearn.feature_selection import mutual_info_regression
 from sklearn.preprocessing import StandardScaler
 from pipeline.config import METRICS_CONFIG, IMPACT_SCORE_WEIGHTS, PHASE_DISPLAY_NAMES
 
 
-def calculate_covariance_matrix(metrics_dict, tenants=None, phase=None, round_name='round-1'):
+def calculate_covariance_matrix(metrics_dict, tenants=None, phase=None, round_name='round-1', time_col='datetime', value_col='value', tenant_col='tenant', phase_col='phase', round_col='round'):
     """
-    Calcula uma matriz de covariância entre métricas de diferentes tenants.
+    Calculates a covariance matrix between metrics of different tenants.
     
     Args:
-        metrics_dict (dict): Dicionário com DataFrames para cada métrica
-        tenants (list): Lista de tenants a incluir (None = todos)
-        phase (str): Fase específica para análise (None = todas)
-        round_name (str): Round a ser analisado
+        metrics_dict (dict): Dictionary with DataFrames for each metric.
+        tenants (list): List of tenants to include (None = all).
+        phase (str): Specific phase for analysis (None = all).
+        round_name (str): Round to be analyzed.
+        time_col (str): Name of the time/datetime column.
+        value_col (str): Name of the metric value column.
+        tenant_col (str): Name of the tenant column.
+        phase_col (str): Name of the phase column.
+        round_col (str): Name of the round column.
         
     Returns:
-        DataFrame: Matriz de covariância entre métricas dos tenants
-        DataFrame: Matriz de correlação (para comparação)
+        DataFrame: Covariance matrix between tenant metrics.
+        DataFrame: Correlation matrix (for comparison).
     """
-    # Preparar dados para covariância
+    # Prepare data for covariance
     covariance_data = {}
     
     for metric_name, metric_df in metrics_dict.items():
-        # Filtrar pelo round especificado
-        round_df = metric_df[metric_df['round'] == round_name]
+        # Filter by the specified round
+        round_df = metric_df[metric_df[round_col] == round_name]
         
-        # Filtrar pela fase se especificada
+        # Filter by phase if specified
         if phase:
-            round_df = round_df[round_df['phase'] == phase]
+            round_df = round_df[round_df[phase_col] == phase]
             
         if tenants:
-            round_df = round_df[round_df['tenant'].isin(tenants)]
+            round_df = round_df[round_df[tenant_col].isin(tenants)]
         
-        # Pivotar para ter uma coluna para cada tenant
+        # Pivot to have one column for each tenant
         pivot = round_df.pivot_table(
-            index='datetime',
-            columns='tenant',
-            values='value'
+            index=time_col,
+            columns=tenant_col,
+            values=value_col
         )
         
-        # Adicionar ao dicionário com prefixo da métrica
-        for tenant in pivot.columns:
-            covariance_data[f"{metric_name}_{tenant}"] = pivot[tenant]
+        # Add to dictionary with metric prefix
+        for tenant_val in pivot.columns:
+            covariance_data[f"{metric_name}_{tenant_val}"] = pivot[tenant_val]
     
-    # Criar DataFrame com todas as séries
+    # Create DataFrame with all series
     cov_df = pd.DataFrame(covariance_data)
     
-    # Calcular covariância
+    # Calculate covariance
     covariance_matrix = cov_df.cov()
     
-    # Calcular correlação para comparação
+    # Calculate correlation for comparison
     correlation_matrix = cov_df.corr()
     
     return covariance_matrix, correlation_matrix
 
 
-def calculate_cross_tenant_entropy(df, tenant1, tenant2, metric_column='value'):
+def calculate_cross_tenant_entropy(df, tenant1, tenant2, value_col='value', time_col='datetime', tenant_col='tenant'):
     """
-    Calcula a entropia cruzada entre dois tenants para uma métrica.
-    Usamos informação mútua como uma medida relacionada à entropia cruzada.
+    Calculates cross-entropy between two tenants for a metric.
+    We use mutual information as a measure related to cross-entropy.
     
     Args:
-        df (DataFrame): DataFrame com dados da métrica
-        tenant1 (str): Primeiro tenant para análise
-        tenant2 (str): Segundo tenant para análise
-        metric_column (str): Coluna com os valores da métrica
+        df (DataFrame): DataFrame with metric data.
+        tenant1 (str): First tenant for analysis.
+        tenant2 (str): Second tenant for analysis.
+        value_col (str): Column with metric values.
+        time_col (str): Name of the time/datetime column.
+        tenant_col (str): Name of the tenant column.
         
     Returns:
-        float: Valor de informação mútua (relacionado à entropia cruzada)
-        dict: Informações adicionais sobre a relação
+        float: Mutual information value (related to cross-entropy).
+        dict: Additional information about the relationship.
     """
-    # Filtrar dados para os dois tenants
-    data1 = df[df['tenant'] == tenant1].sort_values('datetime')
-    data2 = df[df['tenant'] == tenant2].sort_values('datetime')
+    # Filter data for the two tenants
+    data1 = df[df[tenant_col] == tenant1].sort_values(time_col)
+    data2 = df[df[tenant_col] == tenant2].sort_values(time_col)
     
-    # Verificar se temos dados suficientes
+    # Check if we have enough data
     if len(data1) < 10 or len(data2) < 10:
-        return None, {"error": "Dados insuficientes para análise de entropia"}
+        return None, {"error": "Insufficient data for entropy analysis (min 10 points required)."}
+
+    # Align time series using the original logic, then refine
+    common_times = pd.Series(list(set(data1[time_col]).intersection(set(data2[time_col]))))
     
-    # Alinhar as séries temporais (pode requerer interpolação)
-    common_times = pd.Series(list(set(data1['datetime']).intersection(set(data2['datetime']))))
     if len(common_times) < 10:
-        # Se não houver timestamps comuns suficientes, interpolar
-        min_time = min(data1['datetime'].min(), data2['datetime'].min())
-        max_time = max(data1['datetime'].max(), data2['datetime'].max())
+        # Attempt interpolation if few common points
+        min_time = min(data1[time_col].min(), data2[time_col].min())
+        max_time = max(data1[time_col].max(), data2[time_col].max())
         
-        # Criar índice de tempo regular
-        time_index = pd.date_range(start=min_time, end=max_time, freq='1min')
-        
-        # Reindexar e interpolar
-        series1 = data1.set_index('datetime')[metric_column].reindex(time_index).interpolate()
-        series2 = data2.set_index('datetime')[metric_column].reindex(time_index).interpolate()
+        # Try to infer frequency or use a reasonable default (e.g., '1s' or '1min')
+        freq = pd.infer_freq(data1[time_col]) or pd.infer_freq(data2[time_col]) or '1min'
+        try:
+            time_index = pd.date_range(start=min_time, end=max_time, freq=freq)
+        except ValueError: # If inferred frequency is not compatible with date_range
+            time_index = pd.date_range(start=min_time, end=max_time, periods=max(len(data1), len(data2)))
+
+        series1_aligned = data1.set_index(time_col)[value_col].reindex(time_index).interpolate(method='linear')
+        series2_aligned = data2.set_index(time_col)[value_col].reindex(time_index).interpolate(method='linear')
     else:
-        # Se houver timestamps comuns suficientes, usar apenas esses
-        series1 = data1[data1['datetime'].isin(common_times)].set_index('datetime')[metric_column]
-        series2 = data2[data2['datetime'].isin(common_times)].set_index('datetime')[metric_column]
+        series1_aligned = data1[data1[time_col].isin(common_times)].set_index(time_col)[value_col].sort_index()
+        series2_aligned = data2[data2[time_col].isin(common_times)].set_index(time_col)[value_col].sort_index()
     
-    # Normalizar os dados
-    scaler = StandardScaler()
-    X1 = scaler.fit_transform(series1.values.reshape(-1, 1)).flatten()
-    X2 = scaler.fit_transform(series2.values.reshape(-1, 1)).flatten()
+    # Remove NaNs that may have arisen from interpolation/reindexing (especially at the ends)
+    series1_aligned.dropna(inplace=True)
+    series2_aligned.dropna(inplace=True)
+
+    # Ensure series have the same index after cleaning
+    common_idx = series1_aligned.index.intersection(series2_aligned.index)
     
-    # Calcular informação mútua (relacionada à entropia cruzada)
-    mi = mutual_info_regression(X1.reshape(-1, 1), X2)[0]
-    
-    # Calcular estatísticas adicionais
-    corr = np.corrcoef(X1, X2)[0, 1]
-    
+    if len(common_idx) < 10: # Check again after alignment and dropna
+        return None, {"error": f"Insufficient overlapping data points after alignment for {tenant1}-{tenant2} (found {len(common_idx)})."}
+
+    series1 = series1_aligned[common_idx]
+    series2 = series2_aligned[common_idx]
+
+    if series1.empty or series2.empty: # Additional safety check
+        return None, {"error": f"Empty series after final alignment for {tenant1}-{tenant2}."}
+
+    # Check for constant series (zero or very low standard deviation)
+    epsilon = 1e-9 
+    std1 = series1.std()
+    std2 = series2.std()
+
+    if std1 < epsilon or std2 < epsilon:
+        info = {
+            "tenant1": tenant1,
+            "tenant2": tenant2,
+            "mutual_information": 0.0,
+            "correlation": 0.0,
+            "n_samples": len(series1),
+            "note": "One or both series were constant or near-constant. MI/Corr set to 0."
+        }
+        return 0.0, info
+
+    # Normalize the data
+    try:
+        scaler1 = StandardScaler()
+        X1_scaled = scaler1.fit_transform(series1.values.reshape(-1, 1))
+        
+        scaler2 = StandardScaler()
+        X2_scaled = scaler2.fit_transform(series2.values.reshape(-1, 1))
+
+        X1 = X1_scaled.flatten()
+        X2 = X2_scaled.flatten()
+
+        # Safety check for NaNs post-scaling (should be prevented by std check)
+        if np.isnan(X1).any() or np.isnan(X2).any():
+            info = {
+                "tenant1": tenant1,
+                "tenant2": tenant2,
+                "mutual_information": 0.0,
+                "correlation": 0.0,
+                "n_samples": len(X1),
+                "error": "NaN values after scaling (unexpected). MI/Corr set to 0."
+            }
+            return 0.0, info
+
+        # Calculate mutual information
+        mi = mutual_info_regression(X1.reshape(-1, 1), X2, random_state=0)[0] # random_state for reproducibility
+        
+        # Calculate correlation
+        corr_matrix = np.corrcoef(X1, X2)
+        
+        if corr_matrix.shape == (2,2) and not np.isnan(corr_matrix[0, 1]):
+            corr = corr_matrix[0, 1]
+        else: # Fallback if correlation matrix is problematic
+            corr = 0.0 
+            if np.isnan(mi): # If MI is also NaN, default to 0
+                mi = 0.0
+                
+    except Exception as e:
+        info = {
+            "tenant1": tenant1,
+            "tenant2": tenant2,
+            "mutual_information": np.nan, # Use NaN to indicate calculation error
+            "correlation": np.nan,
+            "n_samples": len(series1), # n_samples before the error
+            "error": f"Exception in MI/corr calculation: {str(e)}"
+        }
+        return np.nan, info
+
     info = {
         "tenant1": tenant1,
         "tenant2": tenant2,
@@ -128,35 +206,37 @@ def calculate_cross_tenant_entropy(df, tenant1, tenant2, metric_column='value'):
     return mi, info
 
 
-def calculate_entropy_metrics(df, tenants=None, phase=None, metric_column='value'):
+def calculate_entropy_metrics(df, tenants=None, phase=None, value_col='value', time_col='datetime', tenant_col='tenant', phase_col='phase'):
     """
-    Calcula métricas de entropia para diferentes tenants e fases.
+    Calculates entropy metrics for different tenants and phases.
     
     Args:
-        df (DataFrame): DataFrame com dados da métrica
-        tenants (list): Lista de tenants a incluir (None = todos)
-        phase (str): Fase específica para análise (None = todas)
-        metric_column (str): Coluna com os valores da métrica
+        df (DataFrame): DataFrame with metric data.
+        tenants (list): List of tenants to include (None = all).
+        phase (str): Specific phase for analysis (None = all).
+        value_col (str): Column with metric values.
+        time_col (str): Name of the time/datetime column.
+        tenant_col (str): Name of the tenant column.
+        phase_col (str): Name of the phase column.
         
     Returns:
-        DataFrame: Resultados das métricas de entropia
+        DataFrame: Results of entropy metrics.
     """
     if tenants is None:
-        tenants = sorted(df['tenant'].unique())
+        tenants = sorted(df[tenant_col].unique())
     
-    # Filtrar pela fase se especificada
+    # Filter by phase if specified
     if phase:
-        df = df[df['phase'] == phase]
+        df = df[df[phase_col] == phase]
     
     results = []
     
-    # Calcular entropia para cada par de tenants
+    # Calculate entropy for each pair of tenants
     for i, tenant1 in enumerate(tenants):
-        for tenant2 in tenants[i+1:]:  # Evitar duplicações
-            mi, info = calculate_cross_tenant_entropy(df, tenant1, tenant2, metric_column)
+        for tenant2 in tenants[i+1:]:
+            mi, info = calculate_cross_tenant_entropy(df, tenant1, tenant2, value_col=value_col, time_col=time_col, tenant_col=tenant_col)
             
             if mi is not None:
-                # Se a análise for bem-sucedida, adicionar aos resultados
                 info["phase"] = phase if phase else "all"
                 results.append(info)
     
@@ -166,263 +246,213 @@ def calculate_entropy_metrics(df, tenants=None, phase=None, metric_column='value
         return pd.DataFrame()
 
 
-def granger_causality_test(df, cause_tenant, effect_tenant, metric_column='value', max_lag=5, alpha=0.05):
+def calculate_inter_tenant_correlation_per_metric(
+    metrics_data,
+    output_dir, # Not used in current implementation, consider removing or using
+    current_round,
+    phase_name=None,
+    time_col='datetime',
+    value_col='value',
+    tenant_col='tenant',
+    phase_col='phase',
+    round_col='round'
+):
     """
-    Realiza teste de causalidade de Granger entre dois tenants para uma métrica.
-    
+    Calculates and saves inter-tenant correlation matrices for each metric.
+    """
+    all_correlations = {}
+    for metric_name, metric_df in metrics_data.items():
+        df_round = metric_df[metric_df[round_col] == current_round]
+        
+        if phase_name:
+            df_phase = df_round[df_round[phase_col] == phase_name]
+        else:
+            df_phase = df_round # Use all data for the round if no phase is specified
+
+        if df_phase.empty or df_phase[tenant_col].nunique() < 2:
+            continue
+
+        pivot_df = df_phase.pivot_table(index=time_col, columns=tenant_col, values=value_col)
+        
+        if pivot_df.shape[1] < 2: # Need at least two tenants to correlate
+            continue
+            
+        correlation_matrix = pivot_df.corr()
+        all_correlations[metric_name] = correlation_matrix
+
+    return all_correlations
+
+
+def calculate_inter_tenant_covariance_per_metric(
+    metrics_data,
+    output_dir, # Not used in current implementation, consider removing or using
+    current_round,
+    phase_name=None,
+    time_col='datetime',
+    value_col='value',
+    tenant_col='tenant',
+    phase_col='phase',
+    round_col='round'
+):
+    """
+    Calculates and saves inter-tenant covariance matrices for each metric.
+    """
+    all_covariances = {}
+    for metric_name, metric_df in metrics_data.items():
+        df_round = metric_df[metric_df[round_col] == current_round]
+        
+        if phase_name:
+            df_phase = df_round[df_round[phase_col] == phase_name]
+        else:
+            df_phase = df_round # Use all data for the round if no phase is specified
+
+        if df_phase.empty or df_phase[tenant_col].nunique() < 2:
+            continue
+
+        pivot_df = df_phase.pivot_table(index=time_col, columns=tenant_col, values=value_col)
+
+        if pivot_df.shape[1] < 2: # Need at least two tenants for covariance
+            continue
+
+        covariance_matrix = pivot_df.cov()
+        all_covariances[metric_name] = covariance_matrix
+
+    return all_covariances
+
+
+def calculate_normalized_impact_score(metrics_data, noisy_tenant, impact_phases, baseline_phases, weights, metrics_config, tenant_col='tenant', phase_col='phase', value_col='value', round_col='round'):
+    """
+    Calculates a normalized impact score for each tenant.
+
     Args:
-        df (DataFrame): DataFrame com dados da métrica
-        cause_tenant (str): Tenant que potencialmente causa o efeito
-        effect_tenant (str): Tenant que potencialmente recebe o efeito
-        metric_column (str): Coluna com os valores da métrica
-        max_lag (int): Número máximo de lags a considerar
-        alpha (float): Nível de significância para o teste
-        
+        metrics_data (dict): Dictionary of DataFrames, one for each metric.
+                             If using aggregated data, these should already be in the expected format
+                             (e.g., 'mean' as value_col, 'time_bin' as time_col, 'tenant', 'phase').
+        noisy_tenant (str): The tenant identified as noisy (for reference, not used directly in calculating others' scores).
+        impact_phases (list): List of impact phases (e.g., ["2 - Attack"]).
+        baseline_phases (list): List of baseline phases (e.g., ["1 - Baseline"]).
+        weights (dict): Weights for each metric in the score calculation (from config.IMPACT_SCORE_WEIGHTS).
+        metrics_config (dict): Configuration of metrics, including 'higher_is_worse' (from config.METRICS_CONFIG).
+        tenant_col (str): Name of the tenant column.
+        phase_col (str): Name of the phase column.
+        value_col (str): Name of the value column (e.g., 'value' or 'mean' for aggregated data).
+        round_col (str): Name of the round column (used to distinguish data if not aggregated).
+
     Returns:
-        dict: Resultados do teste de causalidade de Granger
+        pd.DataFrame: DataFrame with 'tenant' and 'normalized_impact_score'.
     """
-    # Filtrar dados para os dois tenants
-    data_cause = df[df['tenant'] == cause_tenant].sort_values('datetime')
-    data_effect = df[df['tenant'] == effect_tenant].sort_values('datetime')
-    
-    # Verificar se temos dados suficientes
-    if len(data_cause) < max_lag + 1 or len(data_effect) < max_lag + 1:
-        return {"error": "Dados insuficientes para análise de causalidade"}
-    
-    # Alinhar as séries temporais (pode requerer interpolação)
-    common_times = pd.Series(list(set(data_cause['datetime']).intersection(set(data_effect['datetime']))))
-    
-    if len(common_times) < max_lag * 2:
-        # Se não houver timestamps comuns suficientes, interpolar
-        min_time = min(data_cause['datetime'].min(), data_effect['datetime'].min())
-        max_time = max(data_cause['datetime'].max(), data_effect['datetime'].max())
-        
-        # Criar índice de tempo regular
-        time_index = pd.date_range(start=min_time, end=max_time, freq='1min')
-        
-        # Reindexar e interpolar
-        series_cause = data_cause.set_index('datetime')[metric_column].reindex(time_index).interpolate()
-        series_effect = data_effect.set_index('datetime')[metric_column].reindex(time_index).interpolate()
-    else:
-        # Se houver timestamps comuns suficientes, usar apenas esses
-        common_times = sorted(common_times)
-        series_cause = data_cause[data_cause['datetime'].isin(common_times)].set_index('datetime')[metric_column]
-        series_effect = data_effect[data_effect['datetime'].isin(common_times)].set_index('datetime')[metric_column]
-    
-    # Preparar dados para o teste
-    data = pd.DataFrame({
-        'cause': series_cause,
-        'effect': series_effect
-    })
-    
-    # Realizar teste de causalidade de Granger
-    try:
-        results = grangercausalitytests(data[['effect', 'cause']], max_lag, verbose=False)
-        
-        # Formatar os resultados
-        granger_results = {}
-        for lag in range(1, max_lag + 1):
-            p_value = results[lag][0]['ssr_chi2test'][1]
-            granger_results[f"lag_{lag}"] = {
-                "p_value": p_value,
-                "significant": p_value < alpha
-            }
-        
-        # Determinar se há causalidade significativa em qualquer lag
-        significant_lags = sum(1 for lag in granger_results if granger_results[lag]["significant"])
-        
-        summary = {
-            "cause_tenant": cause_tenant,
-            "effect_tenant": effect_tenant,
-            "significant_causal_relationship": significant_lags > 0,
-            "significant_lags": significant_lags,
-            "max_lag_tested": max_lag,
-            "min_p_value": min(granger_results[f"lag_{lag}"]["p_value"] for lag in range(1, max_lag + 1)),
-            "detail": granger_results
-        }
-        
-        return summary
-    
-    except Exception as e:
-        return {"error": str(e), "cause_tenant": cause_tenant, "effect_tenant": effect_tenant}
+    all_tenants_impact = {}
 
+    # Ensure impact and baseline phases are lists
+    if isinstance(impact_phases, str):
+        impact_phases = [impact_phases]
+    if isinstance(baseline_phases, str):
+        baseline_phases = [baseline_phases]
 
-def analyze_causal_relationships(df, tenant_pairs=None, metric_column='value', phase=None):
-    """
-    Analisa relações causais entre pares de tenants usando causalidade de Granger.
+    # Collect all unique tenants present in the data
+    all_tenants = set()
+    for metric_df in metrics_data.values():
+        if tenant_col in metric_df.columns:
+            all_tenants.update(metric_df[tenant_col].unique())
     
-    Args:
-        df (DataFrame): DataFrame com dados da métrica
-        tenant_pairs (list): Lista de tuplas (causa, efeito) de tenants a analisar
-                            Se None, analisar todas as combinações possíveis
-        metric_column (str): Coluna com os valores da métrica
-        phase (str): Fase específica para análise (None = todas)
+    if not all_tenants:
+        print("Warning: No tenants found in metrics_data for impact score calculation.")
+        return pd.DataFrame(columns=[tenant_col, 'normalized_impact_score'])
+
+    for tenant in all_tenants:
+        tenant_scores = []
+        for metric_name, metric_df in metrics_data.items():
+            if metric_name not in weights or metric_name not in metrics_config:
+                continue
+
+            # Filter data for the current tenant
+            tenant_metric_df = metric_df[metric_df[tenant_col] == tenant]
+            if tenant_metric_df.empty:
+                tenant_scores.append({'metric': metric_name, 'normalized_change': 0, 'weight': weights[metric_name]})
+                continue
+
+            # Calculate mean value in baseline and impact phases
+            baseline_values = tenant_metric_df[tenant_metric_df[phase_col].isin(baseline_phases)][value_col]
+            impact_values = tenant_metric_df[tenant_metric_df[phase_col].isin(impact_phases)][value_col]
+
+            if baseline_values.empty or impact_values.empty:
+                percent_change = 0.0
+            else:
+                mean_baseline = baseline_values.mean()
+                mean_impact = impact_values.mean()
+
+                if mean_baseline == 0: 
+                    if mean_impact == 0:
+                        percent_change = 0.0
+                    else:
+                        # If baseline is zero and impact is non-zero, assign a large change
+                        percent_change = np.sign(mean_impact) * 100.0 
+                else:
+                    percent_change = ((mean_impact - mean_baseline) / abs(mean_baseline)) * 100
+
+            # Invert change if lower is worse for the metric
+            if not metrics_config[metric_name].get('higher_is_worse', True):
+                percent_change *= -1 # Lower values are better, so a decrease is a positive impact (or less negative)
+            
+            tenant_scores.append({'metric': metric_name, 'raw_change': percent_change, 'weight': weights[metric_name]})
+
+        if not tenant_scores: # Should not happen if all_tenants is populated and metrics_data is not empty
+            all_tenants_impact[tenant] = 0 
+            continue
+
+        current_tenant_total_score = 0
+        total_weight = 0
+        for score_info in tenant_scores:
+            # Cap the change to avoid extreme values dominating the score
+            capped_change = np.clip(score_info['raw_change'], -200, 200) # Cap at +/- 200%
+            current_tenant_total_score += capped_change * score_info['weight']
+            total_weight += score_info['weight']
         
-    Returns:
-        DataFrame: Resultados da análise causal
-    """
-    # Filtrar pela fase se especificada
-    if phase:
-        df = df[df['phase'] == phase]
-    
-    # Se não houver pares especificados, criar todas as combinações
-    if tenant_pairs is None:
-        tenants = sorted(df['tenant'].unique())
-        tenant_pairs = []
-        
-        for i, tenant1 in enumerate(tenants):
-            for tenant2 in tenants:
-                if tenant1 != tenant2:
-                    tenant_pairs.append((tenant1, tenant2))
-    
-    results = []
-    
-    # Realizar teste para cada par
-    for cause, effect in tenant_pairs:
-        result = granger_causality_test(df, cause, effect, metric_column)
-        
-        if "error" not in result:
-            # Se a análise for bem-sucedida, adicionar aos resultados
-            result["phase"] = phase if phase else "all"
-            results.append(result)
-    
-    if results:
-        return pd.DataFrame(results)
-    else:
-        return pd.DataFrame()
-
-
-def calculate_single_metric_impact(row, baseline_phase, attack_phase, weights, metrics_config):
-    # Assuming 'metric' is part of the row's name (index) or a column
-    # If row is a Series from a DataFrame grouped by ['tenant', 'round', 'metric'],
-    # then row.name will be a tuple like ('tenant-a', 'round-1', 'cpu_usage')
-    if isinstance(row.name, tuple) and len(row.name) > 2:
-        metric = row.name[2] # metric is the third level in the multi-index
-    elif 'metric' in row:
-        metric = row['metric']
-    else:
-        # Fallback or error if metric cannot be determined
-        # This part needs to be robust based on how 'row' is structured when passed to apply
-        # For now, let's assume it can be found or raise an error / return default
-        # print(f"DEBUG: Could not determine metric from row: {row.name}")
-        return 0.0 # Or raise an error
-
-    weight = weights.get(metric, 1.0)
-    # higher_is_better = metrics_config.get(metric, {}).get('higher_is_better', False)
-    # Accessing higher_is_better from the global METRICS_CONFIG directly
-    metric_properties = METRICS_CONFIG.get(metric, {})
-    higher_is_better = metric_properties.get('higher_is_better', False)
-
-    baseline_value = row[f'{baseline_phase}_value']
-    attack_value = row[f'{attack_phase}_value']
-
-    if pd.isna(baseline_value) or pd.isna(attack_value):
-        return 0.0
-
-    if baseline_value == 0:
-        if attack_value == 0:
-            impact_percentage = 0.0
+        if total_weight > 0:
+            all_tenants_impact[tenant] = current_tenant_total_score / total_weight
         else:
-            # Consider how to handle infinite impact: cap it or use a large number
-            impact_percentage = float('inf') if attack_value > 0 else float('-inf') 
-    else:
-        impact_percentage = (attack_value - baseline_value) / baseline_value
+            all_tenants_impact[tenant] = 0 # Avoid division by zero if no weighted metrics found
 
-    if higher_is_better:
-        normalized_impact = -impact_percentage
-    else:
-        normalized_impact = impact_percentage
+    impact_df = pd.DataFrame(list(all_tenants_impact.items()), columns=[tenant_col, 'normalized_impact_score'])
     
-    return normalized_impact * weight
+    # Normalize scores to a 0-100 range for easier interpretation
+    if not impact_df.empty and 'normalized_impact_score' in impact_df.columns:
+        min_score = impact_df['normalized_impact_score'].min()
+        max_score = impact_df['normalized_impact_score'].max()
+        if max_score > min_score: # Standard min-max normalization
+            impact_df['normalized_impact_score'] = 100 * (impact_df['normalized_impact_score'] - min_score) / (max_score - min_score)
+        elif max_score == min_score and min_score != 0: # All scores are the same but non-zero
+            impact_df['normalized_impact_score'] = 50 # Assign a middle value
+        else: # All scores are zero or df is empty
+            impact_df['normalized_impact_score'] = 0 
+            
+    return impact_df.sort_values(by='normalized_impact_score', ascending=False)
 
+# Potential future addition: Granger Causality (requires careful consideration of stationarity and lag selection)
+# def calculate_granger_causality(df, tenant1, tenant2, metric_name, max_lag=5, test='ssr_chi2test', verbose=False, time_col='datetime', value_col='value', tenant_col='tenant'):
+#     """
+#     Performs Granger causality test between two tenants for a specific metric.
+#     NOTE: This is a placeholder and requires careful implementation and data preprocessing.
+#     """
+#     data1 = df[(df[tenant_col] == tenant1)][[time_col, value_col]].set_index(time_col).sort_index()
+#     data2 = df[(df[tenant_col] == tenant2)][[time_col, value_col]].set_index(time_col).sort_index()
 
-def calculate_normalized_impact_score(df, metrics, baseline_phase='baseline', attack_phase='attack', agg_type='mean'):
-    """
-    Calculates a normalized impact score for each tenant and round.
-    The score is weighted by metric and normalized based on whether higher or lower values are better.
-    """
-    if df.empty:
-        print("Aviso: DataFrame de entrada para calculate_normalized_impact_score está vazio.")
-        return pd.DataFrame(columns=['tenant', 'round', 'aggregated_impact_score', 'average_normalized_impact'])
-
-    if 'phase_name' in df.columns:
-        print(f"DEBUG: Unique phase_name values in input df for impact score: {df['phase_name'].unique()}")
-    else:
-        print("DEBUG: 'phase_name' column not in input df for impact score.")
-        unique_tenant_rounds = df[['tenant', 'round']].drop_duplicates() if 'tenant' in df.columns and 'round' in df.columns else pd.DataFrame(columns=['tenant', 'round'])
-        final_scores_df = unique_tenant_rounds.copy()
-        final_scores_df['aggregated_impact_score'] = 0.0
-        final_scores_df['average_normalized_impact'] = 0.0
-        return final_scores_df
-
-    if 'value' not in df.columns:
-        print("DEBUG: 'value' column not in input df for pivot_table in impact score calculation.")
-        unique_tenant_rounds = df[['tenant', 'round']].drop_duplicates() if 'tenant' in df.columns and 'round' in df.columns else pd.DataFrame(columns=['tenant', 'round'])
-        final_scores_df = unique_tenant_rounds.copy()
-        final_scores_df['aggregated_impact_score'] = 0.0
-        final_scores_df['average_normalized_impact'] = 0.0
-        return final_scores_df
-        
-    try:
-        pivot_df = df.pivot_table(index=['tenant', 'round', 'metric'], columns='phase_name', values='value', aggfunc=agg_type)
-    except Exception as e:
-        print(f"DEBUG: Error during pivot_table in impact score calculation: {e}")
-        unique_tenant_rounds = df[['tenant', 'round']].drop_duplicates() if 'tenant' in df.columns and 'round' in df.columns else pd.DataFrame(columns=['tenant', 'round'])
-        final_scores_df = unique_tenant_rounds.copy()
-        final_scores_df['aggregated_impact_score'] = 0.0
-        final_scores_df['average_normalized_impact'] = 0.0
-        return final_scores_df
-
-    print(f"DEBUG: Columns in pivot_df for impact score: {pivot_df.columns.tolist()}")
-
-    impact_df = pd.DataFrame(index=pivot_df.index)
+#     # Ensure data is stationary (e.g., by differencing) - CRITICAL STEP
+#     # data1_diff = data1.diff().dropna()
+#     # data2_diff = data2.diff().dropna()
     
-    # Use PHASE_DISPLAY_NAMES to get the actual column names for baseline and attack
-    # Assuming baseline_phase and attack_phase are keys like 'baseline', 'attack'
-    actual_baseline_phase_col = PHASE_DISPLAY_NAMES.get(baseline_phase, baseline_phase)
-    actual_attack_phase_col = PHASE_DISPLAY_NAMES.get(attack_phase, attack_phase)
+#     # Align data - ensure same length and time points
+#     # merged_data = pd.merge(data1_diff, data2_diff, on=time_col, suffixes=('_t1', '_t2'))
+#     # if merged_data.empty or len(merged_data) < max_lag + 5: # Need enough data points
+#     #     return None, {"error": "Not enough overlapping data after differencing and merging."}
 
-    if actual_baseline_phase_col not in pivot_df.columns or actual_attack_phase_col not in pivot_df.columns:
-        print(f"Aviso: Fases [{actual_baseline_phase_col} ({baseline_phase}), {actual_attack_phase_col} ({attack_phase})] não encontradas nos dados pivotados. Score de impacto pode ser incompleto.")
-        if not df.empty and 'tenant' in df.columns and 'round' in df.columns:
-            unique_tenant_rounds = df[['tenant', 'round']].drop_duplicates()
-            final_scores_df = unique_tenant_rounds.copy()
-            final_scores_df['aggregated_impact_score'] = 0.0
-            final_scores_df['average_normalized_impact'] = 0.0
-        else:
-            final_scores_df = pd.DataFrame(columns=['tenant', 'round', 'aggregated_impact_score', 'average_normalized_impact'])
-        return final_scores_df
-    else:
-        impact_df[f'{actual_baseline_phase_col}_value'] = pivot_df[actual_baseline_phase_col]
-        impact_df[f'{actual_attack_phase_col}_value'] = pivot_df[actual_attack_phase_col]
-
-        df_grouped_for_impact_calc = impact_df.reset_index() # Makes 'tenant', 'round', 'metric' columns
-        
-        if 'metric' in df_grouped_for_impact_calc.columns:
-            # Pass the actual column names to calculate_single_metric_impact
-            df_grouped_for_impact_calc['normalized_impact'] = df_grouped_for_impact_calc.apply(
-                lambda row: calculate_single_metric_impact(row, actual_baseline_phase_col, actual_attack_phase_col, 
-                                                         IMPACT_SCORE_WEIGHTS, METRICS_CONFIG), axis=1
-            )
-        else:
-            print("DEBUG: 'metric' column not found after reset_index in impact_df for impact calculation.")
-            df_grouped_for_impact_calc['normalized_impact'] = 0.0
-
-    if 'normalized_impact' in df_grouped_for_impact_calc.columns:
-        final_scores_df = df_grouped_for_impact_calc.groupby(['tenant', 'round'])['normalized_impact'].sum().reset_index()
-        final_scores_df.rename(columns={'normalized_impact': 'aggregated_impact_score'}, inplace=True)
-        
-        avg_normalized_impact = df_grouped_for_impact_calc.groupby(['tenant', 'round'])['normalized_impact'].mean().reset_index()
-        avg_normalized_impact.rename(columns={'normalized_impact': 'average_normalized_impact'}, inplace=True)
-        
-        final_scores_df = pd.merge(final_scores_df, avg_normalized_impact, on=['tenant', 'round'], how='left')
-    else:
-        if not df.empty and 'tenant' in df.columns and 'round' in df.columns:
-            unique_tenant_rounds = df[['tenant', 'round']].drop_duplicates()
-            final_scores_df = unique_tenant_rounds.copy()
-        else:
-            final_scores_df = pd.DataFrame(columns=['tenant', 'round'])
-        final_scores_df['aggregated_impact_score'] = 0.0
-        final_scores_df['average_normalized_impact'] = 0.0
-
-    return final_scores_df
+#     # temp_df = merged_data[[f'{value_col}_t2', f'{value_col}_t1']] # Target variable first (does t1 granger-cause t2?)
+    
+#     # try:
+#     #     gc_results = grangercausalitytests(temp_df, maxlag=max_lag, verbose=verbose)
+#     #     # Process results to extract p-values or F-statistics
+#     #     # ...
+#     #     return gc_results, {} # Placeholder
+#     # except Exception as e:
+#     #     return None, {"error": f"Granger causality test failed: {str(e)}"}
+#     pass # Functionality not fully implemented

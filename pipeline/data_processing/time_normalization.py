@@ -1,8 +1,8 @@
 """
-Módulo de normalização temporal para o experimento de noisy neighbors.
+Time normalization module for the noisy neighbors experiment.
 
-Este módulo fornece funções para normalizar timestamps e adicionar
-campos de tempo decorrido aos DataFrames do experimento.
+This module provides functions to normalize timestamps and add
+elapsed time fields to the experiment DataFrames.
 """
 
 import pandas as pd
@@ -10,31 +10,31 @@ import pandas as pd
 
 def add_elapsed_time(df, group_by=['round', 'phase']):
     """
-    Adiciona colunas de tempo decorrido, calculado desde o início de cada grupo.
+    Adds elapsed time columns, calculated from the start of each group.
     
     Args:
-        df (DataFrame): DataFrame com dados do experimento
-        group_by (list): Colunas para agrupar ao calcular tempo inicial
+        df (DataFrame): DataFrame with experiment data
+        group_by (list): Columns to group by when calculating initial time
         
     Returns:
-        DataFrame: DataFrame com colunas adicionais de tempo decorrido
+        DataFrame: DataFrame with additional elapsed time columns
     """
-    # Cria uma cópia para não modificar o original
+    # Create a copy to avoid modifying the original
     result = df.copy()
     
-    # Encontrar o timestamp inicial para cada grupo
+    # Find the initial timestamp for each group
     start_times = df.groupby(group_by)['datetime'].min().reset_index()
     
-    # Renomear a coluna para facilitar o merge
+    # Rename the column to facilitate merging
     start_times = start_times.rename(columns={'datetime': 'start_time'})
     
-    # Mesclar com o DataFrame original
+    # Merge with the original DataFrame
     result = pd.merge(result, start_times, on=group_by)
     
-    # Calcular tempo decorrido em segundos desde o início de cada grupo
+    # Calculate elapsed time in seconds since the start of each group
     result['elapsed_seconds'] = (result['datetime'] - result['start_time']).dt.total_seconds()
     
-    # Calcular tempo decorrido em minutos (para facilitar a visualização)
+    # Calculate elapsed time in minutes (for easier visualization)
     result['elapsed_minutes'] = result['elapsed_seconds'] / 60.0
     
     return result
@@ -42,33 +42,33 @@ def add_elapsed_time(df, group_by=['round', 'phase']):
 
 def add_experiment_elapsed_time(df, experiment_start_time=None, group_by=None):
     """
-    Adiciona coluna de tempo decorrido desde o início do experimento ou round.
-    Se experiment_start_time for fornecido, usa ele como referência global.
-    Caso contrário, agrupa por `group_by` para encontrar o tempo inicial de cada grupo.
+    Adds an elapsed time column since the start of the experiment or round.
+    If experiment_start_time is provided, it is used as the global reference.
+    Otherwise, groups by `group_by` to find the initial time for each group.
 
     Args:
-        df (DataFrame): DataFrame com dados do experimento.
-        experiment_start_time (datetime, optional): Timestamp do início global do experimento.
-        group_by (list, optional): Colunas para agrupar ao calcular tempo inicial se 
-                                   experiment_start_time não for fornecido (geralmente ['round']).
-                                   Padrão é ['round'] se experiment_start_time for None.
+        df (DataFrame): DataFrame with experiment data.
+        experiment_start_time (datetime, optional): Timestamp of the global start of the experiment.
+        group_by (list, optional): Columns to group by when calculating initial time if 
+                                   experiment_start_time is not provided (usually ['round']).
+                                   Defaults to ['round'] if experiment_start_time is None.
         
     Returns:
-        DataFrame: DataFrame com coluna adicional de tempo decorrido do experimento.
+        DataFrame: DataFrame with an additional experiment elapsed time column.
     """
     result = df.copy()
 
     if experiment_start_time is not None:
-        # Usar o tempo de início global fornecido
+        # Use the provided global start time
         result['experiment_start_time'] = experiment_start_time
     else:
-        # Determinar o tempo de início por grupo
+        # Determine the start time per group
         if group_by is None:
-            group_by = ['round'] # Padrão se não especificado e experiment_start_time é None
+            group_by = ['round'] # Default if not specified and experiment_start_time is None
         
         if not all(col in df.columns for col in group_by):
-            # Se as colunas de agrupamento não existirem, calcula o tempo global para todo o DataFrame
-            # Isso pode acontecer se, por exemplo, os dados já estiverem filtrados para um único round/grupo
+            # If grouping columns do not exist, calculate global time for the entire DataFrame
+            # This can happen if, for example, data is already filtered for a single round/group
             global_start_time = df['datetime'].min()
             result['experiment_start_time'] = global_start_time
         else:
@@ -76,7 +76,7 @@ def add_experiment_elapsed_time(df, experiment_start_time=None, group_by=None):
             start_times = start_times.rename(columns={'datetime': 'experiment_start_time'})
             result = pd.merge(result, start_times, on=group_by, how='left')
 
-    # Calcular tempo decorrido em segundos desde o início de cada grupo/global
+    # Calculate elapsed time in seconds since the start of each group/global
     result['experiment_elapsed_seconds'] = (result['datetime'] - result['experiment_start_time']).dt.total_seconds()
     result['experiment_elapsed_minutes'] = result['experiment_elapsed_seconds'] / 60.0
     
@@ -85,24 +85,24 @@ def add_experiment_elapsed_time(df, experiment_start_time=None, group_by=None):
 
 def add_phase_markers(df, phase_column='phase', phase_display_names=None):
     """
-    Adiciona marcadores de início e fim de fase para facilitar a visualização.
+    Adds phase start and end markers for easier visualization.
     
     Args:
-        df (DataFrame): DataFrame com dados do experimento
-        phase_column (str): Nome da coluna que contém o nome da fase
-        phase_display_names (dict, optional): Dicionário para mapear nomes de fase brutos para nomes de exibição.
+        df (DataFrame): DataFrame with experiment data
+        phase_column (str): Name of the column containing the phase name
+        phase_display_names (dict, optional): Dictionary to map raw phase names to display names.
         
     Returns:
-        DataFrame: O mesmo DataFrame com coluna adicional de nome simplificado da fase
-        dict: Dicionário com marcadores de início de fase para uso em gráficos
+        DataFrame: The same DataFrame with an additional simplified phase name column
+        dict: Dictionary with phase start markers for use in plots
     """
-    # Extrair nomes simplificados das fases
+    # Extract simplified phase names
     if phase_display_names:
         df['phase_name'] = df[phase_column].apply(lambda x: phase_display_names.get(x, x.split('-')[-1].strip()) if isinstance(x, str) else x)
     else:
         df['phase_name'] = df[phase_column].apply(lambda x: x.split('-')[-1].strip() if isinstance(x, str) else x)
     
-    # Agrupar por round e calcular início de cada fase
+    # Group by round and calculate the start of each phase
     phase_markers = {}
     
     for round_name, group in df.groupby('round'):
@@ -119,20 +119,20 @@ def add_phase_markers(df, phase_column='phase', phase_display_names=None):
 
 def merge_phase_info(df, phase_info=None):
     """
-    Adiciona informações sobre duração de fase ao DataFrame.
+    Adds phase duration information to the DataFrame.
     
     Args:
-        df (DataFrame): DataFrame com dados do experimento
-        phase_info (dict): Dicionário com informações sobre as fases
-                           (se None, será inferido dos dados)
+        df (DataFrame): DataFrame with experiment data
+        phase_info (dict): Dictionary with phase information
+                           (if None, it will be inferred from the data)
         
     Returns:
-        DataFrame: DataFrame com informações adicionais sobre as fases
+        DataFrame: DataFrame with additional phase information
     """
     result = df.copy()
     
     if phase_info is None:
-        # Inferir informações de fase dos dados
+        # Infer phase information from the data
         phase_durations = {}
         
         for (round_name, phase_name), group in df.groupby(['round', 'phase']):
@@ -143,7 +143,7 @@ def merge_phase_info(df, phase_info=None):
     else:
         phase_durations = phase_info
     
-    # Adicionar informações de duração
+    # Add duration information
     phase_duration_list = []
     
     for idx, row in df.iterrows():
@@ -163,26 +163,26 @@ def merge_phase_info(df, phase_info=None):
 
 def normalize_time(df, time_column='datetime', group_by=None, method='elapsed_seconds'):
     """
-    Normaliza a coluna de tempo de acordo com o método especificado.
+    Normalizes the time column according to the specified method.
 
     Args:
-        df (DataFrame): DataFrame de entrada.
-        time_column (str): Nome da coluna de timestamp (datetime objects).
-        group_by (list, optional): Colunas para agrupar antes de normalizar.
-                                   Se None, normaliza globalmente.
-        method (str): Método de normalização:
-                      'elapsed_seconds': Segundos desde o primeiro timestamp (no grupo ou global).
-                      'elapsed_minutes': Minutos desde o primeiro timestamp.
-                      'experiment_elapsed_seconds': Segundos desde o início do experimento (requer 'round' em group_by).
-                      'experiment_elapsed_minutes': Minutos desde o início do experimento.
+        df (DataFrame): Input DataFrame.
+        time_column (str): Name of the timestamp column (datetime objects).
+        group_by (list, optional): Columns to group by before normalizing.
+                                   If None, normalizes globally.
+        method (str): Normalization method:
+                      'elapsed_seconds': Seconds since the first timestamp (in group or globally).
+                      'elapsed_minutes': Minutes since the first timestamp.
+                      'experiment_elapsed_seconds': Seconds since the start of the experiment (requires 'round' in group_by).
+                      'experiment_elapsed_minutes': Minutes since the start of the experiment.
 
     Returns:
-        DataFrame: DataFrame com a nova coluna de tempo normalizado.
+        DataFrame: DataFrame with the new normalized time column.
     """
     if time_column not in df.columns:
-        raise ValueError(f"Coluna de tempo '{time_column}' não encontrada no DataFrame.")
+        raise ValueError(f"Time column '{time_column}' not found in the DataFrame.")
     if not pd.api.types.is_datetime64_any_dtype(df[time_column]):
-        raise ValueError(f"Coluna de tempo '{time_column}' deve ser do tipo datetime.")
+        raise ValueError(f"Time column '{time_column}' must be of datetime type.")
 
     df_copy = df.copy()
 
@@ -200,11 +200,11 @@ def normalize_time(df, time_column='datetime', group_by=None, method='elapsed_se
             df_copy['normalized_time'] = elapsed / 60.0
 
     elif method in ['experiment_elapsed_seconds', 'experiment_elapsed_minutes']:
-        # Este método é mais específico e geralmente usa add_experiment_elapsed_time
-        # Aqui, replicamos uma lógica similar para fins de uma função genérica 'normalize_time'
-        # Assumimos que 'round' (ou um agrupamento similar de alto nível) está em group_by
+        # This method is more specific and usually uses add_experiment_elapsed_time
+        # Here, we replicate similar logic for the sake of a generic 'normalize_time' function
+        # We assume that 'round' (or a similar high-level grouping) is in group_by
         if not group_by or not any(g_col in df_copy.columns for g_col in group_by):
-            # Se não há group_by, calcula desde o início global do dataset
+            # If there is no group_by, calculate from the global start of the dataset
              exp_start_col_name = 'experiment_start_time_calc'
              df_copy[exp_start_col_name] = df_copy[time_column].min()
         else:
@@ -219,6 +219,6 @@ def normalize_time(df, time_column='datetime', group_by=None, method='elapsed_se
         else: # experiment_elapsed_minutes
             df_copy['normalized_time'] = elapsed_exp / 60.0
     else:
-        raise ValueError(f"Método de normalização desconhecido: {method}")
+        raise ValueError(f"Unknown normalization method: {method}")
 
     return df_copy

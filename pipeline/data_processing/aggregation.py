@@ -1,8 +1,8 @@
 """
-Módulo de agregação de dados para o experimento de noisy neighbors.
+Data aggregation module for the noisy neighbors experiment.
 
-Este módulo fornece funções para agregar e resumir dados de métricas
-do experimento por tenant, fase, round, etc.
+This module provides functions to aggregate and summarize metric data
+from the experiment by tenant, phase, round, etc.
 """
 
 import pandas as pd
@@ -11,15 +11,15 @@ import numpy as np
 
 def calculate_tenant_stats(df, value_column='value', group_columns=['tenant', 'round', 'phase']):
     """
-    Calcula estatísticas resumidas para os valores de métricas, agrupados por tenant, round e fase.
+    Calculates summary statistics for metric values, grouped by tenant, round, and phase.
     
     Args:
-        df (DataFrame): DataFrame com dados de métricas
-        value_column (str): Coluna que contém os valores da métrica
-        group_columns (list): Colunas para agrupar (por padrão, tenant, round e fase)
+        df (DataFrame): DataFrame with metric data
+        value_column (str): Column containing the metric values
+        group_columns (list): Columns to group by (by default, tenant, round, and phase)
         
     Returns:
-        DataFrame: DataFrame com estatísticas calculadas
+        DataFrame: DataFrame with calculated statistics
     """
     stats = df.groupby(group_columns)[value_column].agg([
         'mean', 'median', 'std', 'min', 'max', 'count',
@@ -28,7 +28,7 @@ def calculate_tenant_stats(df, value_column='value', group_columns=['tenant', 'r
         lambda x: np.percentile(x, 95)
     ]).reset_index()
     
-    # Renomear as colunas calculadas
+    # Rename the calculated columns
     stats = stats.rename(columns={
         '<lambda_0>': 'percentile_25',
         '<lambda_1>': 'percentile_75',
@@ -41,32 +41,32 @@ def calculate_tenant_stats(df, value_column='value', group_columns=['tenant', 'r
 def calculate_inter_tenant_impact(df, noisy_tenant='tenant-b', attack_phase='2 - Attack', 
                                   value_column='mean', baseline_phase='1 - Baseline'):
     """
-    Calcula o impacto do tenant barulhento nos outros tenants.
+    Calculates the impact of the noisy tenant on other tenants.
     
     Args:
-        df (DataFrame): DataFrame com estatísticas resumidas por tenant e fase
-        noisy_tenant (str): Nome do tenant barulhento
-        attack_phase (str): Nome da fase de ataque
-        value_column (str): Nome da coluna com valores de métrica (geralmente 'mean')
-        baseline_phase (str): Nome da fase de baseline
+        df (DataFrame): DataFrame with summary statistics by tenant and phase
+        noisy_tenant (str): Name of the noisy tenant
+        attack_phase (str): Name of the attack phase
+        value_column (str): Name of the column with metric values (usually 'mean')
+        baseline_phase (str): Name of the baseline phase
         
     Returns:
-        DataFrame: DataFrame com o impacto calculado
+        DataFrame: DataFrame with the calculated impact
     """
-    # Filtrar apenas as fases de baseline e ataque
+    # Filter only the baseline and attack phases
     filtered_df = df[df['phase'].isin([baseline_phase, attack_phase])].copy()
     
-    # Pivotar para ter colunas para cada fase
+    # Pivot to have columns for each phase
     pivot = filtered_df.pivot_table(
         index=['tenant', 'round'],
         columns='phase',
         values=value_column
     ).reset_index()
     
-    # Calcular o impacto (variação percentual)
+    # Calculate the impact (percentage change)
     pivot['impact_percent'] = ((pivot[attack_phase] - pivot[baseline_phase]) / pivot[baseline_phase]) * 100
     
-    # Remover o tenant barulhento se necessário
+    # Remove the noisy tenant if necessary
     if noisy_tenant is not None:
         impact_summary = pivot[pivot['tenant'] != noisy_tenant]
     else:
@@ -80,35 +80,35 @@ def calculate_recovery_effectiveness(df, value_column='mean',
                                    attack_phase='2 - Attack',
                                    recovery_phase='3 - Recovery'):
     """
-    Calcula a efetividade da recuperação após a fase de ataque.
+    Calculates the effectiveness of recovery after the attack phase.
     
     Args:
-        df (DataFrame): DataFrame com estatísticas resumidas por tenant e fase
-        value_column (str): Nome da coluna com valores de métrica (geralmente 'mean')
-        baseline_phase (str): Nome da fase de baseline
-        attack_phase (str): Nome da fase de ataque
-        recovery_phase (str): Nome da fase de recuperação
+        df (DataFrame): DataFrame with summary statistics by tenant and phase
+        value_column (str): Name of the column with metric values (usually 'mean')
+        baseline_phase (str): Name of the baseline phase
+        attack_phase (str): Name of the attack phase
+        recovery_phase (str): Name of the recovery phase
         
     Returns:
-        DataFrame: DataFrame com a efetividade da recuperação calculada
+        DataFrame: DataFrame with the calculated recovery effectiveness
     """
-    # Filtrar apenas as fases relevantes
+    # Filter only the relevant phases
     filtered_df = df[df['phase'].isin([baseline_phase, attack_phase, recovery_phase])].copy()
     
-    # Pivotar para ter colunas para cada fase
+    # Pivot to have columns for each phase
     pivot = filtered_df.pivot_table(
         index=['tenant', 'round'],
         columns='phase',
         values=value_column
     ).reset_index()
     
-    # Calcular a degradação durante o ataque (quanto piorou)
+    # Calculate the degradation during the attack (how much it worsened)
     pivot['attack_degradation'] = ((pivot[attack_phase] - pivot[baseline_phase]) / pivot[baseline_phase]) * 100
     
-    # Calcular quanto da degradação foi recuperada
+    # Calculate how much of the degradation was recovered
     pivot['recovery_percent'] = ((pivot[recovery_phase] - pivot[attack_phase]) / (pivot[baseline_phase] - pivot[attack_phase])) * 100
     
-    # Calcular quanto ainda falta para voltar ao baseline (em percentual)
+    # Calculate how much is still missing to return to baseline (in percentage)
     pivot['baseline_diff_percent'] = ((pivot[recovery_phase] - pivot[baseline_phase]) / pivot[baseline_phase]) * 100
     
     return pivot
@@ -116,22 +116,22 @@ def calculate_recovery_effectiveness(df, value_column='mean',
 
 def aggregate_data_by_custom_elements(df, aggregation_keys=None, elements_to_aggregate=None, value_column='value', agg_functions=None):
     """
-    Agrega dados com base em chaves de agregação e elementos específicos definidos pelo usuário.
+    Aggregates data based on aggregation keys and specific user-defined elements.
 
     Args:
-        df (DataFrame): DataFrame com dados de métricas.
-        aggregation_keys (list): Lista de colunas para agrupar (ex: ["tenant", "phase", "custom_group"]).
-        elements_to_aggregate (list or dict): Lista de valores específicos para filtrar na primeira chave de agregação,
-                                             ou um dicionário onde as chaves são nomes de colunas de `aggregation_keys`
-                                             e os valores são listas de elementos para filtrar nessas colunas.
-                                             Se None, todos os elementos são considerados.
-        value_column (str): Coluna que contém os valores da métrica.
-        agg_functions (list or dict): Lista de funções de agregação (ex: ['mean', 'std']) ou um dicionário
-                                      mapeando colunas para funções de agregação.
-                                      Padrão é ['mean', 'std', 'count'].
+        df (DataFrame): DataFrame with metric data.
+        aggregation_keys (list): List of columns to group by (e.g., ["tenant", "phase", "custom_group"]).
+        elements_to_aggregate (list or dict): List of specific values to filter in the first aggregation key,
+                                             or a dictionary where keys are column names from `aggregation_keys`
+                                             and values are lists of elements to filter in those columns.
+                                             If None, all elements are considered.
+        value_column (str): Column containing the metric values.
+        agg_functions (list or dict): List of aggregation functions (e.g., ['mean', 'std']) or a dictionary
+                                      mapping columns to aggregation functions.
+                                      Default is ['mean', 'std', 'count'].
 
     Returns:
-        DataFrame: DataFrame agregado.
+        DataFrame: Aggregated DataFrame.
     """
     if aggregation_keys is None:
         aggregation_keys = ['tenant', 'phase'] # Default aggregation
@@ -144,17 +144,17 @@ def aggregate_data_by_custom_elements(df, aggregation_keys=None, elements_to_agg
                 if filter_column in df_filtered.columns and filter_values:
                     df_filtered = df_filtered[df_filtered[filter_column].isin(filter_values)]
         elif isinstance(elements_to_aggregate, list) and aggregation_keys:
-            # Mantém o comportamento original se for uma lista: filtra na primeira chave de agregação
+            # Keeps the original behavior if it's a list: filters in the first aggregation key
             filter_column = aggregation_keys[0]
             if filter_column in df_filtered.columns:
                 df_filtered = df_filtered[df_filtered[filter_column].isin(elements_to_aggregate)]
-        # Se elements_to_aggregate não for dict nem list, ou se for uma lista vazia, não faz nada aqui.
+        # If elements_to_aggregate is neither dict nor list, or if it's an empty list, do nothing here.
     
-    # Se após a filtragem o DataFrame estiver vazio, retorna um DataFrame vazio.
+    # If the DataFrame is empty after filtering, return an empty DataFrame.
     if df_filtered.empty:
         return pd.DataFrame(columns=df.columns.tolist() + ['mean', 'std', 'count', 'percentile_25', 'percentile_75', 'percentile_95'])
 
-    # Calcular estatísticas
+    # Calculate statistics
     agg_stats = df_filtered.groupby(aggregation_keys)[value_column].agg([
         'mean', 'std', 'count',
         lambda x: np.percentile(x, 25),
@@ -162,7 +162,7 @@ def aggregate_data_by_custom_elements(df, aggregation_keys=None, elements_to_agg
         lambda x: np.percentile(x, 95)
     ]).reset_index()
 
-    # Renomear as colunas calculadas
+    # Rename the calculated columns
     agg_stats = agg_stats.rename(columns={
         '<lambda_0>': 'percentile_25',
         '<lambda_1>': 'percentile_75',
@@ -174,31 +174,31 @@ def aggregate_data_by_custom_elements(df, aggregation_keys=None, elements_to_agg
 
 def aggregate_by_time(df, time_column='elapsed_minutes', value_column='value', agg_interval='5T', agg_funcs=None):
     """
-    Agrega dados por intervalos de tempo.
+    Aggregates data by time intervals.
 
     Args:
-        df (DataFrame): DataFrame com coluna de tempo (datetime ou timedelta) e valor.
-        time_column (str): Nome da coluna de tempo a ser usada para resampling.
-                           Deve ser datetime ou convertível para timedelta se for numérico (minutos, segundos).
-        value_column (str): Nome da coluna de valor a ser agregada.
-        agg_interval (str): String de intervalo de agregação (ex: '1T' para 1 minuto, '5S' para 5 segundos).
-                            Usado com pd.Grouper ou resample.
-        agg_funcs (list or dict, optional): Funções de agregação a aplicar (ex: ['mean', 'std']).
+        df (DataFrame): DataFrame with time column (datetime or timedelta) and value.
+        time_column (str): Name of the time column to be used for resampling.
+                           Must be datetime or convertible to timedelta if numeric (minutes, seconds).
+        value_column (str): Name of the value column to be aggregated.
+        agg_interval (str): String representing the aggregation interval (e.g., '1T' for 1 minute, '5S' for 5 seconds).
+                            Used with pd.Grouper or resample.
+        agg_funcs (list or dict, optional): Aggregation functions to apply (e.g., ['mean', 'std']).
                                             Defaults to ['mean'].
 
     Returns:
-        DataFrame: DataFrame agregado por tempo.
+        DataFrame: DataFrame aggregated by time.
     """
     if agg_funcs is None:
         agg_funcs = ['mean']
 
     if df.empty or time_column not in df.columns or value_column not in df.columns:
-        # Retorna um DataFrame vazio com colunas esperadas se os dados de entrada não forem válidos
+        # Return an empty DataFrame with expected columns if the input data is invalid
         return pd.DataFrame()
 
     df_copy = df.copy()
 
-    # Certificar que a coluna de tempo é datetime para usar resample ou pd.Grouper
+    # Ensure the time column is datetime to use resample or pd.Grouper
     if pd.api.types.is_numeric_dtype(df_copy[time_column]):
         df_copy[time_column] = pd.to_timedelta(df_copy[time_column], unit='m')
         base_timestamp = df_copy['datetime'].min() if 'datetime' in df_copy.columns else pd.Timestamp("2000-01-01")
@@ -207,7 +207,7 @@ def aggregate_by_time(df, time_column='elapsed_minutes', value_column='value', a
     elif pd.api.types.is_datetime64_any_dtype(df_copy[time_column]):
         time_col_for_resample = time_column
     else:
-        raise ValueError(f"A coluna de tempo '{time_column}' deve ser numérica (minutos/segundos) ou datetime.")
+        raise ValueError(f"The time column '{time_column}' must be numeric (minutes/seconds) or datetime.")
 
     grouping_cols = [col for col in ['tenant', 'phase', 'round'] if col in df_copy.columns]
 
@@ -217,7 +217,7 @@ def aggregate_by_time(df, time_column='elapsed_minutes', value_column='value', a
                 [pd.Grouper(key=time_col_for_resample, freq=agg_interval)] + grouping_cols
             )[value_column].agg(agg_funcs).reset_index()
         except Exception as e:
-            print(f"Erro ao agregar com pd.Grouper e grupos adicionais: {e}. Tentando resample global.")
+            print(f"Error aggregating with pd.Grouper and additional groups: {e}. Trying global resample.")
             df_copy = df_copy.set_index(time_col_for_resample)
             aggregated_df = df_copy[value_column].resample(agg_interval).agg(agg_funcs).reset_index()
     else:

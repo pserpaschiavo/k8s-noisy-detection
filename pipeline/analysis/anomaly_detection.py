@@ -1,8 +1,8 @@
 """
-Módulo para detecção avançada de anomalias em dados do experimento de noisy neighbors.
+Module for advanced anomaly detection in data from the noisy neighbors experiment.
 
-Este módulo implementa algoritmos de machine learning para detecção de anomalias,
-pontos de mudança e comportamentos anormais nas métricas coletadas.
+This module implements machine learning algorithms for anomaly detection,
+change points, and abnormal behaviors in the collected metrics.
 """
 
 import numpy as np
@@ -20,30 +20,30 @@ warnings.filterwarnings('ignore')
 
 def detect_anomalies_isolation_forest(df, metric_column='value', contamination=0.05, group_by=None):
     """
-    Detecta anomalias usando o algoritmo Isolation Forest.
+    Detects anomalies using the Isolation Forest algorithm.
     
     Args:
-        df (DataFrame): DataFrame com dados da métrica
-        metric_column (str): Coluna com os valores da métrica
-        contamination (float): Proporção esperada de anomalias nos dados
-        group_by (list): Colunas para agrupar os dados (ex: ['tenant', 'phase'])
+        df (DataFrame): DataFrame with metric data.
+        metric_column (str): Column with metric values.
+        contamination (float): Expected proportion of anomalies in the data.
+        group_by (list): Columns to group data by (e.g., ['tenant', 'phase']).
         
     Returns:
-        DataFrame: DataFrame original com coluna adicional 'is_anomaly' e 'anomaly_score'
+        DataFrame: Original DataFrame with additional columns 'is_anomaly_if' and 'anomaly_score_if'.
     """
-    # Cria uma cópia para não modificar o original
+    # Create a copy to avoid modifying the original
     result = df.copy()
     
-    # Adicionar coluna para anomalias
+    # Add column for anomalies
     result['is_anomaly_if'] = False
     result['anomaly_score_if'] = 0.0
     
-    # Se não houver agrupamento, tratar todo o conjunto de dados
+    # If no grouping, treat the entire dataset
     if group_by is None:
-        # Criar e treinar o modelo
+        # Create and train the model
         X = result[metric_column].values.reshape(-1, 1)
         
-        # Pular se houver valores faltantes
+        # Skip if there are missing values
         if np.isnan(X).any():
             X = result[metric_column].dropna().values.reshape(-1, 1)
             if len(X) == 0:
@@ -53,32 +53,32 @@ def detect_anomalies_isolation_forest(df, metric_column='value', contamination=0
         result['anomaly_score_if'] = model.fit_predict(X)
         result['is_anomaly_if'] = result['anomaly_score_if'] == -1
         
-        # Converter score para valores positivos (maior = mais anômalo)
+        # Convert score to positive values (higher = more anomalous)
         model_decision = model.decision_function(X) * -1
         result.loc[result.index[~np.isnan(result[metric_column])], 'anomaly_score_if'] = model_decision
     else:
-        # Para cada grupo, treinar um modelo separado
+        # For each group, train a separate model
         for group_name, group in result.groupby(group_by):
-            # Pular se o grupo for muito pequeno
+            # Skip if the group is too small
             if len(group) < 10:
                 continue
             
-            # Preparar os dados
+            # Prepare the data
             X = group[metric_column].values.reshape(-1, 1)
             
-            # Pular se houver valores faltantes
+            # Skip if there are missing values
             if np.isnan(X).any():
                 continue
             
-            # Criar e treinar o modelo
+            # Create and train the model
             model = IsolationForest(contamination=contamination, random_state=42)
             predictions = model.fit_predict(X)
             
-            # Atualizar o DataFrame de resultado
+            # Update the result DataFrame
             index_in_group = group.index
             result.loc[index_in_group, 'is_anomaly_if'] = (predictions == -1)
             
-            # Converter score para valores positivos (maior = mais anômalo)
+            # Convert score to positive values (higher = more anomalous)
             model_decision = model.decision_function(X) * -1
             result.loc[index_in_group, 'anomaly_score_if'] = model_decision
     
@@ -87,37 +87,37 @@ def detect_anomalies_isolation_forest(df, metric_column='value', contamination=0
 
 def detect_anomalies_local_outlier_factor(df, metric_column='value', n_neighbors=20, contamination=0.05, group_by=None):
     """
-    Detecta anomalias usando o algoritmo Local Outlier Factor (LOF).
+    Detects anomalies using the Local Outlier Factor (LOF) algorithm.
     
     Args:
-        df (DataFrame): DataFrame com dados da métrica
-        metric_column (str): Coluna com os valores da métrica
-        n_neighbors (int): Número de vizinhos para o algoritmo LOF
-        contamination (float): Proporção esperada de anomalias nos dados
-        group_by (list): Colunas para agrupar os dados (ex: ['tenant', 'phase'])
+        df (DataFrame): DataFrame with metric data.
+        metric_column (str): Column with metric values.
+        n_neighbors (int): Number of neighbors for the LOF algorithm.
+        contamination (float): Expected proportion of anomalies in the data.
+        group_by (list): Columns to group data by (e.g., ['tenant', 'phase']).
         
     Returns:
-        DataFrame: DataFrame original com coluna adicional 'is_anomaly_lof' e 'anomaly_score_lof'
+        DataFrame: Original DataFrame with additional columns 'is_anomaly_lof' and 'anomaly_score_lof'.
     """
-    # Cria uma cópia para não modificar o original
+    # Create a copy to avoid modifying the original
     result = df.copy()
     
-    # Adicionar coluna para anomalias
+    # Add column for anomalies
     result['is_anomaly_lof'] = False
     result['anomaly_score_lof'] = 0.0
     
-    # Se não houver agrupamento, tratar todo o conjunto de dados
+    # If no grouping, treat the entire dataset
     if group_by is None:
-        # Criar e treinar o modelo
+        # Create and train the model
         X = result[metric_column].values.reshape(-1, 1)
         
-        # Pular se houver valores faltantes
+        # Skip if there are missing values
         if np.isnan(X).any():
             X = result[metric_column].dropna().values.reshape(-1, 1)
             if len(X) == 0:
                 return result
         
-        # Ajustar n_neighbors se o conjunto de dados for pequeno
+        # Adjust n_neighbors if the dataset is small
         n_neighbors = min(n_neighbors, len(X) - 1)
         if n_neighbors < 1:
             return result
@@ -125,30 +125,30 @@ def detect_anomalies_local_outlier_factor(df, metric_column='value', n_neighbors
         model = LocalOutlierFactor(n_neighbors=n_neighbors, contamination=contamination)
         result['is_anomaly_lof'] = (model.fit_predict(X) == -1)
         
-        # Obter scores de anomalia (negativo da distância de alcance)
+        # Get anomaly scores (negative of outreach distance)
         result.loc[result.index[~np.isnan(result[metric_column])], 'anomaly_score_lof'] = -model.negative_outlier_factor_
     else:
-        # Para cada grupo, treinar um modelo separado
+        # For each group, train a separate model
         for group_name, group in result.groupby(group_by):
-            # Pular se o grupo for muito pequeno
+            # Skip if the group is too small
             if len(group) <= n_neighbors:
                 continue
             
-            # Preparar os dados
+            # Prepare the data
             X = group[metric_column].values.reshape(-1, 1)
             
-            # Pular se houver valores faltantes
+            # Skip if there are missing values
             if np.isnan(X).any():
                 continue
             
-            # Ajustar n_neighbors se o conjunto de dados for pequeno
+            # Adjust n_neighbors if the dataset is small
             local_n_neighbors = min(n_neighbors, len(X) - 1)
             
-            # Criar e treinar o modelo
+            # Create and train the model
             model = LocalOutlierFactor(n_neighbors=local_n_neighbors, contamination=contamination)
             predictions = model.fit_predict(X)
             
-            # Atualizar o DataFrame de resultado
+            # Update the result DataFrame
             index_in_group = group.index
             result.loc[index_in_group, 'is_anomaly_lof'] = (predictions == -1)
             result.loc[index_in_group, 'anomaly_score_lof'] = -model.negative_outlier_factor_
@@ -159,114 +159,114 @@ def detect_anomalies_local_outlier_factor(df, metric_column='value', n_neighbors
 def detect_change_points(df, metric_column='value', time_column='elapsed_minutes', 
                         method='pelt', model='l2', min_size=5, penalty=3, group_by=None):
     """
-    Detecta pontos de mudança na série temporal usando o algoritmo especificado.
+    Detects change points in the time series using the specified algorithm.
     
     Args:
-        df (DataFrame): DataFrame com dados da métrica
-        metric_column (str): Coluna com os valores da métrica
-        time_column (str): Coluna com os valores de tempo
-        method (str): Método de detecção ('pelt', 'binseg', 'window')
-        model (str): Modelo de custo ('l1', 'l2', 'rbf', etc.)
-        min_size (int): Tamanho mínimo do segmento
-        penalty (float): Penalidade para o algoritmo PELT
-        group_by (list): Colunas para agrupar os dados (ex: ['tenant'])
+        df (DataFrame): DataFrame with metric data.
+        metric_column (str): Column with metric values.
+        time_column (str): Column with time values.
+        method (str): Detection method ('pelt', 'binseg', 'window').
+        model (str): Cost model ('l1', 'l2', 'rbf', etc.).
+        min_size (int): Minimum segment size.
+        penalty (float): Penalty for the PELT algorithm.
+        group_by (list): Columns to group data by (e.g., ['tenant']).
         
     Returns:
-        DataFrame: DataFrame original com coluna adicional 'is_change_point'
-        dict: Informações sobre os pontos de mudança detectados
+        DataFrame: Original DataFrame with an additional column 'is_change_point'.
+        dict: Information about detected change points.
     """
-    # Cria uma cópia para não modificar o original
+    # Create a copy to avoid modifying the original
     result = df.copy()
     
-    # Adicionar coluna para pontos de mudança
+    # Add column for change points
     result['is_change_point'] = False
     
     changes_info = {}
     
-    # Se não houver agrupamento, tratar todo o conjunto de dados
+    # If no grouping, treat the entire dataset
     if group_by is None:
-        # Ordenar por tempo
+        # Sort by time
         sorted_df = result.sort_values(time_column)
         
-        # Preparar os dados
+        # Prepare the data
         signal = sorted_df[metric_column].values
         
-        # Pular se o sinal for muito pequeno
+        # Skip if the signal is too small
         if len(signal) < min_size * 2:
             return result, changes_info
         
-        # Configurar o algoritmo
+        # Configure the algorithm
         if method == 'pelt':
             algo = rpt.Pelt(model=model, min_size=min_size).fit(signal)
             change_points = algo.predict(pen=penalty)
         elif method == 'binseg':
             algo = rpt.Binseg(model=model, min_size=min_size).fit(signal)
-            change_points = algo.predict(n_bkps=5)  # Detectar até 5 pontos
+            change_points = algo.predict(n_bkps=5)  # Detect up to 5 points
         elif method == 'window':
             algo = rpt.Window(model=model, width=40).fit(signal)
-            change_points = algo.predict(n_bkps=5)  # Detectar até 5 pontos
+            change_points = algo.predict(n_bkps=5)  # Detect up to 5 points
         else:
-            # Método padrão
+            # Default method
             algo = rpt.Pelt(model=model, min_size=min_size).fit(signal)
             change_points = algo.predict(pen=penalty)
         
-        # Filtrar change_points para garantir que estão dentro dos limites de iloc
+        # Filter change_points to ensure they are within iloc bounds
         valid_change_points_indices = [cp for cp in change_points if cp < len(sorted_df)]
 
-        # Marcar os pontos de mudança no DataFrame
+        # Mark change points in the DataFrame
         for cp_idx in valid_change_points_indices:
-            # cp_idx já é um índice válido para iloc
+            # cp_idx is already a valid index for iloc
             idx = sorted_df.iloc[cp_idx].name
             result.loc[idx, 'is_change_point'] = True
         
-        # Registrar informações
-        # Usar os índices válidos para buscar os tempos
+        # Record information
+        # Use valid indices to fetch times
         change_point_times_list = []
-        if valid_change_points_indices: # Apenas se houver pontos de mudança válidos
+        if valid_change_points_indices: # Only if there are valid change points
             change_point_times_list = sorted_df.iloc[valid_change_points_indices][time_column].tolist()
 
         changes_info['all'] = {
-            'n_change_points': len(valid_change_points_indices), # Contar apenas os válidos
-            'change_point_indices': valid_change_points_indices, # Armazenar os válidos
+            'n_change_points': len(valid_change_points_indices), # Count only valid ones
+            'change_point_indices': valid_change_points_indices, # Store valid ones
             'change_point_times': change_point_times_list
         }
     else:
-        # Para cada grupo, detectar pontos de mudança separadamente
+        # For each group, detect change points separately
         for group_name, group in result.groupby(group_by):
-            # Ordenar por tempo
+            # Sort by time
             sorted_group = group.sort_values(time_column)
             
-            # Pular se o grupo for muito pequeno
+            # Skip if the group is too small
             if len(sorted_group) < min_size * 2:
                 continue
             
-            # Preparar os dados
+            # Prepare the data
             signal = sorted_group[metric_column].values
             
-            # Configurar o algoritmo
+            # Configure the algorithm
             if method == 'pelt':
                 algo = rpt.Pelt(model=model, min_size=min_size).fit(signal)
                 change_points = algo.predict(pen=penalty)
             elif method == 'binseg':
                 algo = rpt.Binseg(model=model, min_size=min_size).fit(signal)
-                change_points = algo.predict(n_bkps=5)  # Detectar até 5 pontos
+                change_points = algo.predict(n_bkps=5)  # Detect up to 5 points
             elif method == 'window':
                 algo = rpt.Window(model=model, width=40).fit(signal)
-                change_points = algo.predict(n_bkps=5)  # Detectar até 5 pontos
+                change_points = algo.predict(n_bkps=5)  # Detect up to 5 points
             else:
-                # Método padrão
+                # Default method
                 algo = rpt.Pelt(model=model, min_size=min_size).fit(signal)
                 change_points = algo.predict(pen=penalty)
 
-            # Filtrar change_points para garantir que estão dentro dos limites de iloc
+            # Filter change_points to ensure they are within iloc bounds
             valid_change_points_indices_group = [cp for cp in change_points if cp < len(sorted_group)]
             
-            # Marcar os pontos de mudança no DataFrame
+            # Mark change points in the DataFrame
             for cp_idx in valid_change_points_indices_group:
                 idx = sorted_group.iloc[cp_idx].name
                 result.loc[idx, 'is_change_point'] = True
             
-            # Registrar informações
+            # Record information
             change_point_times_list_group = []
             if valid_change_points_indices_group:
                 change_point_times_list_group = sorted_group.iloc[valid_change_points_indices_group][time_column].tolist()
@@ -283,42 +283,42 @@ def detect_change_points(df, metric_column='value', time_column='elapsed_minutes
 def detect_pattern_changes(df, metrics, time_column='elapsed_minutes', 
                          window_size=10, n_clusters=3, group_by=None):
     """
-    Detecta mudanças de padrão usando clustering de séries temporais.
+    Detects pattern changes using time series clustering.
     
     Args:
-        df (DataFrame): DataFrame com dados
-        metrics (list): Lista de nomes de métricas a incluir na análise
-        time_column (str): Coluna com os valores de tempo
-        window_size (int): Tamanho da janela deslizante para extração de padrões
-        n_clusters (int): Número de clusters para agrupar padrões
-        group_by (list): Colunas para agrupar os dados (ex: ['tenant'])
+        df (DataFrame): DataFrame with data.
+        metrics (list): List of metric names to include in the analysis.
+        time_column (str): Column with time values.
+        window_size (int): Size of the sliding window for pattern extraction.
+        n_clusters (int): Number of clusters to group patterns.
+        group_by (list): Columns to group data by (e.g., ['tenant']).
         
     Returns:
-        DataFrame: DataFrame com informações sobre padrões detectados
+        DataFrame: DataFrame with information about detected patterns.
     """
-    # Verificar se temos métricas suficientes
+    # Check if we have enough metrics
     if len(metrics) == 0:
         return pd.DataFrame()
     
     results = []
     
-    # Se não houver agrupamento, tratar todo o conjunto de dados
+    # If no grouping, treat the entire dataset
     if group_by is None:
-        # Ordenar por tempo
+        # Sort by time
         sorted_df = df.sort_values(time_column)
         
-        # Extração de características
+        # Feature extraction
         X = sorted_df[metrics].values
         
-        # Pular se o sinal for muito pequeno
+        # Skip if the signal is too small
         if len(X) < window_size * 2:
             return pd.DataFrame()
         
-        # Normalizar os dados
+        # Normalize the data
         scaler = StandardScaler()
         X_scaled = scaler.fit_transform(X)
         
-        # Extrair subsequências usando janela deslizante
+        # Extract subsequences using a sliding window
         subsequences = []
         timestamps = []
         
@@ -327,16 +327,16 @@ def detect_pattern_changes(df, metrics, time_column='elapsed_minutes',
             subsequences.append(subseq)
             timestamps.append(sorted_df.iloc[i+window_size-1][time_column])
         
-        # Agrupar subsequências
+        # Group subsequences
         if len(subsequences) > n_clusters:
             kmeans = TimeSeriesKMeans(n_clusters=n_clusters, metric="dtw", random_state=42)
             clusters = kmeans.fit_predict(np.array(subsequences))
             
-            # Detectar mudanças de cluster
+            # Detect cluster changes
             cluster_changes = np.diff(clusters, prepend=clusters[0])
             change_indices = np.where(cluster_changes != 0)[0]
             
-            # Registrar informações sobre mudanças de padrão
+            # Record information about pattern changes
             for i in change_indices:
                 if i > 0 and i < len(timestamps):
                     results.append({
@@ -346,23 +346,23 @@ def detect_pattern_changes(df, metrics, time_column='elapsed_minutes',
                         'group': 'all'
                     })
     else:
-        # Para cada grupo, detectar mudanças de padrão separadamente
+        # For each group, detect pattern changes separately
         for group_name, group in df.groupby(group_by):
-            # Ordenar por tempo
+            # Sort by time
             sorted_group = group.sort_values(time_column)
             
-            # Pular se o grupo for muito pequeno
+            # Skip if the group is too small
             if len(sorted_group) < window_size * 2:
                 continue
             
-            # Extração de características
+            # Feature extraction
             X = sorted_group[metrics].values
             
-            # Normalizar os dados
+            # Normalize the data
             scaler = StandardScaler()
             X_scaled = scaler.fit_transform(X)
             
-            # Extrair subsequências usando janela deslizante
+            # Extract subsequences using a sliding window
             subsequences = []
             timestamps = []
             
@@ -371,16 +371,16 @@ def detect_pattern_changes(df, metrics, time_column='elapsed_minutes',
                 subsequences.append(subseq)
                 timestamps.append(sorted_group.iloc[i+window_size-1][time_column])
             
-            # Agrupar subsequências
+            # Group subsequences
             if len(subsequences) > n_clusters:
                 kmeans = TimeSeriesKMeans(n_clusters=n_clusters, metric="dtw", random_state=42)
                 clusters = kmeans.fit_predict(np.array(subsequences))
                 
-                # Detectar mudanças de cluster
+                # Detect cluster changes
                 cluster_changes = np.diff(clusters, prepend=clusters[0])
                 change_indices = np.where(cluster_changes != 0)[0]
                 
-                # Registrar informações sobre mudanças de padrão
+                # Record information about pattern changes
                 for i in change_indices:
                     if i > 0 and i < len(timestamps):
                         results.append({
@@ -396,66 +396,66 @@ def detect_pattern_changes(df, metrics, time_column='elapsed_minutes',
 def detect_anomalies_ensemble(df, metric_column='value', time_column='elapsed_minutes', 
                             contamination=0.05, group_by=None):
     """
-    Detecta anomalias usando um conjunto de algoritmos (ensemble).
+    Detects anomalies using an ensemble of algorithms.
     
     Args:
-        df (DataFrame): DataFrame com dados da métrica
-        metric_column (str): Coluna com os valores da métrica
-        time_column (str): Coluna com os valores de tempo
-        contamination (float): Proporção esperada de anomalias nos dados
-        group_by (list): Colunas para agrupar os dados (ex: ['tenant', 'phase'])
+        df (DataFrame): DataFrame with metric data.
+        metric_column (str): Column with metric values.
+        time_column (str): Column with time values.
+        contamination (float): Expected proportion of anomalies in the data.
+        group_by (list): Columns to group data by (e.g., ['tenant', 'phase']).
         
     Returns:
-        DataFrame: DataFrame com resultados consolidados da detecção de anomalias
+        DataFrame: DataFrame with consolidated anomaly detection results.
     """
-    # Carregar configurações
+    # Load configurations
     from pipeline.config import DEFAULT_NOISY_TENANT
     
-    # Verificar e tratar valores NaN
+    # Check and handle NaN values
     df_clean = df.copy()
     
-    # Determinar qual é o tenant gerador de ruído a partir de um atributo no DataFrame ou usar o padrão
+    # Determine the noisy tenant from a DataFrame attribute or use the default
     noisy_tenant = None
     if hasattr(df, 'noisy_tenant') and df.noisy_tenant:
         noisy_tenant = df.noisy_tenant
     else:
         noisy_tenant = DEFAULT_NOISY_TENANT
     
-    # Tratar especialmente o caso do tenant gerador de ruído que pode não existir em certas fases
+    # Handle the case of the noisy tenant, which might not exist in certain phases
     if 'tenant' in df_clean.columns and group_by and 'tenant' in group_by:
-        # Verificar se há NaNs na coluna de valores para o tenant gerador de ruído
+        # Check for NaNs in the value column for the noisy tenant
         noisy_tenant_mask = df_clean['tenant'] == noisy_tenant
         if noisy_tenant_mask.any():
-            # Substituir NaNs por zeros apenas para o tenant gerador de ruído 
+            # Replace NaNs with zeros only for the noisy tenant
             df_clean.loc[noisy_tenant_mask, metric_column] = df_clean.loc[noisy_tenant_mask, metric_column].fillna(0)
     
-    # Preencher quaisquer outros NaNs remanescentes com a média da coluna
+    # Fill any other remaining NaNs with the column mean
     if df_clean[metric_column].isna().any():
         df_clean[metric_column] = df_clean[metric_column].fillna(df_clean[metric_column].mean())
     
-    # Aplicar diferentes algoritmos no DataFrame limpo
+    # Apply different algorithms to the cleaned DataFrame
     result_if = detect_anomalies_isolation_forest(df_clean, metric_column, contamination, group_by)
     
-    # Ajustar o número de vizinhos com base no tamanho dos dados
+    # Adjust the number of neighbors based on data size
     if group_by is not None:
-        # Calcular tamanho médio dos grupos
+        # Calculate average group size
         group_sizes = df_clean.groupby(group_by).size()
-        n_neighbors = max(5, int(group_sizes.mean() * 0.1))  # 10% do tamanho médio
+        n_neighbors = max(5, int(group_sizes.mean() * 0.1))  # 10% of average size
     else:
-        n_neighbors = max(5, int(len(df_clean) * 0.1))  # 10% do tamanho total
+        n_neighbors = max(5, int(len(df_clean) * 0.1))  # 10% of total size
     
     result_lof = detect_anomalies_local_outlier_factor(df, metric_column, n_neighbors, contamination, group_by)
     
-    # Combinar resultados
+    # Combine results
     result = df.copy()
     result['anomaly_score_if'] = result_if['anomaly_score_if']
     result['is_anomaly_if'] = result_if['is_anomaly_if']
     result['anomaly_score_lof'] = result_lof['anomaly_score_lof']
     result['is_anomaly_lof'] = result_lof['is_anomaly_lof']
     
-    # Normalizar scores para permitir combinação
+    # Normalize scores to allow combination
     if 'anomaly_score_if' in result.columns and 'anomaly_score_lof' in result.columns:
-        # Função para normalizar entre 0 e 1
+        # Function to normalize between 0 and 1
         def normalize(series):
             min_val = series.min()
             max_val = series.max()
@@ -467,13 +467,13 @@ def detect_anomalies_ensemble(df, metric_column='value', time_column='elapsed_mi
         result['normalized_score_if'] = normalize(result['anomaly_score_if'])
         result['normalized_score_lof'] = normalize(result['anomaly_score_lof'])
         
-        # Calcular score combinado (média dos scores normalizados)
+        # Calculate combined score (average of normalized scores)
         result['anomaly_score_combined'] = (result['normalized_score_if'] + result['normalized_score_lof']) / 2
         
-        # Determinar anomalias combinadas (qualquer um dos algoritmos classificou como anomalia)
+        # Determine combined anomalies (either algorithm classified as anomaly)
         result['is_anomaly'] = result['is_anomaly_if'] | result['is_anomaly_lof']
     
-    # Adicionar detecção de pontos de mudança
+    # Add change point detection
     change_result, change_info = detect_change_points(df, metric_column, time_column, group_by=group_by)
     result['is_change_point'] = change_result['is_change_point']
     
