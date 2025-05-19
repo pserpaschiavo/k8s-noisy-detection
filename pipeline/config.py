@@ -146,6 +146,7 @@ DEFAULT_METRICS_FOR_CAUSALITY = [
     "memory_usage",
     "network_total_bandwidth"
 ]
+CAUSALITY_FIGURE_SIZE = (12, 10)  # Default figure size for causality graphs (width, height)
 
 # Colors for metrics in causality graph (can be expanded)
 # Using more formal colors for academic publications

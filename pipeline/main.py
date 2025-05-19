@@ -34,9 +34,7 @@ from pipeline.data_processing.quota_parser import (
 from pipeline.analysis.tenant_analysis import calculate_correlation_matrix, compare_tenant_metrics
 from pipeline.analysis.phase_analysis import compare_phases_ttest, analyze_recovery_effectiveness
 from pipeline.analysis.advanced_analysis import calculate_covariance_matrix, calculate_entropy_metrics, calculate_normalized_impact_score
-# from pipeline.analysis.advanced_analysis import granger_causality_test, analyze_causal_relationships # Commented out due to ImportError
-from pipeline.analysis.tenant_analysis import calculate_inter_tenant_correlation_per_metric, calculate_inter_tenant_covariance_per_metric
-from pipeline.analysis.inter_tenant_causality import identify_causal_chains, visualize_causal_graph
+from pipeline.analysis.inter_tenant_causality import visualize_causal_graph, perform_inter_tenant_causality_analysis
 from pipeline.analysis.noisy_tenant_detection import identify_noisy_tenant
 from pipeline.analysis.experiment_comparison import (
     load_multiple_experiments,
@@ -252,15 +250,11 @@ def compare_rounds_within_experiment(experiment_results, output_dir_main, metric
                     comparison_data = phase_specific_df_filtered.groupby('round')['value'].mean().reset_index()
                     comparison_data.rename(columns={'value': 'mean_value'}, inplace=True)
                 
-                print(f"    Mean values of {metric_display_name} in phase {current_phase_display_for_report} per round:")
-                print(comparison_data)
-                
                 # Use current_phase_display_for_report for filenames
                 csv_filename = f"{metric_name}_{current_phase_display_for_report.replace(' ', '_')}_round_comparison.csv"
                 csv_path = os.path.join(rounds_comparison_output_dir, csv_filename)
                 try:
                     comparison_data.to_csv(csv_path, index=False)
-                    print(f"    Comparison (CSV) saved to: {csv_path}")
                     current_output["csv_path"] = csv_path
                 except Exception as e:
                     print(f"    Error saving round comparison CSV: {e}")
@@ -316,16 +310,12 @@ def compare_rounds_within_experiment(experiment_results, output_dir_main, metric
                     plot_path = os.path.join(plots_subdir, plot_filename)
                     try:
                         plt.savefig(plot_path)
-                        print(f"    Round comparison plot saved to: {plot_path}")
                         current_output["plot_path"] = plot_path
                     except Exception as e:
                         print(f"    Error saving round comparison plot: {e}")
                     plt.close()
                 all_comparison_outputs[output_key] = current_output
-            else:
-                print(f"    No data for metric {metric_display_name} in phase {current_phase_display_for_report} for round comparison.")
     
-    print("Comparison Between Rounds of the Same Experiment completed.")
     return all_comparison_outputs
 
 
@@ -692,710 +682,174 @@ def main():
                 print(f"DataFrame for metric '{metric_name}', round '{round_name}' is empty or None. Skipping time normalization.")
     print("Global time normalization completed.")
 
-    # >>> BEGIN MODIFICATION TO USE AGGREGATED DATA FOR ADVANCED ANALYSIS <<<
-    # Option to use aggregated data if multiple rounds exist and flag is set
+    # >>> BEGIN MODIFICATION TO PREPARE DATA FOR ADVANCED ANALYSIS <<<
+    
+    # 1. Consolidate all_metrics_data into a single DataFrame for time-series based analysis
+    list_of_processed_dfs = []
+    if all_metrics_data:
+        for metric_name, rounds_data_dict in all_metrics_data.items():
+            if isinstance(rounds_data_dict, dict):
+                for round_name, df_round in rounds_data_dict.items():
+                    if isinstance(df_round, pd.DataFrame) and not df_round.empty:
+                        df_copy = df_round.copy()
+                        df_copy['metric_name'] = metric_name
+                        # Ensure 'round' column is present, might be added by load_experiment_data or here
+                        if 'round' not in df_copy.columns:
+                            df_copy['round'] = round_name
+                        list_of_processed_dfs.append(df_copy)
+            # This case should ideally not be hit if load_experiment_data consistently returns Dict[metric, Dict[round, DF]]
+            elif isinstance(rounds_data_dict, pd.DataFrame) and not rounds_data_dict.empty:
+                 print(f"Warning: Data for metric '{metric_name}' is a single DataFrame, not a dict of rounds. Consolidating as is.")
+                 df_copy = rounds_data_dict.copy()
+                 df_copy['metric_name'] = metric_name
+                 if 'round' not in df_copy.columns: # Add a default round if missing
+                    df_copy['round'] = 'default_round'
+                 list_of_processed_dfs.append(df_copy)
+
+    consolidated_processed_df = pd.DataFrame()
+    if list_of_processed_dfs:
+        consolidated_processed_df = pd.concat(list_of_processed_dfs, ignore_index=True)
+        print(f"Consolidated processed data for advanced analysis. Shape: {consolidated_processed_df.shape}")
+    else:
+        print("No processed data to consolidate for advanced analysis.")
+
+    # 2. Prepare aggregated data if requested and possible
+    consolidated_aggregated_df = pd.DataFrame() # Initialize as empty DF
+    aggregated_data_dict = {} # Initialize as empty dict
+
+    # Define multiple_rounds_available based on the structure of all_metrics_data
     multiple_rounds_available = False
-    if metrics_data:
-        # Check if any metric has data from more than one round
-        for metric_name_check, rounds_data_check in metrics_data.items():
-            if isinstance(rounds_data_check, dict) and len(rounds_data_check) > 1:
+    if all_metrics_data:
+        for metric_name, rounds_data_dict in all_metrics_data.items():
+            if isinstance(rounds_data_dict, dict) and len(rounds_data_dict) > 1:
                 multiple_rounds_available = True
                 break
-    
+    print(f"Multiple rounds available for aggregation: {multiple_rounds_available}")
+
     if args.use_aggregated_rounds_for_advanced and multiple_rounds_available:
-        print("\nPreparing data for aggregation across multiple rounds...")
-        metrics_for_aggregation = {}
+        print("\nPreparing dictionary of metrics for aggregation across multiple rounds...")
+        metrics_for_aggregation_dict = {} # Renamed from metrics_for_aggregation to avoid confusion with the list
         for metric_name, rounds_data_map in all_metrics_data.items():
-            if isinstance(rounds_data_map, dict):
-                metric_dfs = []
+            if isinstance(rounds_data_map, dict) and rounds_data_map:
+                metric_dfs_list = []
                 for round_name, df_round in rounds_data_map.items():
-                    df_copy = df_round.copy()
-                    df_copy['round'] = round_name # Ensure 'round' column is present
-                    metric_dfs.append(df_copy)
-                if metric_dfs:
-                    metrics_for_aggregation[metric_name] = pd.concat(metric_dfs, ignore_index=True)
-            else:
-                # If it's already a DataFrame (e.g. single round loaded, or already concatenated)
-                # Ensure 'round' column exists or add a default one
-                if 'round' not in rounds_data_map.columns:
-                    df_copy = rounds_data_map.copy()
-                    df_copy['round'] = 'default_round' # Placeholder
-                    metrics_for_aggregation[metric_name] = df_copy
-                else:
-                    metrics_for_aggregation[metric_name] = rounds_data_map
+                    if isinstance(df_round, pd.DataFrame) and not df_round.empty:
+                        df_copy = df_round.copy()
+                        if 'round' not in df_copy.columns: # Ensure 'round' column from key
+                            df_copy['round'] = round_name
+                        metric_dfs_list.append(df_copy)
+                if metric_dfs_list:
+                    # Concatenate all rounds for a single metric into one DataFrame
+                    metrics_for_aggregation_dict[metric_name] = pd.concat(metric_dfs_list, ignore_index=True)
+            elif isinstance(rounds_data_map, pd.DataFrame) and not rounds_data_map.empty: # Handle cases where a metric might already be a single DF
+                df_copy = rounds_data_map.copy()
+                if 'round' not in df_copy.columns:
+                    df_copy['round'] = 'default_round' # Add default if missing
+                metrics_for_aggregation_dict[metric_name] = df_copy
 
-        if metrics_for_aggregation:
-            aggregated_data_for_advanced = aggregate_metrics_across_rounds(metrics_for_aggregation, value_column='value')
-            print("Aggregation complete. Using aggregated data for subsequent advanced/causality analyses.")
+
+        if metrics_for_aggregation_dict:
+            # Call aggregate_metrics_across_rounds with the dictionary of DataFrames
+            # Each DataFrame in this dict already contains all rounds for that specific metric
+            aggregated_data_dict = aggregate_metrics_across_rounds(metrics_for_aggregation_dict, value_column='value')
             
-            # Generate aggregated plots and tables
-            for metric_name_agg, agg_df in aggregated_data_for_advanced.items():
-                if not agg_df.empty:
-                    # Pass all_metrics_data to plot_aggregated_metrics
-                    fig_agg = plot_aggregated_metrics(aggregated_data_for_advanced, metric_name_agg, all_metrics_data_for_phases=all_metrics_data)
-                    if fig_agg:
-                        agg_plot_path = os.path.join(advanced_dir, 'plots', f'aggregated_{metric_name_agg}_across_rounds.png')
-                        fig_agg.savefig(agg_plot_path)
-                        plt.close(fig_agg)
-                        print(f"    Aggregated plot for {metric_name_agg} saved to {agg_plot_path}")
-                    
-                    # Generate boxplots for aggregated data
-                    plot_aggregated_metrics_boxplot(aggregated_data_for_advanced, metric_name_agg, os.path.join(advanced_dir, 'plots'))
+            if aggregated_data_dict:
+                print("Aggregation complete. Consolidating aggregated data for advanced/causality analyses.")
+                list_of_aggregated_dfs = []
+                for metric_name_agg, agg_df_metric in aggregated_data_dict.items():
+                    if isinstance(agg_df_metric, pd.DataFrame) and not agg_df_metric.empty:
+                        df_copy = agg_df_metric.copy()
+                        df_copy['metric_name'] = metric_name_agg
+                        list_of_aggregated_dfs.append(df_copy)
+                
+                if list_of_aggregated_dfs:
+                    consolidated_aggregated_df = pd.concat(list_of_aggregated_dfs, ignore_index=True)
+                    print(f"Consolidated aggregated data. Shape: {consolidated_aggregated_df.shape}")
 
-                    agg_table_path = os.path.join(advanced_dir, 'tables', f'aggregated_{metric_name_agg}_across_rounds.csv')
-                    export_to_csv(agg_df, agg_table_path)
-                    print(f"    Aggregated table for {metric_name_agg} saved to {agg_table_path}")
+                # Generate aggregated plots and tables using the per-metric aggregated data (aggregated_data_dict)
+                for metric_name_agg, agg_df in aggregated_data_dict.items(): # Use aggregated_data_dict here
+                    if not agg_df.empty:
+                        # Pass all_metrics_data to plot_aggregated_metrics for phase information if needed by the plot function
+                        fig_agg = plot_aggregated_metrics(aggregated_data_dict, metric_name_agg, all_metrics_data_for_phases=all_metrics_data)
+                        if fig_agg:
+                            agg_plot_path = os.path.join(advanced_dir, 'plots', f'aggregated_{metric_name_agg}_across_rounds.png')
+                            fig_agg.savefig(agg_plot_path)
+                            plt.close(fig_agg)
+                            print(f"    Aggregated plot for {metric_name_agg} saved to {agg_plot_path}")
+                        
+                        plot_aggregated_metrics_boxplot(aggregated_data_dict, metric_name_agg, os.path.join(advanced_dir, 'plots'))
+
+                        agg_table_path = os.path.join(advanced_dir, 'tables', f'aggregated_{metric_name_agg}_across_rounds.csv')
+                        export_to_csv(agg_df, agg_table_path)
+                        print(f"    Aggregated table for {metric_name_agg} saved to {agg_table_path}")
+            else:
+                print("Aggregation across rounds did not yield any data.")
         else:
-            print("No metrics suitable for aggregation were found.")
-    # >>> END MODIFICATION <<<
+            print("No metrics suitable for aggregation were found (metrics_for_aggregation_dict is empty).")
+    # >>> END MODIFICATION TO PREPARE DATA <<<
 
-    # Main Processing and Analysis (if data and active flags exist)
-    if args.advanced and metrics_data:
-        print("\nRunning Advanced Analyses and Generating Plots...")
+    # Advanced analysis: Covariance, Entropy, Causality
+    if args.advanced or args.inter_tenant_causality:
+        print("\n=== Running Advanced Analyses ===")
         advanced_plots_dir = os.path.join(advanced_dir, 'plots')
-        os.makedirs(advanced_plots_dir, exist_ok=True)
         advanced_tables_dir = os.path.join(advanced_dir, 'tables')
-        os.makedirs(advanced_tables_dir, exist_ok=True)
+
+        # The 'data_for_advanced_analysis' variable is no longer the primary input for causality.
+        # Specific analyses should use either consolidated_processed_df or consolidated_aggregated_df.
         
-        # Ensure advanced_analysis_results is initialized correctly
-        # Results will be stored in experiment_results['advanced_analysis']
-        # If using aggregated, new sub-keys like 'correlation_matrices_aggregated' might be used,
-        # or we can overwrite existing keys if the structure is compatible.
-        # For clarity, let's use distinct keys for aggregated results within advanced_analysis.
-        if 'advanced_analysis' not in experiment_results:
-            experiment_results['advanced_analysis'] = {}
-        # This variable will hold the results for the current run (either aggregated or not)
-        current_advanced_results_dict = experiment_results['advanced_analysis']
+        source_description_for_log = "processed (per-round) data" # Default description
 
-
-        if args.use_aggregated_rounds_for_advanced and 'aggregated_data_for_advanced' in locals() and aggregated_data_for_advanced:
-            print("\nUsing AGGREGATED data for Advanced Analyses (correlation, covariance, entropy)...")
-            
-            available_phases_in_agg = set()
-            if aggregated_data_for_advanced: # Check if dict is not empty
-                for metric_df_agg_check in aggregated_data_for_advanced.values():
-                    if 'phase' in metric_df_agg_check.columns and not metric_df_agg_check.empty:
-                        available_phases_in_agg.update(metric_df_agg_check['phase'].unique())
-            
-            if not available_phases_in_agg and aggregated_data_for_advanced: # If no phases, but data exists (e.g. not phase-specific aggregation)
-                available_phases_in_agg.add("all_aggregated") # Use a placeholder for non-phased aggregated data
-            elif not aggregated_data_for_advanced:
-                 print("    No aggregated data available to process for advanced analysis.")
-
-            for phase_to_analyze_agg in sorted(list(p for p in available_phases_in_agg if p is not None)):
-                phase_str = f"phase_{phase_to_analyze_agg}" if phase_to_analyze_agg != "all_aggregated" else "all_aggregated"
-                print(f"  Analyzing AGGREGATED data for: {phase_str}")
-
-                metrics_dict_for_agg_phase = {}
-                for metric_name, agg_df in aggregated_data_for_advanced.items():
-                    df_for_corr_cov = agg_df.copy()
-                    if phase_to_analyze_agg != "all_aggregated" and 'phase' in df_for_corr_cov.columns:
-                        df_for_corr_cov = df_for_corr_cov[df_for_corr_cov['phase'] == phase_to_analyze_agg]
-                    
-                    if not df_for_corr_cov.empty:
-                        # Corrected renaming: 'experiment_elapsed_seconds' is the time column from aggregation
-                        df_for_corr_cov = df_for_corr_cov.rename(columns={'experiment_elapsed_seconds': 'datetime', 'mean': 'value'})
-                        df_for_corr_cov['round'] = 'aggregated_data' # Dummy round for compatibility
-                        # Ensure 'phase' column exists if phase_to_analyze_agg is not "all_aggregated"
-                        if phase_to_analyze_agg != "all_aggregated" and 'phase' not in df_for_corr_cov.columns:
-                             df_for_corr_cov['phase'] = phase_to_analyze_agg
-                        elif phase_to_analyze_agg == "all_aggregated" and 'phase' not in df_for_corr_cov.columns:
-                             df_for_corr_cov['phase'] = "all_aggregated" # ensure phase column
-
-                        # Ensure 'datetime' column exists after renaming
-                        if 'datetime' not in df_for_corr_cov.columns:
-                            print(f"    WARNING: 'datetime' column missing for {metric_name}, {phase_str} after rename. Columns: {df_for_corr_cov.columns.tolist()}")
-                            # Attempt to use 'time_bin_global' if 'experiment_elapsed_seconds' was not found and it exists
-                            if 'time_bin_global' in agg_df.columns:
-                                print(f"    Attempting rename from 'time_bin_global' instead for {metric_name}")
-                                df_for_corr_cov = agg_df.copy().rename(columns={'time_bin_global': 'datetime', 'mean': 'value'})
-                                df_for_corr_cov['round'] = 'aggregated_data' 
-                                if phase_to_analyze_agg != "all_aggregated" and 'phase' not in df_for_corr_cov.columns:
-                                    df_for_corr_cov['phase'] = phase_to_analyze_agg
-                                elif phase_to_analyze_agg == "all_aggregated" and 'phase' not in df_for_corr_cov.columns:
-                                    df_for_corr_cov['phase'] = "all_aggregated"
-                            else:
-                                print(f"    ERROR: Neither 'experiment_elapsed_seconds' nor 'time_bin_global' found in columns for {metric_name}. Skipping.")
-                                continue # Skip this metric for this phase if time column is missing
-
-                        metrics_dict_for_agg_phase[metric_name] = df_for_corr_cov[['datetime', 'tenant', 'value', 'round', 'phase']]
-
-                if not metrics_dict_for_agg_phase:
-                    print(f"    No aggregated data for {phase_str} to analyze for inter-metric correlation/covariance.")
-                    continue
-
-                # 1. AGGREGATED Inter-Metric Correlation Analysis
-                try:
-                    print(f"    Calculating AGGREGATED inter-metric correlation matrix for {phase_str}")
-                    correlation_matrix_agg = calculate_correlation_matrix(
-                        metrics_dict=metrics_dict_for_agg_phase,
-                        round_name='aggregated_data',
-                        tenants=args.tenants,
-                        noisy_tenant=args.noisy_tenant
-                    )
-                    if correlation_matrix_agg is not None and not correlation_matrix_agg.empty:
-                        plot_path_corr_agg = os.path.join(advanced_plots_dir, f'correlation_heatmap_aggregated_{phase_str}.png')
-                        fig_corr_agg = plot_correlation_heatmap(
-                            correlation_matrix_agg,
-                            title=f'Aggregated Inter-Metric Correlation ({PHASE_DISPLAY_NAMES.get(phase_to_analyze_agg, phase_str)})'
-                        )
-                        fig_corr_agg.savefig(plot_path_corr_agg)
-                        plt.close(fig_corr_agg)
-                        print(f"      Aggregated correlation heatmap saved to: {plot_path_corr_agg}")
-                        current_advanced_results_dict.setdefault('correlation_matrices_aggregated', {})[phase_str] = correlation_matrix_agg.to_dict()
-                    else:
-                        print(f"      Aggregated correlation matrix is empty for {phase_str}.")
-                except Exception as e:
-                    print(f"    Error in AGGREGATED inter-metric correlation analysis for {phase_str}: {e}")
-
-                # 2. AGGREGATED Inter-Metric Covariance Analysis
-                try:
-                    print(f"    Calculating AGGREGATED inter-metric covariance matrix for {phase_str}")
-                    covariance_matrix_agg, _ = calculate_covariance_matrix(
-                        metrics_dict=metrics_dict_for_agg_phase,
-                        round_name='aggregated_data',
-                        tenants=args.tenants
-                    )
-                    if covariance_matrix_agg is not None and not covariance_matrix_agg.empty:
-                        plot_path_cov_agg = os.path.join(advanced_plots_dir, f'covariance_heatmap_aggregated_{phase_str}.png')
-                        fig_cov_agg = plot_correlation_heatmap(
-                            covariance_matrix_agg,
-                            title=f'Aggregated Inter-Metric Covariance ({PHASE_DISPLAY_NAMES.get(phase_to_analyze_agg, phase_str)})',
-                            cmap='coolwarm'
-                        )
-                        fig_cov_agg.savefig(plot_path_cov_agg)
-                        plt.close(fig_cov_agg)
-                        print(f"      Aggregated covariance heatmap saved to: {plot_path_cov_agg}")
-                        current_advanced_results_dict.setdefault('covariance_matrices_aggregated', {})[phase_str] = covariance_matrix_agg.to_dict()
-                    else:
-                        print(f"      Aggregated covariance matrix is empty for {phase_str}.")
-                except Exception as e:
-                    print(f"    Error in AGGREGATED inter-metric covariance analysis for {phase_str}: {e}")
-
-            # AGGREGATED Inter-Tenant Correlation and Covariance per Metric
-            print("\n  Calculating AGGREGATED Inter-Tenant Correlation and Covariance per Metric...")
-            for metric_name_agg_inter, agg_df_inter_original in aggregated_data_for_advanced.items():
-                agg_df_inter = agg_df_inter_original.copy() # Work on a copy to avoid modifying the original dict entry
-                if not agg_df_inter.empty and 'tenant' in agg_df_inter.columns and agg_df_inter['tenant'].nunique() > 1:
-                    # Corrected renaming for inter-tenant analysis from the correct source DataFrame
-                    if 'experiment_elapsed_seconds' in agg_df_inter.columns:
-                        df_for_inter_tenant_analysis = agg_df_inter.rename(columns={'experiment_elapsed_seconds': 'datetime', 'mean': 'value'})
-                    elif 'time_bin_global' in agg_df_inter.columns: # Fallback if 'experiment_elapsed_seconds' was somehow not the primary name
-                        df_for_inter_tenant_analysis = agg_df_inter.rename(columns={'time_bin_global': 'datetime', 'mean': 'value'})
-                    else:
-                        print(f"    ERROR: Time column ('experiment_elapsed_seconds' or 'time_bin_global') not found for {metric_name_agg_inter} in inter-tenant analysis. Columns: {agg_df_inter.columns.tolist()}. Skipping.")
-                        continue
-                    
-                    # Verify 'datetime' column exists after renaming before proceeding
-                    if 'datetime' not in df_for_inter_tenant_analysis.columns:
-                        print(f"    ERROR: 'datetime' column still missing after rename for {metric_name_agg_inter} in inter-tenant. Cols: {df_for_inter_tenant_analysis.columns.tolist()}. Skipping.")
-                        continue
-
-                    if args.tenants:
-                        df_for_inter_tenant_analysis = df_for_inter_tenant_analysis[df_for_inter_tenant_analysis['tenant'].isin(args.tenants)]
-                    
-                    if df_for_inter_tenant_analysis['tenant'].nunique() < 2:
-                        print(f"    Skipping AGGREGATED inter-tenant analysis for {metric_name_agg_inter}: < 2 tenants after filtering.")
-                        continue
-
-                    try: # AGGREGATED Inter-Tenant Correlation
-                        print(f"    Calculating AGGREGATED inter-tenant correlation for metric: {metric_name_agg_inter}")
-                        inter_tenant_corr_matrix_agg = calculate_inter_tenant_correlation_per_metric(df_for_inter_tenant_analysis, value_col='value', time_col='datetime', tenant_col='tenant')
-                        if inter_tenant_corr_matrix_agg is not None and not inter_tenant_corr_matrix_agg.empty:
-                            csv_path = os.path.join(advanced_tables_dir, f'inter_tenant_correlation_aggregated_{metric_name_agg_inter}.csv')
-                            export_to_csv(inter_tenant_corr_matrix_agg, csv_path)
-                            plot_path = os.path.join(advanced_plots_dir, f'inter_tenant_correlation_heatmap_aggregated_{metric_name_agg_inter}.png')
-                            fig = plot_correlation_heatmap(
-                                inter_tenant_corr_matrix_agg,
-                                title=f'Aggregated Inter-Tenant Correlation - {METRIC_DISPLAY_NAMES.get(metric_name_agg_inter, metric_name_agg_inter)}',
-                                cbar_label='Correlation Coefficient'
-                            )
-                            fig.savefig(plot_path)
-                            plt.close(fig)
-                            print(f"      Aggregated inter-tenant correlation for {metric_name_agg_inter} saved (CSV/Plot).")
-                            current_advanced_results_dict.setdefault('inter_tenant_correlation_matrices_aggregated', {}).setdefault(metric_name_agg_inter, {})['aggregated'] = inter_tenant_corr_matrix_agg.to_dict()
-                        else:
-                            print(f"      Aggregated inter-tenant correlation matrix empty for {metric_name_agg_inter}.")
-                    except Exception as e:
-                        print(f"      Error in AGGREGATED inter-tenant correlation for {metric_name_agg_inter}: {e}")
-
-                    try: # AGGREGATED Inter-Tenant Covariance
-                        print(f"    Calculating AGGREGATED inter-tenant covariance for metric: {metric_name_agg_inter}")
-                        inter_tenant_cov_matrix_agg = calculate_inter_tenant_covariance_per_metric(df_for_inter_tenant_analysis, value_col='value', time_col='datetime', tenant_col='tenant')
-                        if inter_tenant_cov_matrix_agg is not None and not inter_tenant_cov_matrix_agg.empty:
-                            csv_path = os.path.join(advanced_tables_dir, f'inter_tenant_covariance_aggregated_{metric_name_agg_inter}.csv')
-                            export_to_csv(inter_tenant_cov_matrix_agg, csv_path)
-                            plot_path = os.path.join(advanced_plots_dir, f'inter_tenant_covariance_heatmap_aggregated_{metric_name_agg_inter}.png')
-                            fig = plot_correlation_heatmap(
-                                inter_tenant_cov_matrix_agg,
-                                title=f'Aggregated Inter-Tenant Covariance - {METRIC_DISPLAY_NAMES.get(metric_name_agg_inter, metric_name_agg_inter)}',
-                                cbar_label='Covariance'
-                            )
-                            fig.savefig(plot_path)
-                            plt.close(fig)
-                            print(f"      Aggregated inter-tenant covariance for {metric_name_agg_inter} saved (CSV/Plot).")
-                            current_advanced_results_dict.setdefault('inter_tenant_covariance_matrices_aggregated', {}).setdefault(metric_name_agg_inter, {})['aggregated'] = inter_tenant_cov_matrix_agg.to_dict()
-                        else:
-                            print(f"      Aggregated inter-tenant covariance matrix empty for {metric_name_agg_inter}.")
-                    except Exception as e:
-                        print(f"      Error in AGGREGATED inter-tenant covariance for {metric_name_agg_inter}: {e}")
-                else:
-                    print(f"    Skipping AGGREGATED inter-tenant analysis for {metric_name_agg_inter}: Not enough unique tenants or data.")
-            
-            # 3. AGGREGATED Entropy Analysis
-            print(f"\n  Calculating AGGREGATED entropy metrics...")
-            all_entropy_results_agg_list = []
-            for metric_name_entropy_agg, agg_df_entropy_original in aggregated_data_for_advanced.items():
-                agg_df_entropy = agg_df_entropy_original.copy() # Work on a copy
-                if not agg_df_entropy.empty and 'tenant' in agg_df_entropy.columns and agg_df_entropy['tenant'].nunique() >=2 :
-                    # Corrected renaming for entropy analysis from the correct source DataFrame
-                    if 'experiment_elapsed_seconds' in agg_df_entropy.columns:
-                        df_for_entropy = agg_df_entropy.rename(columns={'experiment_elapsed_seconds': 'datetime', 'mean': 'value'})
-                    elif 'time_bin_global' in agg_df_entropy.columns: # Fallback
-                        df_for_entropy = agg_df_entropy.rename(columns={'time_bin_global': 'datetime', 'mean': 'value'})
-                    else:
-                        print(f"    ERROR: Time column ('experiment_elapsed_seconds' or 'time_bin_global') not found for {metric_name_entropy_agg} in entropy analysis. Columns: {agg_df_entropy.columns.tolist()}. Skipping.")
-                        continue
-
-                    # Verify 'datetime' column exists after renaming before proceeding
-                    if 'datetime' not in df_for_entropy.columns:
-                        print(f"    ERROR: 'datetime' column still missing after rename for {metric_name_entropy_agg} in entropy. Cols: {df_for_entropy.columns.tolist()}. Skipping.")
-                        continue
-
-                    if args.tenants:
-                        df_for_entropy = df_for_entropy[df_for_entropy['tenant'].isin(args.tenants)]
-                    
-                    if df_for_entropy['tenant'].nunique() < 2:
-                        print(f"    Skipping AGGREGATED entropy for {metric_name_entropy_agg}: < 2 tenants after filtering.")
-                        continue
-
-                    current_metric_phases_entropy = df_for_entropy['phase'].unique() if 'phase' in df_for_entropy.columns else ["all_aggregated"]
-                    for phase_entropy in current_metric_phases_entropy:
-                        phase_entropy_str = f"phase_{phase_entropy}" if phase_entropy != "all_aggregated" else "all_aggregated"
-                        df_phase_entropy = df_for_entropy.copy()
-                        if phase_entropy != "all_aggregated" and 'phase' in df_phase_entropy.columns:
-                            df_phase_entropy = df_phase_entropy[df_phase_entropy['phase'] == phase_entropy]
-                        elif 'phase' not in df_phase_entropy.columns : # If no phase column, use all data for "all_aggregated"
-                            pass
-
-
-                        if df_phase_entropy.empty or df_phase_entropy['tenant'].nunique() < 2:
-                            print(f"      Skipping AGGREGATED entropy for {metric_name_entropy_agg}, {phase_entropy_str}: not enough data or tenants.")
-                            continue
-                        
-                        print(f"    Calculating AGGREGATED entropy for metric: {metric_name_entropy_agg}, {phase_entropy_str}")
-                        try:
-                            entropy_results_df_agg = calculate_entropy_metrics(
-                                df_phase_entropy,
-                                tenants=None, # Uses all tenants in the provided df_phase_entropy
-                                phase=phase_entropy if phase_entropy != "all_aggregated" else None, # Pass phase if specific, else None
-                                value_col='value', # CORRECTED from metric_column and made explicit
-                                time_col='datetime', # Explicitly pass
-                                tenant_col='tenant',   # Explicitly pass
-                                phase_col='phase'     # Explicitly pass
-                            )
-                            if entropy_results_df_agg is not None and not entropy_results_df_agg.empty:
-                                entropy_results_df_agg['metric'] = metric_name_entropy_agg
-                                entropy_results_df_agg['aggregation_phase_analyzed'] = phase_entropy_str
-                                all_entropy_results_agg_list.append(entropy_results_df_agg)
-                                table_path_entropy_agg = os.path.join(advanced_tables_dir, f'entropy_analysis_aggregated_{metric_name_entropy_agg}_{phase_entropy_str}.csv')
-                                export_to_csv(entropy_results_df_agg, table_path_entropy_agg)
-                                print(f"      Aggregated entropy results for {metric_name_entropy_agg}, {phase_entropy_str} saved to {table_path_entropy_agg}")
-                            else:
-                                print(f"      No AGGREGATED entropy results for {metric_name_entropy_agg}, {phase_entropy_str}.")
-                        except Exception as e_entropy_agg:
-                            print(f"    Error in AGGREGATED entropy analysis for {metric_name_entropy_agg}, {phase_entropy_str}: {e_entropy_agg}")
-                else:
-                    print(f"    Skipping AGGREGATED entropy for {metric_name_entropy_agg}: Not enough unique tenants or data.")
-
-            if all_entropy_results_agg_list:
-                final_entropy_df_agg = pd.concat(all_entropy_results_agg_list, ignore_index=True)
-                current_advanced_results_dict['entropy_analysis_aggregated'] = final_entropy_df_agg.to_dict(orient='records')
-                export_to_csv(final_entropy_df_agg, os.path.join(advanced_tables_dir, 'entropy_analysis_aggregated_combined.csv'))
-                print("  Combined aggregated entropy analysis saved.")
-
-                # Generate plots for aggregated entropy results
-                if not final_entropy_df_agg.empty:
-                    print("  Generating plots for aggregated entropy analysis...")
-                    # Ensure 'metric' and 'aggregation_phase_analyzed' columns exist
-                    if 'metric' in final_entropy_df_agg.columns and 'aggregation_phase_analyzed' in final_entropy_df_agg.columns:
-                        for (metric_name_plot, phase_analyzed_plot), group_df in final_entropy_df_agg.groupby(['metric', 'aggregation_phase_analyzed']):
-                            # Sanitize filenames by replacing potentially problematic characters
-                            safe_metric_name = str(metric_name_plot).replace('/', '_').replace('\\', '_') # Corrected backslash replacement
-                            safe_phase_analyzed = str(phase_analyzed_plot).replace('/', '_').replace('\\', '_') # Corrected backslash replacement
-                            
-                            plot_title_suffix = f"Aggregated - {METRIC_DISPLAY_NAMES.get(metric_name_plot, metric_name_plot)} - {PHASE_DISPLAY_NAMES.get(phase_analyzed_plot.replace('phase_', ''), phase_analyzed_plot)}"
-                            
-                            if args.entropy_plot_type in ['heatmap', 'all']:
-                                try:
-                                    # Construct output_path for plot_entropy_heatmap
-                                    heatmap_filename = f'entropy_heatmap_aggregated_{safe_metric_name}_{safe_phase_analyzed}.png'
-                                    heatmap_output_path = os.path.join(advanced_plots_dir, heatmap_filename)
-                                    
-                                    plot_entropy_heatmap(
-                                        group_df, # This is the entropy_results_df for this group
-                                        metric_name=metric_name_plot, # Pass the metric name
-                                        round_name=phase_analyzed_plot, # Pass the phase/aggregation identifier
-                                        output_path=heatmap_output_path # Pass the full output path
-                                    )
-                                    print(f"    Entropy heatmap for {metric_name_plot}, {phase_analyzed_plot} generated and saved to {heatmap_output_path}.")
-                                except Exception as e_plot_heatmap:
-                                    print(f"    Error generating entropy heatmap for {metric_name_plot}, {phase_analyzed_plot}: {e_plot_heatmap}")
-
-                            if args.entropy_plot_type in ['barplot', 'all']:
-                                try:
-                                    # Construct output_path for plot_entropy_top_pairs_barplot
-                                    barplot_filename = f'entropy_top_pairs_aggregated_{safe_metric_name}_{safe_phase_analyzed}.png'
-                                    barplot_output_path = os.path.join(advanced_plots_dir, barplot_filename)
-                                    
-                                    plot_entropy_top_pairs_barplot(
-                                        group_df, # This is the entropy_results_df for this group
-                                        metric_name=metric_name_plot, # Pass the metric name
-                                        round_name=phase_analyzed_plot, # Pass the phase/aggregation identifier
-                                        output_path=barplot_output_path, # Pass the full output path
-                                        top_n=10
-                                    )
-                                    print(f"    Entropy barplot for {metric_name_plot}, {phase_analyzed_plot} generated and saved to {barplot_output_path}.")
-                                except Exception as e_plot_barplot:
-                                    print(f"    Error generating entropy barplot for {metric_name_plot}, {phase_analyzed_plot}: {e_plot_barplot}")
-                    else:
-                        print("    Skipping aggregated entropy plot generation: 'metric' or 'aggregation_phase_analyzed' column missing in final_entropy_df_agg.")
-
-            experiment_results['advanced_analysis'] = current_advanced_results_dict
-
-        elif not args.use_aggregated_rounds_for_advanced and metrics_data:
-            print("\nUsing NON-AGGREGATED (per-round or concatenated) data for Advanced Analyses (correlation, covariance, entropy)...")
-            # Prepare data for correlation/covariance: concatenate rounds for each metric
-            all_metrics_data_concatenated = {}
-            if metrics_data: # Ensure metrics_data is not None
-                for metric_name_loop, rounds_data_for_metric_loop in metrics_data.items():
-                    if isinstance(rounds_data_for_metric_loop, dict) and rounds_data_for_metric_loop:
-                        all_rounds_dfs_loop = []
-                        for round_df_loop in rounds_data_for_metric_loop.values():
-                            if isinstance(round_df_loop, pd.DataFrame) and not round_df_loop.empty:
-                                # Ensure 'round' column exists
-                                if 'round' not in round_df_loop.columns:
-                                    # This case should ideally not happen if data loader is consistent
-                                    # For safety, skip if round info is missing for concatenated analysis
-                                    print(f"Warning: 'round' column missing in data for {metric_name_loop}. Skipping for concatenation.")
-                                    continue
-                                all_rounds_dfs_loop.append(round_df_loop)
-                        if all_rounds_dfs_loop:
-                            concatenated_df_loop = pd.concat(all_rounds_dfs_loop, ignore_index=True)
-                            all_metrics_data_concatenated[metric_name_loop] = concatenated_df_loop
-            
-            all_round_names = set()
-            if isinstance(metrics_data, dict):
-                for metric_name_iter, rounds_data_iter in metrics_data.items():
-                    if isinstance(rounds_data_iter, dict):
-                        all_round_names.update(rounds_data_iter.keys())
-            
-            if not all_metrics_data_concatenated and not (args.round and len(args.round) == 1 and metrics_data):
-                 print("No concatenated data available and not single round analysis. Skipping advanced inter-metric correlation/covariance analyses.")
-            else:
-                # Determine rounds to analyze: either specified single round or all found rounds
-                rounds_to_iterate = []
-                if args.round and len(args.round) == 1:
-                    single_round_name = args.round[0]
-                    # Prepare metrics_dict for the single round
-                    metrics_dict_single_round = {}
-                    for metric_name, round_data_dict in metrics_data.items():
-                        if single_round_name in round_data_dict:
-                             metrics_dict_single_round[metric_name] = round_data_dict[single_round_name]
-                    
-                    if metrics_dict_single_round:
-                         # For single round analysis, calculate_correlation_matrix expects dict of DFs for that round
-                         # The function itself will handle the filtering by round_name if it's still in the DFs.
-                         # Or, ensure DFs passed only contain that round's data.
-                         # The current calculate_correlation_matrix filters by round_name from the concatenated DFs.
-                         # So, we still need all_metrics_data_concatenated for it to work as designed.
-                         # If only one round is loaded, all_metrics_data_concatenated will contain only that round.
-                        rounds_to_iterate.append(single_round_name)
-                    else:
-                        print(f"Data for the specified round '{single_round_name}' not found. Skipping inter-metric correlation/covariance.")
+        if args.use_aggregated_rounds_for_advanced:
+            if not consolidated_aggregated_df.empty:
+                source_description_for_log = "data aggregated across rounds"
+                print(f"Advanced analysis will primarily use: {source_description_for_log} (if applicable to the specific analysis).")
                 
-                elif all_metrics_data_concatenated : # Multiple rounds, use concatenated data
-                    rounds_to_iterate = sorted(list(all_round_names))
-
-                if not rounds_to_iterate and all_metrics_data_concatenated: # Fallback if specific round logic failed but concatenated exists
-                    rounds_to_iterate = sorted(list(all_round_names))
-
-
-                for round_name_to_analyze in rounds_to_iterate:
-                    print(f"  Analyzing Round: {round_name_to_analyze} for correlation and covariance inter-metric")
-                    
-                    # Data for this specific round for calculate_correlation_matrix
-                    # It expects a dict of DFs, where each DF might contain multiple rounds,
-                    # and it filters by 'round_name_to_analyze'. So all_metrics_data_concatenated is correct.
-                    current_metrics_for_round_analysis = all_metrics_data_concatenated
-                    if not current_metrics_for_round_analysis:
-                        print(f"    Concatenated data not available for round {round_name_to_analyze}. Skipping.")
-                        continue
-
-                    # 1. Correlation Analysis (Non-Aggregated)
-                    try:
-                        print(f"    Calculating correlation matrix for round: {round_name_to_analyze}")
-                        correlation_matrix = calculate_correlation_matrix(
-                            metrics_dict=current_metrics_for_round_analysis, # This contains all rounds, func filters
-                            round_name=round_name_to_analyze,
-                            tenants=args.tenants,
-                            noisy_tenant=args.noisy_tenant
-                        )
-
-                        if correlation_matrix is not None and not correlation_matrix.empty:
-                            plot_path_corr = os.path.join(advanced_plots_dir, f'correlation_heatmap_round_{round_name_to_analyze}.png')
-                            fig_corr = plot_correlation_heatmap(
-                                correlation_matrix,
-                                title=f'Inter-Metric Correlation Heatmap (Round: {round_name_to_analyze})'
-                            )
-                            fig_corr.savefig(plot_path_corr)
-                            plt.close(fig_corr)
-                            print(f"      Correlation heatmap saved to: {plot_path_corr}")
-                            current_advanced_results_dict.setdefault('correlation_matrices', {}).setdefault(round_name_to_analyze, {}).update(correlation_matrix.to_dict())
-                        else:
-                            print(f"      Correlation matrix empty or None for round: {round_name_to_analyze}. Skipping plot.")
-                    except Exception as e:
-                        print(f"    Error calculating or plotting correlation matrix for round {round_name_to_analyze}: {e}")
-
-                    # 2. Covariance Analysis (Non-Aggregated)
-                    try:
-                        print(f"    Calculating covariance matrix for round: {round_name_to_analyze}")
-                        covariance_matrix, _ = calculate_covariance_matrix(
-                            metrics_dict=current_metrics_for_round_analysis, # This contains all rounds, func filters
-                            round_name=round_name_to_analyze,
-                            tenants=args.tenants
-                        )
-
-                        if covariance_matrix is not None and not covariance_matrix.empty:
-                            plot_path_cov = os.path.join(advanced_plots_dir, f'covariance_heatmap_round_{round_name_to_analyze}.png')
-                            fig_cov = plot_correlation_heatmap(
-                                covariance_matrix,
-                                title=f'Inter-Metric Covariance Heatmap (Round: {round_name_to_analyze})',
-                                cmap='coolwarm'
-                            )
-                            fig_cov.savefig(plot_path_cov)
-                            plt.close(fig_cov)
-                            print(f"      Covariance heatmap saved to: {plot_path_cov}")
-                            current_advanced_results_dict.setdefault('covariance_matrices', {}).setdefault(round_name_to_analyze, {}).update(covariance_matrix.to_dict())
-                        else:
-                            print(f"      Covariance matrix empty or None for round: {round_name_to_analyze}. Skipping plot.")
-                    except Exception as e:
-                        print(f"    Error calculating or plotting covariance matrix for round {round_name_to_analyze}: {e}")
-
-            # Inter-Tenant Correlation and Covariance per Metric (Non-Aggregated)
-            print("\n  Calculating Inter-Tenant Correlation and Covariance per Metric (NON-AGGREGATED)...")
-            if metrics_data: # Check if metrics_data is not None
-                for metric_name_inter_tenant, rounds_data_inter_tenant in metrics_data.items():
-                    if isinstance(rounds_data_inter_tenant, dict):
-                        # Determine rounds to iterate: specified single round or all available for this metric
-                        rounds_to_analyze_inter_tenant = []
-                        if args.round and len(args.round) == 1:
-                            if args.round[0] in rounds_data_inter_tenant:
-                                rounds_to_analyze_inter_tenant.append(args.round[0])
-                            else:
-                                print(f"    Data for the specified round '{args.round[0]}' not found for metric {metric_name_inter_tenant}. Skipping inter-tenant analysis for this round.")
-                        else:
-                            rounds_to_analyze_inter_tenant = rounds_data_inter_tenant.keys()
-
-                        for round_name_inter_tenant in rounds_to_analyze_inter_tenant:
-                            df_round_inter_tenant = rounds_data_inter_tenant.get(round_name_inter_tenant)
-                            if isinstance(df_round_inter_tenant, pd.DataFrame) and not df_round_inter_tenant.empty and 'tenant' in df_round_inter_tenant.columns and df_round_inter_tenant['tenant'].nunique() > 1:
-                                df_to_analyze = df_round_inter_tenant
-                                if args.tenants:
-                                    df_to_analyze = df_round_inter_tenant[df_round_inter_tenant['tenant'].isin(args.tenants)]
-                                
-                                if df_to_analyze['tenant'].nunique() < 2:
-                                    print(f"    Skipping inter-tenant correlation/covariance for {metric_name_inter_tenant}, round {round_name_inter_tenant}: Less than 2 tenants after filtering.")
-                                    continue
-
-                                # Inter-Tenant Correlation (Non-Aggregated)
-                                try:
-                                    print(f"    Calculating inter-tenant correlation for metric: {metric_name_inter_tenant}, round: {round_name_inter_tenant}")
-                                    inter_tenant_corr_matrix = calculate_inter_tenant_correlation_per_metric(df_to_analyze) # Uses default 'value', 'datetime', 'tenant'
-                                    if inter_tenant_corr_matrix is not None and not inter_tenant_corr_matrix.empty:
-                                        csv_path_inter_tenant_corr = os.path.join(advanced_tables_dir, f'inter_tenant_correlation_{metric_name_inter_tenant}_round_{round_name_inter_tenant}.csv')
-                                        export_to_csv(inter_tenant_corr_matrix, csv_path_inter_tenant_corr)
-                                        plot_path_inter_tenant_corr = os.path.join(advanced_plots_dir, f'inter_tenant_correlation_heatmap_{metric_name_inter_tenant}_round_{round_name_inter_tenant}.png')
-                                        fig_inter_tenant_corr = plot_correlation_heatmap(
-                                            inter_tenant_corr_matrix,
-                                            title=f'Inter-Tenant Correlation - {METRIC_DISPLAY_NAMES.get(metric_name_inter_tenant, metric_name_inter_tenant)} (Round: {round_name_inter_tenant})',
-                                            cbar_label='Correlation Coefficient'
-                                        )
-                                        fig_inter_tenant_corr.savefig(plot_path_inter_tenant_corr)
-                                        plt.close(fig_inter_tenant_corr)
-                                        print(f"      Inter-tenant correlation matrix saved for {metric_name_inter_tenant}, round {round_name_inter_tenant}.")
-                                        current_advanced_results_dict.setdefault('inter_tenant_correlation_matrices', {}).setdefault(metric_name_inter_tenant, {}).setdefault(round_name_inter_tenant, {}).update(inter_tenant_corr_matrix.to_dict())
-                                    else:
-                                        print(f"      Inter-tenant correlation matrix empty for {metric_name_inter_tenant}, round {round_name_inter_tenant}.")
-                                except Exception as e_inter_corr:
-                                    print(f"      Error calculating/plotting inter-tenant correlation for {metric_name_inter_tenant}, round {round_name_inter_tenant}: {e_inter_corr}")
-
-                                # Inter-Tenant Covariance (Non-Aggregated)
-                                try:
-                                    print(f"    Calculating inter-tenant covariance for metric: {metric_name_inter_tenant}, round: {round_name_inter_tenant}")
-                                    inter_tenant_cov_matrix = calculate_inter_tenant_covariance_per_metric(df_to_analyze) # Uses default 'value', 'datetime', 'tenant'
-                                    if inter_tenant_cov_matrix is not None and not inter_tenant_cov_matrix.empty:
-                                        csv_path_inter_tenant_cov = os.path.join(advanced_tables_dir, f'inter_tenant_covariance_{metric_name_inter_tenant}_round_{round_name_inter_tenant}.csv')
-                                        export_to_csv(inter_tenant_cov_matrix, csv_path_inter_tenant_cov)
-                                        plot_path_inter_tenant_cov = os.path.join(advanced_plots_dir, f'inter_tenant_covariance_heatmap_{metric_name_inter_tenant}_round_{round_name_inter_tenant}.png')
-                                        fig_inter_tenant_cov = plot_correlation_heatmap(
-                                            inter_tenant_cov_matrix,
-                                            title=f'Inter-Tenant Covariance - {METRIC_DISPLAY_NAMES.get(metric_name_inter_tenant, metric_name_inter_tenant)} (Round: {round_name_inter_tenant})',
-                                            cbar_label='Covariance'
-                                        )
-                                        fig_inter_tenant_cov.savefig(plot_path_inter_tenant_cov)
-                                        plt.close(fig_inter_tenant_cov)
-                                        print(f"      Inter-tenant covariance matrix saved for {metric_name_inter_tenant}, round {round_name_inter_tenant}.")
-                                        current_advanced_results_dict.setdefault('inter_tenant_covariance_matrices', {}).setdefault(metric_name_inter_tenant, {}).setdefault(round_name_inter_tenant, {}).update(inter_tenant_cov_matrix.to_dict())
-                                    else:
-                                        print(f"      Inter-tenant covariance matrix empty for {metric_name_inter_tenant}, round {round_name_inter_tenant}.")
-                                except Exception as e_inter_cov:
-                                    print(f"      Error calculating/plotting inter-tenant covariance for {metric_name_inter_tenant}, round {round_name_inter_tenant}: {e_inter_cov}")
-                            elif isinstance(df_round_inter_tenant, pd.DataFrame) and df_round_inter_tenant['tenant'].nunique() <= 1:
-                                print(f"    Skipping inter-tenant correlation/covariance for {metric_name_inter_tenant}, round {round_name_inter_tenant}: Less than 2 tenants in original data.")
-            
-            # 3. Entropy Analysis (Non-Aggregated)
-            print(f"\n  Calculating entropy metrics (NON-AGGREGATED)...")
-            all_entropy_results = []
-            if metrics_data: # Check if metrics_data is not None
-                for metric_name_entropy, rounds_data_entropy in metrics_data.items():
-                    if isinstance(rounds_data_entropy, dict):
-                        rounds_to_analyze_entropy = []
-                        if args.round and len(args.round) == 1:
-                            if args.round[0] in rounds_data_entropy:
-                                rounds_to_analyze_entropy.append(args.round[0])
-                        else:
-                            rounds_to_analyze_entropy = rounds_data_entropy.keys()
-                        
-                        for round_name_entropy in rounds_to_analyze_entropy:
-                            df_round_entropy = rounds_data_entropy.get(round_name_entropy)
-                            if isinstance(df_round_entropy, pd.DataFrame) and not df_round_entropy.empty and 'tenant' in df_round_entropy.columns:
-                                df_to_analyze_entropy = df_round_entropy
-                                if args.tenants: # Filter by tenants if specified
-                                    df_to_analyze_entropy = df_round_entropy[df_round_entropy['tenant'].isin(args.tenants)]
-                                
-                                if df_to_analyze_entropy['tenant'].nunique() < 2:
-                                    print(f"    Skipping entropy for {metric_name_entropy}, round {round_name_entropy}: Less than 2 tenants after filtering.")
-                                    continue
-
-                                print(f"    Calculating entropy for metric: {metric_name_entropy}, round: {round_name_entropy}")
-                                try:
-                                    # calculate_entropy_metrics can iterate through phases if 'phase' column exists and phase arg is None
-                                    # Or analyze a specific phase if phase arg is provided.
-                                    # For non-aggregated, we typically analyze per round, possibly all phases within that round or specific phases.
-                                    # Let's assume for now it processes all phases within the round's data or as per its internal logic.
-                                    entropy_results_df = calculate_entropy_metrics(
-                                        df_to_analyze_entropy, 
-                                        tenants=None, # Uses tenants from df_to_analyze_entropy
-                                        phase=None, # Analyze all phases within this round's data, or specific if df is pre-filtered
-                                        metric_column='value'
-                                    )
-                                    if entropy_results_df is not None and not entropy_results_df.empty:
-                                        entropy_results_df['metric'] = metric_name_entropy
-                                        entropy_results_df['round'] = round_name_entropy
-                                        all_entropy_results.append(entropy_results_df)
-                                        table_path_entropy = os.path.join(advanced_tables_dir, f'entropy_analysis_{metric_name_entropy}_round_{round_name_entropy}.csv')
-                                        export_to_csv(entropy_results_df, table_path_entropy)
-                                        print(f"      Entropy analysis results saved to: {table_path_entropy}")
-                                    else:
-                                        print(f"      No entropy results for {metric_name_entropy}, round {round_name_entropy}.")
-                                except Exception as e_entropy:
-                                    print(f"    Error calculating entropy for {metric_name_entropy}, round {round_name_entropy}: {e_entropy}")
-            if all_entropy_results:
-                final_entropy_df = pd.concat(all_entropy_results, ignore_index=True)
-                current_advanced_results_dict['entropy_analysis'] = final_entropy_df.to_dict(orient='records')
-                export_to_csv(final_entropy_df, os.path.join(advanced_tables_dir, 'entropy_analysis_combined.csv'))
-                print("  Combined entropy analysis results (non-aggregated) saved.")
-            
-            experiment_results['advanced_analysis'] = current_advanced_results_dict
-
-    # Análise de Impacto Normalizado (após todas as outras análises avançadas)
-    if args.advanced and metrics_data: # Pode ser executado com dados agregados ou não
-        print("\nCalculating Normalized Impact Score...")
-        
-        # Determinar quais dados usar: agregados ou não
-        data_for_impact_score = {}
-        value_col_for_impact = 'value' # Default para dados não agregados
-
-        if args.use_aggregated_rounds_for_advanced and aggregated_data_for_advanced:
-            print("  Using AGGREGATED data for Normalized Impact Score.")
-            data_for_impact_score = aggregated_data_for_advanced
-            value_col_for_impact = 'mean'
-        elif metrics_data:
-            print("  Using NON-AGGREGATED data for Normalized Impact Score.")
-            if not all_metrics_data_concatenated:
-                for metric_name_loop, rounds_data_for_metric_loop in metrics_data.items():
-                    if isinstance(rounds_data_for_metric_loop, dict) and rounds_data_for_metric_loop:
-                        all_rounds_dfs_loop = []
-                        for round_name_loop, round_df_loop in rounds_data_for_metric_loop.items():
-                            if isinstance(round_df_loop, pd.DataFrame) and not round_df_loop.empty:
-                                df_copy = round_df_loop.copy()
-                                if 'round' not in df_copy.columns:
-                                    df_copy['round'] = round_name_loop
-                                all_rounds_dfs_loop.append(df_copy)
-                        if all_rounds_dfs_loop:
-                            all_metrics_data_concatenated[metric_name_loop] = pd.concat(all_rounds_dfs_loop, ignore_index=True)
-            data_for_impact_score = all_metrics_data_concatenated
-            value_col_for_impact = 'value'
+                # Check the structure of consolidated_aggregated_df for appropriate warnings
+                # Granger causality on aggregated data (summary stats) will only plot nodes.
+                # The 'value' column here refers to raw time-series values, which won't exist in summary stats.
+                # 'mean_value' is an example of a summary statistic column.
+                if 'value' not in consolidated_aggregated_df.columns and any(col for col in consolidated_aggregated_df.columns if 'mean' in col or 'median' in col):
+                     print("Warning: Consolidated aggregated data appears to be summary statistics (e.g., contains 'mean_value'). "
+                           "For causality analysis, this means tenant nodes will be shown, but no causal links will be computed from this summary data.")
+                elif 'value' not in consolidated_aggregated_df.columns:
+                    # This case might be less common if the above catches typical summary stats.
+                    print("Warning: Consolidated aggregated data is missing a raw 'value' column. "
+                          "If this data were intended for time-series causality, it would not work as expected.")
+            else:
+                print("Warning: --use-aggregated-rounds-for-advanced was specified, but no consolidated aggregated data is available. "
+                      "Analyses requiring aggregated data may not run or may fall back to processed data.")
         else:
-            print("  No suitable data (aggregated or non-aggregated) found for Normalized Impact Score calculation.")
+            print(f"Advanced analysis will primarily use: {source_description_for_log} (if applicable to the specific analysis).")
 
-        if data_for_impact_score:
-            impact_phases_for_score = [p for p in PHASE_DISPLAY_NAMES.keys() if "attack" in p.lower() or "stress" in p.lower()]
-            baseline_phases_for_score = [p for p in PHASE_DISPLAY_NAMES.keys() if "baseline" in p.lower()]
 
-            if not impact_phases_for_score:
-                print("Warning: No impact phases (e.g., '2 - Attack') found in PHASE_DISPLAY_NAMES. Impact score may be incorrect.")
-                impact_phases_for_score = ["2 - Attack"]
-            if not baseline_phases_for_score:
-                print("Warning: No baseline phases (e.g., '1 - Baseline') found in PHASE_DISPLAY_NAMES. Impact score may be incorrect.")
-                baseline_phases_for_score = ["1 - Baseline"]
+        # Inter-Tenant Causality Analysis
+        if args.inter_tenant_causality:
+            print(f"\n--- Running Inter-Tenant Causality Analysis ---")
+            causality_output_dir = os.path.join(causality_dir, 'plots') 
 
-            impact_score_df = calculate_normalized_impact_score(
-                metrics_data=data_for_impact_score,
-                noisy_tenant=args.noisy_tenant if args.noisy_tenant else DEFAULT_NOISY_TENANT,
-                impact_phases=impact_phases_for_score,
-                baseline_phases=baseline_phases_for_score,
-                weights=IMPACT_CALCULATION_DEFAULTS.get('weights', {}),
-                metrics_config=IMPACT_CALCULATION_DEFAULTS.get('metrics_config', {}),
-                value_col=value_col_for_impact,
-                tenant_col='tenant',
-                phase_col='phase',
-                round_col='round'
+            # Determine if aggregated data should be used by the causality function
+            use_agg_for_causality_call = args.use_aggregated_rounds_for_advanced and not consolidated_aggregated_df.empty
+
+            if use_agg_for_causality_call:
+                print("Causality analysis will be performed using the consolidated aggregated data.")
+                print("  (Note: If this is summary data, only tenant nodes will be plotted without causal links from this data.)")
+            else:
+                if args.use_aggregated_rounds_for_advanced and consolidated_aggregated_df.empty:
+                    print("Consolidated aggregated data is empty; causality analysis will use consolidated processed (per-round) data instead.")
+                elif not args.use_aggregated_rounds_for_advanced:
+                    print("Causality analysis will use the consolidated processed (per-round) data.")
+                else: # Should not be reached if logic is correct
+                    print("Causality analysis will default to consolidated processed (per-round) data.")
+            
+            perform_inter_tenant_causality_analysis(
+                processed_data_df=consolidated_processed_df,
+                aggregated_data_df=consolidated_aggregated_df, 
+                config=args, # Using 'args' as the config object, assuming it has necessary attributes like GRANGER_MAX_LAG
+                output_dir=causality_output_dir,
+                experiment_name=os.path.basename(experiment_data_dir),
+                use_aggregated_data=use_agg_for_causality_call
             )
-
-            if impact_score_df is not None and not impact_score_df.empty:
-                print("\nNormalized Impact Scores:")
-                print(impact_score_df)
-                impact_score_table_path = os.path.join(advanced_tables_dir, 'normalized_impact_scores.csv')
-                export_to_csv(impact_score_df, impact_score_table_path)
-                print(f"  Normalized impact scores saved to: {impact_score_table_path}")
-
-                if 'advanced_analysis' not in experiment_results:
-                    experiment_results['advanced_analysis'] = {}
-                experiment_results['advanced_analysis']['normalized_impact_score'] = impact_score_df.to_dict(orient='records')
-                
-                fig_impact_bar = plot_impact_score_barplot(impact_score_df, score_col='normalized_impact_score', tenant_col='tenant')
-                if fig_impact_bar:
-                    plot_path_bar = os.path.join(advanced_plots_dir, 'normalized_impact_score_barplot.png')
-                    fig_impact_bar.savefig(plot_path_bar)
-                    plt.close(fig_impact_bar)
-                    print(f"  Impact score barplot saved to: {plot_path_bar}")
-            else:
-                print("  Normalized impact score calculation did not return results.")
-        else:
-            print("  Skipping normalized impact score calculation as no data was prepared.")
-
-    # COMPARAÇÃO ENTRE RODADAS (INTRA-EXPERIMENTO)
-    if args.compare_rounds_intra and metrics_data:
-        compare_rounds_within_experiment(
-            experiment_results=experiment_results,
-            output_dir_main=rounds_comparison_intra_dir,
-            metrics_to_compare=args.metrics,
-            phases_to_compare=args.phases,
-            show_as_percentage=args.show_as_percentage,
-            node_config=node_config_to_use
-        )
+            print("--- Inter-Tenant Causality Analysis completed ---")
 
     print("\nPipeline execution finished successfully!")
     

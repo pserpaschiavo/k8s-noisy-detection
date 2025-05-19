@@ -25,6 +25,9 @@ h5py>=3.10.0
 # General utilities
 tqdm>=4.65.0
 
+# Reporting
+markdown>=3.3.0 # For generating HTML reports from Markdown
+
 # Jupyter notebooks (para visualizações interativas)
 jupyter>=1.0.0
 nbformat>=5.0.0

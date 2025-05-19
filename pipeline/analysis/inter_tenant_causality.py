@@ -5,373 +5,382 @@ This module contains functions to investigate and quantify cause-and-effect rela
 between the behavior of different tenants in a Kubernetes environment, especially
 in noisy neighbor scenarios.
 """
+import logging
 import pandas as pd
-from typing import Dict, List, Tuple, Optional
-from statsmodels.tsa.stattools import grangercausalitytests
 import numpy as np
+from statsmodels.tsa.stattools import grangercausalitytests
+import networkx as nx
+import matplotlib.pyplot as plt
+import os
+from ..config import (
+    DEFAULT_CAUSALITY_MAX_LAG, DEFAULT_CAUSALITY_THRESHOLD_P_VALUE, 
+    DEFAULT_METRICS_FOR_CAUSALITY, CAUSALITY_METRIC_COLORS, METRIC_DISPLAY_NAMES,
+    CAUSALITY_FIGURE_SIZE # Added import for CAUSALITY_FIGURE_SIZE
+)
 
-def calculate_causal_impact_between_tenants(
-    metric_df: pd.DataFrame,
-    source_tenant: str,
-    target_tenant: str,
-    metric_name: str,
-    time_column: str = 'experiment_elapsed_seconds',
-    value_column: str = 'value',
-    control_tenants: Optional[List[str]] = None,
-    max_lag: int = 5,
-    verbose: bool = False,
-    **kwargs
-) -> Dict:
+logger = logging.getLogger(__name__)
+
+def prepare_data_for_granger_causality(data, metric_column_name, phase_name, config):
     """
-    Calculates the causal impact of one tenant (source) on another tenant (target)
-    for a specific metric using Granger Causality.
+    Prepares data for Granger causality testing.
+    Filters data for the specified phase, pivots it to have time as index and tenants as columns.
+    Handles missing values by interpolation.
 
     Args:
-        metric_df (pd.DataFrame): DataFrame containing the time series of metrics.
-        source_tenant (str): Identifier of the source tenant.
-        target_tenant (str): Identifier of the target tenant.
-        metric_name (str): Name of the metric.
-        time_column (str): Name of the time column.
-        value_column (str): Name of the metric value column.
-        control_tenants (Optional[List[str]]): Not used in this implementation.
-        max_lag (int): The maximum number of lags to test in Granger Causality.
-        verbose (bool): If True, prints the results of the Granger test.
-        **kwargs: Additional arguments (currently unused).
+        data (pd.DataFrame): DataFrame with 'timestamp', 'tenant', and metric_column_name.
+        metric_column_name (str): The name of the metric column to be used as values.
+        phase_name (str): The name of the phase to filter data for (used for logging).
+        config: Configuration object.
 
     Returns:
-        Dict: A dictionary containing the results of the Granger Causality analysis.
-              Includes 'min_p_value' and 'best_lag' with the lowest p-value.
+        tuple: (pd.DataFrame, list): Pivoted DataFrame ready for causality testing, and list of tenants.
+               Returns (empty DataFrame, empty list) if data is unsuitable.
     """
-    if control_tenants:
-        print("Warning: control_tenants are not used in this Granger causality implementation.")
+    min_obs_granger = config.GRANGER_MIN_OBSERVATIONS
 
-    series_target, series_source = prepare_data_for_granger_causality(
-        metric_df,
-        target_tenant, # First argument to prepare_data is the 'dependent' variable (effect)
-        source_tenant, # Second argument is the 'independent' variable (cause)
-        metric_name,
-        time_column,
-        value_column
-    )
+    # Ensure required columns exist
+    required_cols = ['timestamp', 'tenant', metric_column_name]
+    if not all(col in data.columns for col in required_cols):
+        logger.warning(
+            f"Data for phase '{phase_name}', metric value column '{metric_column_name}' is missing one or more required columns. "
+            f"Required: {required_cols}. Available: {data.columns.tolist()}. "
+            f"Skipping Granger causality preparation."
+        )
+        return pd.DataFrame(), []
 
-    if series_source.empty or series_target.empty:
-        return {
-            "source_tenant": source_tenant,
-            "target_tenant": target_tenant,
-            "metric_name": metric_name,
-            "error": "One or both series are empty after preparation.",
-            "min_p_value": None,
-            "best_lag": None,
-            "all_p_values": {}
-        }
+    # Data is assumed to be already filtered by phase and metric_name before calling this function.
+    data_to_pivot = data.copy()
 
-    # Granger causality test requires a DataFrame with both series
-    data_for_granger = pd.DataFrame({
-        'target': series_target,
-        'source': series_source
-    })
-    data_for_granger = data_for_granger.dropna() # Ensure no NaNs before test
+    if data_to_pivot.empty:
+        logger.info(f"No data provided for metric value column '{metric_column_name}' in phase '{phase_name}' for pivoting.")
+        return pd.DataFrame(), []
 
-    if len(data_for_granger) < 3 * max_lag: # Heuristic: need enough data points
-        return {
-            "source_tenant": source_tenant,
-            "target_tenant": target_tenant,
-            "metric_name": metric_name,
-            "error": f"Not enough data for Granger test with max_lag={max_lag}. Data available: {len(data_for_granger)}",
-            "min_p_value": None,
-            "best_lag": None,
-            "all_p_values": {}
-        }
-
+    # Pivot table: time as index, tenants as columns, metric_column_name as values
     try:
-        # The first variable in the DataFrame is the one being caused (target/effect)
-        # The second variable is the one causing (source/cause)
-        # So, we test if 'source' Granger-causes 'target'
-        results = grangercausalitytests(data_for_granger[['target', 'source']], maxlag=max_lag, verbose=verbose)
-        
-        min_p_value = 1.0
-        best_lag = -1
-        all_p_values = {}
-
-        for lag in results:
-            # Test results are a tuple; p-value is typically the second element of the first test ('ssr_ftest')
-            # Example: results[lag][0] is a dict like {'ssr_ftest': (f_stat, p_val, df_num, df_den), ...}
-            p_value = results[lag][0]['ssr_ftest'][1]
-            all_p_values[lag] = p_value
-            if p_value < min_p_value:
-                min_p_value = p_value
-                best_lag = lag
-        
-        return {
-            "source_tenant": source_tenant,
-            "target_tenant": target_tenant,
-            "metric_name": metric_name,
-            "min_p_value": min_p_value,
-            "best_lag": best_lag,
-            "all_p_values": all_p_values,
-            "message": "Granger Causality test completed."
-        }
+        pivot_df = data_to_pivot.pivot_table(index='timestamp', columns='tenant', values=metric_column_name)
+    except KeyError as e:
+        logger.error(f"KeyError during pivot for metric value column '{metric_column_name}', phase '{phase_name}': {e}. "
+                     f"This might happen if 'timestamp', 'tenant', or '{metric_column_name}' are missing in the slice despite initial checks.")
+        return pd.DataFrame(), []
     except Exception as e:
-        # Catch specific exceptions if possible, e.g., LinAlgError for singular matrix
-        return {
-            "source_tenant": source_tenant,
-            "target_tenant": target_tenant,
-            "metric_name": metric_name,
-            "error": f"Error executing Granger test: {str(e)}",
-            "min_p_value": None,
-            "best_lag": None,
-            "all_p_values": {}
-        }
+        logger.error(f"An unexpected error occurred during pivot for metric value column '{metric_column_name}', phase '{phase_name}': {e}")
+        return pd.DataFrame(), []
 
-def identify_causal_chains(
-    metric_df: pd.DataFrame,
-    all_tenants: List[str],
-    metric_names: List[str],
-    causality_threshold: float = 0.05,
-    max_lag_granger: int = 5,
-    verbose_granger: bool = False,
-    **kwargs
-) -> List[Tuple[str, str, str, float, int]]:
+    # Handle missing values
+    pivot_df.interpolate(method='linear', axis=0, limit_direction='both', inplace=True) # Interpolate
+    pivot_df.fillna(method='bfill', inplace=True) # Backfill for any leading NaNs after interpolation
+    pivot_df.fillna(method='ffill', inplace=True) # Forwardfill for any remaining NaNs
+
+    # Drop tenants (columns) that are still all NaN after filling
+    pivot_df.dropna(axis=1, how='all', inplace=True)
+    # Drop timestamps (rows) that have any NaN if critical (e.g., if a tenant appeared late and has leading NaNs not filled)
+    pivot_df.dropna(axis=0, how='any', inplace=True)
+
+    tenants = pivot_df.columns.tolist()
+
+    if pivot_df.empty or len(tenants) < 2:
+        logger.info(
+            f"Pivot table for metric value column '{metric_column_name}', phase '{phase_name}' is empty or has fewer than 2 tenants ({len(tenants)}) after NaN handling. "
+            f"Cannot perform Granger causality."
+        )
+        return pd.DataFrame(), tenants # Return tenants found, even if empty df
+
+    if len(pivot_df) < min_obs_granger:
+        logger.info(
+            f"Insufficient observations for Granger causality for metric value column '{metric_column_name}', phase '{phase_name}'. "
+            f"Need {min_obs_granger}, got {len(pivot_df)}. Table shape: {pivot_df.shape}"
+        )
+        return pd.DataFrame(), tenants # Return tenants, even if data is insufficient
+
+    for tenant_col in tenants:
+        if pivot_df[tenant_col].nunique() == 1:
+            logger.warning(
+                f"Tenant '{tenant_col}' has constant values for metric value column '{metric_column_name}', phase '{phase_name}'. "
+                f"This may cause issues with Granger causality (e.g., perfect multicollinearity or singular matrix)."
+            )
+    return pivot_df, tenants
+
+
+def granger_causality_test(data_df, tenants, max_lag, config, metric_name, phase_name):
     """
-    Identifies chains of causal relationships between multiple tenants for a set of metrics,
-    using Granger Causality.
+    Performs Granger causality tests between all pairs of tenants.
 
     Args:
-        metric_df (pd.DataFrame): DataFrame with all time series.
-        all_tenants (List[str]): List of all tenants to be considered.
-        metric_names (List[str]): List of metrics for which causality is sought.
-        causality_threshold (float): Threshold (p-value) to consider a causal relationship as significant.
-        max_lag_granger (int): Maximum lag for the Granger test.
-        verbose_granger (bool): If True, prints the results of the Granger test.
-        **kwargs: Additional arguments for `calculate_causal_impact_between_tenants`.
+        data_df (pd.DataFrame): Time-series data with tenants as columns.
+        tenants (list): List of tenant names (columns in data_df).
+        max_lag (int): Maximum lag for the Granger causality test.
+        config: Configuration object.
+        metric_name (str): Name of the metric being analyzed (for logging).
+        phase_name (str): Name of the phase being analyzed (for logging).
 
     Returns:
-        List[Tuple[str, str, str, float, int]]: A list of tuples, where each tuple represents
-                                           a significant causal link:
-                                           (source_tenant, target_tenant, metric_name, p_value, best_lag)
+        pd.DataFrame: DataFrame with significant causal links, or empty if none.
     """
     causal_links = []
-    if len(all_tenants) < 2:
-        print("At least two tenants are required for causality analysis.")
-        return causal_links
+    significance_level = config.GRANGER_SIGNIFICANCE_LEVEL
 
-    for metric in metric_names:
-        print(f"Analyzing causality for metric: {metric}")
-        for i in range(len(all_tenants)):
-            for j in range(len(all_tenants)):
-                if i == j:
-                    continue # Do not test causality of a tenant to itself
+    if len(tenants) < 2:
+        logger.info(f"Not enough tenants ({len(tenants)}) to perform Granger causality for metric '{metric_name}', phase '{phase_name}'.")
+        return pd.DataFrame()
 
-                source_tenant = all_tenants[i]
-                target_tenant = all_tenants[j]
+    for target_tenant in tenants:
+        for source_tenant in tenants:
+            if target_tenant == source_tenant:
+                continue
 
-                print(f"  Testing: {source_tenant} -> {target_tenant} for {metric}")
-                
-                # Pass max_lag and verbose to the calculation function
-                causality_result = calculate_causal_impact_between_tenants(
-                    metric_df=metric_df,
-                    source_tenant=source_tenant,
-                    target_tenant=target_tenant,
-                    metric_name=metric,
-                    max_lag=max_lag_granger,
-                    verbose=verbose_granger,
-                    **kwargs 
-                )
-
-                if "error" in causality_result:
-                    print(f"    Error in causality test for {source_tenant} -> {target_tenant} ({metric}): {causality_result['error']}")
+            test_data = data_df[[target_tenant, source_tenant]].copy()
+            
+            # Check for NaNs or Infs that might have slipped through or resulted from operations
+            if test_data.isnull().values.any() or np.isinf(test_data.values).any():
+                logger.warning(f"NaN or Inf values found in data for {source_tenant} -> {target_tenant} for metric '{metric_name}', phase '{phase_name}'. Skipping this pair.")
+                # Attempt to drop rows with NaNs for this specific pair test
+                test_data.dropna(inplace=True)
+                if test_data.shape[0] < config.GRANGER_MIN_OBSERVATIONS: # Check length again after dropna
+                    logger.warning(f"Insufficient data after dropping NaNs for {source_tenant} -> {target_tenant}. Skipping.")
                     continue
 
-                p_value = causality_result.get("min_p_value")
-                best_lag = causality_result.get("best_lag")
+            # Check for constant series again, as this is a common issue for statsmodels
+            if test_data[source_tenant].nunique() == 1 or test_data[target_tenant].nunique() == 1:
+                logger.warning(f"Constant series detected for {source_tenant} or {target_tenant} (metric '{metric_name}', phase '{phase_name}'). Skipping Granger for this pair.")
+                continue
+            
+            if test_data.shape[0] < max_lag + 1: # Or some other minimum, e.g., config.GRANGER_MIN_OBSERVATIONS
+                 logger.warning(f"Insufficient data points ({test_data.shape[0]}) for max_lag {max_lag} for {source_tenant} -> {target_tenant} (metric '{metric_name}', phase '{phase_name}'). Skipping.")
+                 continue
 
-                if p_value is not None and p_value < causality_threshold:
-                    print(f"    Significant causality found: {source_tenant} -> {target_tenant} for {metric} (p-value: {p_value:.4f}, lag: {best_lag})")
-                    causal_links.append((source_tenant, target_tenant, metric, p_value, best_lag))
-                elif p_value is not None:
-                    print(f"    Causality not significant: {source_tenant} -> {target_tenant} for {metric} (p-value: {p_value:.4f})")
-                else:
-                    print(f"    Invalid causality test result for {source_tenant} -> {target_tenant} ({metric}).")
-
+            try:
+                gc_results = grangercausalitytests(test_data, maxlag=max_lag, verbose=False)
+                for lag in range(1, max_lag + 1):
+                    p_value = gc_results[lag][0]['ssr_ftest'][1] # F-test p-value
+                    if p_value < significance_level:
+                        causal_links.append({
+                            'Source Tenant': source_tenant,
+                            'Target Tenant': target_tenant,
+                            'Lag (Granger)': lag,
+                            'P-Value (Granger)': p_value,
+                            'Metric': metric_name,
+                            'Phase': phase_name
+                        })
+                        logger.debug(f"Granger causality: {source_tenant} -> {target_tenant} at lag {lag} (p={p_value:.4f}) for metric '{metric_name}', phase '{phase_name}'")
+                        break # Found significance at this lag, no need to check further lags for this pair
+            except Exception as e:
+                # Common errors: "LinAlgError: Singular matrix", "ValueError: The number of observations is not sufficient"
+                logger.error(f"Error in Granger causality test for {source_tenant} -> {target_tenant} (metric '{metric_name}', phase '{phase_name}'): {e}")
 
     if not causal_links:
-        print("No significant causal links found with the current criteria.")
-    else:
-        print(f"Total significant causal links found: {len(causal_links)}")
-        
-    return causal_links
+        logger.info(f"No significant Granger causal links found for metric '{metric_name}', phase '{phase_name}' with max_lag={max_lag} and p<{significance_level}.")
+    return pd.DataFrame(causal_links)
 
-def visualize_causal_graph(
-    causal_links: List[Tuple[str, str, str, float, int]], # Added best_lag to tuple
-    output_path: Optional[str] = None,
-    metric_colors: Optional[Dict[str, str]] = None,
-    figsize: Tuple[int, int] = (15, 12),
-    node_size: int = 4500,
-    font_size: int = 16, # MODIFIED default font_size from 14 to 16
-    arrow_size: int = 20,
-    layout_type: str = 'spring', # e.g., spring, circular, kamada_kawai
-    **kwargs
-) -> object:
+
+def perform_inter_tenant_causality_analysis(processed_data_df, aggregated_data_df, config, output_dir, experiment_name, use_aggregated_data=False):
     """
-    Generates a visualization (graph) of the identified causal relationships.
+    Performs inter-tenant causality analysis.
+    If use_aggregated_data is True, it plots tenant nodes without causality links,
+    as aggregated data (summary stats) is not suitable for time-series Granger causality.
+    Otherwise, it uses processed_data_df for Granger causality.
 
     Args:
-        causal_links (List[Tuple[str, str, str, float, int]]):
-            List of causal links. Each tuple: 
-            (source_tenant, target_tenant, metric_name, p_value, best_lag).
-        output_path (Optional[str]): Path to save the graph image.
-        metric_colors (Optional[Dict[str, str]]): Dictionary mapping metric names to colors.
-        figsize (Tuple[int, int]): Size of the plot figure.
-        node_size (int): Size of the nodes in the graph.
-        font_size (int): Font size for labels.
-        arrow_size (int): Size of the edge arrows.
-        layout_type (str): Type of graph layout (e.g., 'spring', 'circular', 'kamada_kawai', 'shell').
-        **kwargs: Additional arguments for the visualization library (NetworkX).
-
-    Returns:
-        object: Generated matplotlib figure object, or None if saved to file.
+        processed_data_df (pd.DataFrame): DataFrame with processed time-series data (per round).
+                                          Expected columns: 'timestamp', 'tenant', 'metric_name', 'phase', 'value'.
+        aggregated_data_df (pd.DataFrame): DataFrame with aggregated data across rounds.
+                                           Expected columns: 'tenant', 'metric_name', 'phase', plus summary stats.
+        config: Configuration object.
+        output_dir (str): Directory to save causality graphs.
+        experiment_name (str): Name of the experiment for graph titles/filenames.
+        use_aggregated_data (bool): If True, uses aggregated_data_df; otherwise, uses processed_data_df.
     """
-    if not causal_links:
-        print("No causal links to visualize.")
-        return None
+    logger.info(f"Starting inter-tenant causality analysis for {experiment_name} (use_aggregated_data={use_aggregated_data})...")
+    os.makedirs(output_dir, exist_ok=True)
+
+    input_df = aggregated_data_df if use_aggregated_data else processed_data_df
+
+    if input_df is None or input_df.empty:
+        logger.warning("Input data for causality analysis is None or empty. Skipping.")
+        return
+
+    # Essential columns check
+    required_cols_general = ['metric_name', 'phase', 'tenant']
+    if not all(col in input_df.columns for col in required_cols_general):
+        logger.error(f"Input DataFrame is missing one or more essential columns: {required_cols_general}. "
+                     f"Available columns: {input_df.columns.tolist()}. Cannot proceed.")
+        return
+
+    if not use_aggregated_data and 'value' not in input_df.columns:
+        logger.error("'value' column not found in processed_data_df, which is required for time-series causality. Cannot proceed.")
+        return
+    if not use_aggregated_data and 'timestamp' not in input_df.columns: # Timestamp needed for prepare_data
+        logger.error("'timestamp' column not found in processed_data_df, which is required for time-series causality. Cannot proceed.")
+        return
+
+    # Determine the max_lag for Granger causality tests
+    max_lag = config.granger_max_lag if hasattr(config, 'granger_max_lag') and config.granger_max_lag is not None else DEFAULT_CAUSALITY_MAX_LAG
+    # Determine the p-value threshold for significance
+    threshold_p_value = config.granger_threshold_p_value if hasattr(config, 'granger_threshold_p_value') and config.granger_threshold_p_value is not None else DEFAULT_CAUSALITY_THRESHOLD_P_VALUE
+    # Determine metrics to use for causality analysis
+    metrics_for_causality = config.metrics_for_causality if hasattr(config, 'metrics_for_causality') and config.metrics_for_causality else DEFAULT_METRICS_FOR_CAUSALITY
+
+    metrics_to_analyze = config.GRANGER_METRICS_TO_ANALYZE if hasattr(config, 'GRANGER_METRICS_TO_ANALYZE') and config.GRANGER_METRICS_TO_ANALYZE else \
+                         sorted(list(input_df['metric_name'].unique()))
+    phases_to_analyze = config.GRANGER_PHASES_TO_ANALYZE if hasattr(config, 'GRANGER_PHASES_TO_ANALYZE') and config.GRANGER_PHASES_TO_ANALYZE else \
+                        sorted(list(input_df['phase'].unique()))
+    
+    if not metrics_to_analyze:
+        logger.warning("No metrics found or specified to analyze for causality. Skipping.")
+        return
+    if not phases_to_analyze:
+        logger.warning("No phases found or specified to analyze for causality. Skipping.")
+        return
+
+    for metric in metrics_to_analyze:
+        for phase_name in phases_to_analyze:
+            output_dir_phase_metric = os.path.join(output_dir, metric, phase_name)
+            os.makedirs(output_dir_phase_metric, exist_ok=True)
+
+            logger.info(f"Analyzing causality for metric: '{metric}', phase: '{phase_name}'")
+
+            data_for_metric_phase = input_df[
+                (input_df['metric_name'] == metric) & (input_df['phase'] == phase_name)
+            ]
+
+            if data_for_metric_phase.empty:
+                logger.info(f"No data available for metric '{metric}' in phase '{phase_name}'. Skipping.")
+                continue
+            
+            current_tenants_for_graph = sorted(data_for_metric_phase['tenant'].unique().tolist())
+            if not current_tenants_for_graph:
+                logger.info(f"No tenants found in data for metric '{metric}' in phase '{phase_name}'. Skipping.")
+                continue
+
+            causal_links_df = pd.DataFrame() # Initialize for this metric/phase
+
+            if use_aggregated_data:
+                logger.warning(
+                    f"Causality analysis on AGGREGATED data for metric '{metric}', phase '{phase_name}' is not performed "
+                    f"as it represents summary statistics, not time series. "
+                    f"A graph with tenant nodes (if any) but no causal links will be generated."
+                )
+                # causal_links_df remains empty. Nodes will be drawn based on current_tenants_for_graph.
+            else:
+                # Using PROCESSED (per-round, time-series) data
+                value_column_for_timeseries = 'value' # This column should contain the time series values
+
+                if value_column_for_timeseries not in data_for_metric_phase.columns:
+                    logger.error(f"TimeSeries value column '{value_column_for_timeseries}' not found in the filtered data "
+                                 f"for metric '{metric}', phase '{phase_name}'. Skipping Granger causality test for this combination.")
+                    # causal_links_df remains empty
+                else:
+                    prepared_data_df, tenants_in_prepared_data = prepare_data_for_granger_causality(
+                        data_for_metric_phase, value_column_for_timeseries, phase_name, config
+                    )
+
+                    if prepared_data_df.empty or len(tenants_in_prepared_data) < 2:
+                        logger.info(
+                            f"No suitable time series data from prepare_data_for_granger_causality or insufficient distinct tenants "
+                            f"({len(tenants_in_prepared_data)}) for Granger causality for metric '{metric}', phase '{phase_name}'. "
+                            f"Skipping Granger causality test."
+                        )
+                        # causal_links_df remains empty
+                    else:
+                        logger.info(f"Running Granger causality test for metric '{metric}', phase '{phase_name}' with tenants: {tenants_in_prepared_data}")
+                        causal_links_df = granger_causality_test(
+                            prepared_data_df, tenants_in_prepared_data, max_lag, config, metric, phase_name
+                        )
+            
+            visualize_causal_graph(
+                causal_links_df=causal_links_df,
+                all_tenants_for_graph=current_tenants_for_graph,
+                metric=metric,
+                phase=phase_name,
+                output_dir=output_dir_phase_metric,
+                experiment_name=experiment_name,
+                config=config
+            )
+
+    logger.info(f"Inter-tenant causality analysis for {experiment_name} completed.")
+
+
+def visualize_causal_graph(causal_links_df, all_tenants_for_graph, metric, phase, output_dir, experiment_name, config):
+    """
+    Visualizes the causal graph and saves it as a PNG file.
+    Nodes are created based on all_tenants_for_graph, ensuring all relevant tenants are shown.
+
+    Args:
+        causal_links_df (pd.DataFrame): DataFrame with causal links ('Source Tenant', 'Target Tenant', 'Lag (Granger)', 'P-Value (Granger)').
+                                        Can be empty if no links found or if analysis was skipped (e.g. for aggregated data).
+        all_tenants_for_graph (list): List of all tenant names that should be included as nodes in the graph.
+        metric (str): Name of the metric.
+        phase (str): Name of the phase.
+        output_dir (str): Directory to save the graph.
+        experiment_name (str): Name of the experiment for the graph title.
+        config: Configuration object.
+    """
+    # Define a default filename suffix if not provided in config
+    filename_suffix = getattr(config, 'CAUSALITY_FILENAME_SUFFIX', 'causal_graph')
+
+    # Construct filename
+    filepath = os.path.join(output_dir, f"{experiment_name}_{metric}_{phase}_{filename_suffix}.png")
+    
+    G = nx.DiGraph()
+
+    if not all_tenants_for_graph:
+        logger.warning(f"No tenants provided for graph of metric '{metric}', phase '{phase}'. Graph will be empty but saved.")
+    else:
+        # Add all tenants that were present in the data for this metric/phase as nodes
+        G.add_nodes_from(sorted(list(set(all_tenants_for_graph)))) # Use set for uniqueness, then sort
+
+    if not causal_links_df.empty:
+        logger.info(f"Found {len(causal_links_df)} causal links to draw for metric '{metric}', phase '{phase}'.")
+        for _, row in causal_links_df.iterrows():
+            source = row['Source Tenant']
+            target = row['Target Tenant']
+            lag = row.get('Lag (Granger)', 'N/A') # Use .get for safety
+            p_value = row.get('P-Value (Granger)', np.nan)
+            
+            # Ensure nodes exist before adding edge (should be guaranteed by all_tenants_for_graph if data is consistent)
+            if source not in G: G.add_node(source) # Should not happen if all_tenants_for_graph is comprehensive
+            if target not in G: G.add_node(target) # Should not happen
+
+            G.add_edge(source, target, lag=lag, p_value=p_value)
+    else:
+        if G.nodes(): # Nodes might exist even if no links
+             logger.info(f"No causal links found or computed to draw for metric '{metric}', phase '{phase}'. Graph will show {len(G.nodes())} tenant(s) without edges.")
+        # If no nodes and no links, it will be an empty graph.
+
+    # Determine figure size
+    fig_size = getattr(config, 'CAUSALITY_FIGURE_SIZE', CAUSALITY_FIGURE_SIZE) # Use imported default
+
+    plt.figure(figsize=fig_size)
+    
+    title = f"Causality: {metric} - Phase: {phase}\nExperiment: {experiment_name}"
+    if not G.nodes():
+        logger.info(f"Graph for metric '{metric}', phase '{phase}' has no nodes. Plot will be empty.")
+        plt.title(title + " (No Nodes)", fontsize=config.PLOT_TITLE_FONTSIZE)
+    else:
+        pos = nx.circular_layout(G) # Consider other layouts: spring_layout, kamada_kawai_layout
+        
+        nx.draw(G, pos, with_labels=True, node_size=config.CAUSALITY_NODE_SIZE, 
+                node_color=config.CAUSALITY_NODE_COLOR, font_size=config.CAUSALITY_FONT_SIZE, 
+                font_weight='bold', arrows=True, arrowstyle='-|>', arrowsize=config.CAUSALITY_ARROW_SIZE,
+                connectionstyle='arc3,rad=0.1') # Curved arrows
+
+        if G.edges():
+            edge_labels = {}
+            for u, v, d in G.edges(data=True):
+                lag_val = d.get('lag', 'N/A')
+                pval_val = d.get('p_value', np.nan)
+                if pd.notna(pval_val):
+                    edge_labels[(u,v)] = f"lag: {lag_val}\np: {pval_val:.3f}"
+                else:
+                    edge_labels[(u,v)] = f"lag: {lag_val}"
+            nx.draw_networkx_edge_labels(G, pos, edge_labels=edge_labels, font_size=config.CAUSALITY_EDGE_FONT_SIZE)
+        
+        plt.title(title, fontsize=config.PLOT_TITLE_FONTSIZE)
 
     try:
-        import networkx as nx
-        import matplotlib.pyplot as plt
-    except ImportError:
-        print("Please install networkx and matplotlib to visualize the graph: pip install networkx matplotlib")
-        return {"error": "Missing dependencies: networkx, matplotlib"}
-
-    G = nx.DiGraph()
-    
-    # Add nodes first to ensure all tenants are present
-    all_tenants_in_links = set()
-    for source, target, _, _, _ in causal_links:
-        all_tenants_in_links.add(source)
-        all_tenants_in_links.add(target)
-    for tenant in all_tenants_in_links:
-        G.add_node(tenant)
-
-    # Map metrics to colors if not provided
-    if metric_colors is None:
-        unique_metrics = sorted(list(set(link[2] for link in causal_links)))
-        # Generate distinct colors (can be improved with a color palette)
-        default_colors = plt.cm.get_cmap('tab10', len(unique_metrics) if len(unique_metrics) > 0 else 1)
-        metric_colors = {metric: default_colors(i) for i, metric in enumerate(unique_metrics)}
-    
-    # Add edges with attributes
-    edge_labels = {}
-    for source, target, metric, p_value, lag in causal_links:
-        G.add_edge(source, target, label=f"{metric}\np={p_value:.2f}, lag={lag}", 
-                   color=metric_colors.get(metric, 'gray'), weight=(1-p_value), metric=metric)
-
-    # Choose layout
-    if layout_type == 'spring':
-        pos = nx.spring_layout(G, k=kwargs.get('k', 1.1), iterations=kwargs.get('iterations', 75), seed=kwargs.get('seed', 42)) # MODIFIED k
-    elif layout_type == 'circular':
-        pos = nx.circular_layout(G)
-    elif layout_type == 'kamada_kawai':
-        pos = nx.kamada_kawai_layout(G, weight='weight') # Use weight for layout
-    elif layout_type == 'shell':
-        shells = None # Could be [[tenant1, tenant2], [tenant3, tenant4]]
-        if 'shells' in kwargs:
-            shells = kwargs['shells']
-        elif len(all_tenants_in_links) > 0:
-            shells = [list(all_tenants_in_links)]
-        if shells:
-             pos = nx.shell_layout(G, nlist=shells)
-        else:
-            pos = nx.shell_layout(G) # Fallback if shells cannot be determined
-    else:
-        pos = nx.spring_layout(G, seed=42) # Default fallback
-
-    plt.figure(figsize=figsize)
-    
-    edge_colors = [G[u][v]['color'] for u,v in G.edges()]
-    
-    nx.draw(G, pos, with_labels=True, node_size=node_size, node_color="skyblue", 
-            font_size=font_size, font_weight='bold',
-            arrows=True, arrowstyle='-|>', arrowsize=arrow_size,
-            edge_color=edge_colors, width=2, # width is the thickness of the edge line
-            connectionstyle='arc3,rad=0.1')
-
-    current_edge_labels = {(u,v): d['label'] for u,v,d in G.edges(data=True)}
-    nx.draw_networkx_edge_labels(G, pos, edge_labels=current_edge_labels, font_size=font_size-4, # MODIFIED font_size
-                                 label_pos=0.35, # ADDED label_pos to shift labels
-                                 bbox=dict(facecolor='white', edgecolor='none', alpha=0.85))
-
-    plt.title("Directed Causality Graph between Tenants", fontsize=font_size + 4)
-    
-    if metric_colors:
-        patches = [plt.plot([],[], marker="o", ms=10, ls="", mec=None, color=color, 
-                        label=f"{metric}")[0]  for metric, color in metric_colors.items() if metric in [d['metric'] for u,v,d in G.edges(data=True)]]
-        if patches:
-            plt.legend(handles=patches, title="Metrics", loc="best", fontsize=font_size)
-
-    plt.tight_layout()
-
-    if output_path:
-        try:
-            plt.savefig(output_path, bbox_inches='tight', dpi=kwargs.get('dpi', 300))
-            print(f"Causality graph saved to {output_path}")
-            plt.close() # Close the figure to free up memory
-            return None
-        except Exception as e:
-            print(f"Error saving graph: {e}")
-            try:
-                fig = plt.gcf()
-                plt.show()
-                return fig
-            except Exception as e_show:
-                 print(f"Error displaying graph: {e_show}")
-                 return {"error": f"Error saving and displaying graph: {e}, {e_show}"}
-
-    else:
-        fig = plt.gcf()
-        return fig
-
-def prepare_data_for_granger_causality(
-    metric_df: pd.DataFrame,
-    tenant_dependent: str,
-    tenant_independent: str,
-    metric_name: str,
-    time_column: str = 'experiment_elapsed_seconds',
-    value_column: str = 'value'
-) -> Tuple[pd.Series, pd.Series]:
-    """
-    Prepares time series of two tenants for Granger Causality analysis.
-    The first series returned is the dependent variable (effect).
-    The second series returned is the independent variable (cause).
-
-    Args:
-        metric_df (pd.DataFrame): DataFrame containing the time series.
-        tenant_dependent (str): Identifier of the tenant experiencing the effect.
-        tenant_independent (str): Identifier of the tenant causing the effect.
-        metric_name (str): Name of the metric.
-        time_column (str): Name of the time column.
-        value_column (str): Name of the value column.
-
-    Returns:
-        Tuple[pd.Series, pd.Series]: Two time series (metric values for tenant_dependent and tenant_independent).
-    """
-    series_dependent = metric_df[
-        (metric_df['tenant'] == tenant_dependent) & (metric_df['metric_name'] == metric_name)
-    ].set_index(time_column)[value_column].sort_index()
-
-    series_independent = metric_df[
-        (metric_df['tenant'] == tenant_independent) & (metric_df['metric_name'] == metric_name)
-    ].set_index(time_column)[value_column].sort_index()
-
-    # Ensure series have the same time index and no NaNs
-    aligned_series_dependent, aligned_series_independent = series_dependent.align(series_independent, join='inner')
-    
-    # Handle NaNs that may arise from alignment or already exist
-    aligned_series_dependent = aligned_series_dependent.astype(np.float64).fillna(method='ffill').fillna(method='bfill')
-    aligned_series_independent = aligned_series_independent.astype(np.float64).fillna(method='ffill').fillna(method='bfill')
-    
-    # Remove any remaining NaNs that could not be filled
-    common_index = aligned_series_dependent.dropna().index.intersection(aligned_series_independent.dropna().index)
-    aligned_series_dependent = aligned_series_dependent.loc[common_index]
-    aligned_series_independent = aligned_series_independent.loc[common_index]
-
-    return aligned_series_dependent, aligned_series_independent
+        plt.tight_layout()
+        plt.savefig(filepath)
+        logger.info(f"Causality graph saved to {filepath}")
+    except Exception as e:
+        logger.error(f"Error saving causality graph {filepath}: {e}")
+    finally:
+        plt.close()
