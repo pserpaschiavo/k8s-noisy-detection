@@ -1,0 +1,6 @@
+{
+    "latency": 200,
+    "response_time": 300,
+    "error_rate": 0.05,
+    "throughput": 500
+}

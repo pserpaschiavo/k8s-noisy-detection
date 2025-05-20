@@ -1,19 +1,20 @@
 """
-Configuration file for the data analysis pipeline of the noisy neighbors experiment.
+Arquivo de configuração para o pipeline de análise de dados do experimento de noisy neighbors.
 """
 
-# General settings
+# Configurações gerais
 DEFAULT_DATA_DIR = "/home/phil/Projects/k8s-noisy-detection/demo-data/demo-experiment-3-rounds"
 DEFAULT_OUTPUT_DIR = "output"
 
-# Metric settings
+# Configurações de métricas
 DEFAULT_METRICS = [
     "cpu_usage",
     "memory_usage",
+    "disk_throughput_total",
     "network_total_bandwidth"
 ]
 
-# Visualization settings
+# Configurações de visualização
 VISUALIZATION_CONFIG = {
     "dpi": 300,
     "figure_width": 10,
@@ -24,7 +25,7 @@ VISUALIZATION_CONFIG = {
     "legend_size": 12
 }
 
-# Color mapping for tenants - Using Seaborn's "Paired" palette (colorblind-friendly)
+# Mapeamento de cores para tenants - Usando paleta "Paired" do Seaborn (colorblind-friendly)
 TENANT_COLORS = {
     'tenant-a':      '#a6cee3',  # Light Blue
     'tenant-b':      '#1f78b4',  # Dark Blue
@@ -34,14 +35,14 @@ TENANT_COLORS = {
     'unknown':       '#e31a1c',  # Dark Red
     'waiting':       '#fdbf6f',  # Light Orange
     'active':        '#ff7f00',  # Dark Orange
-    # Additional colors from the "Paired" palette if needed:
+    # Cores adicionais da paleta "Paired" se necessário:
     # '#cab2d6',  # Light Purple
     # '#6a3d9a',  # Dark Purple
-    # '#ffff99',  # Light Yellow (use with caution)
+    # '#ffff99',  # Light Yellow (usar com cautela)
     # '#b15928'   # Brown
 }
 
-# Tenant configured as a noisy neighbor
+# Tenant configurado como gerador de ruído (noisy neighbor)
 DEFAULT_NOISY_TENANT = 'tenant-b'
 
 # Formatted names for metrics (for graph titles and tables)
@@ -69,7 +70,7 @@ PHASE_DISPLAY_NAMES = {
     "3 - Recovery": "Recovery"
 }
 
-# Settings for statistical analysis
+# Configurações para análise estatística
 STATISTICAL_CONFIG = {
     "significance_level": 0.05,
     "effect_size_thresholds": {
@@ -80,21 +81,21 @@ STATISTICAL_CONFIG = {
     "outlier_z_threshold": 3.0
 }
 
-# Settings for table export
+# Configurações para exportação de tabelas
 TABLE_EXPORT_CONFIG = {
     "float_format": ".2f",
     "include_index": False,
     "longtable": False
 }
 
-# Settings for data aggregation
+# Configurações para agregação de dados
 AGGREGATION_CONFIG = {
-    "aggregation_keys": ["tenant", "phase"],  # Elements by which data will be grouped
-    "elements_to_aggregate": None,  # Specific list of elements to focus on, e.g., ["tenant-a", "ingress-nginx"]. None for all.
-    "metrics_for_aggregation": DEFAULT_METRICS # Metrics to consider in aggregation. Uses DEFAULT_METRICS if None.
+    "aggregation_keys": ["tenant", "phase"],  # Elementos pelos quais os dados serão agrupados
+    "elements_to_aggregate": None,  # Lista específica de elementos para focar, ex: ["tenant-a", "ingress-nginx"]. None para todos.
+    "metrics_for_aggregation": DEFAULT_METRICS # Métricas a serem consideradas na agregação. Usa DEFAULT_METRICS se None.
 }
 
-# Node Resource Limit Settings
+# Configurações dos Limites de Recursos do Nó
 NODE_RESOURCE_CONFIGS = {
     "Default": {
         "CPUS": 8,
@@ -108,7 +109,7 @@ NODE_RESOURCE_CONFIGS = {
     }
 }
 
-DEFAULT_NODE_CONFIG_NAME = "Default"  # Default node configuration if not specified
+DEFAULT_NODE_CONFIG_NAME = "Default"  # Configuração padrão do nó se não especificada
 
 # Configuration defaults for Impact Score Calculation
 IMPACT_CALCULATION_DEFAULTS = {
@@ -141,43 +142,19 @@ IMPACT_SCORE_WEIGHTS = {
 # Configuration for Inter-Tenant Causality Analysis
 DEFAULT_CAUSALITY_MAX_LAG = 5
 DEFAULT_CAUSALITY_THRESHOLD_P_VALUE = 0.05
-DEFAULT_GRANGER_MIN_OBSERVATIONS = 30  # Minimum number of observations required for Granger causality test
 DEFAULT_METRICS_FOR_CAUSALITY = [
     "cpu_usage",
     "memory_usage",
     "network_total_bandwidth"
 ]
-GRANGER_CAUSALITY_DEFAULTS = { # Added this dictionary to group Granger-specific defaults
-    'max_lag': DEFAULT_CAUSALITY_MAX_LAG, # Default max lag for Granger causality
-    'test': 'ssr_chi2test', # Default test for Granger causality
-}
-CAUSALITY_FIGURE_SIZE = (12, 10)  # Default figure size for causality graphs (width, height)
 
 # Colors for metrics in causality graph (can be expanded)
-# Using more formal colors for academic publications
+# Usando cores mais formais para publicações acadêmicas
 CAUSALITY_METRIC_COLORS = {
-    "cpu_usage": "#4472C4",      # Formal Blue
-    "memory_usage": "#ED7D31",   # Formal Orange
-    "network_total_bandwidth": "#70AD47", # Formal Green
-    "disk_throughput_total": "#5B9BD5",  # Formal Light Blue
-    "pod_restarts": "#7030A0",  # Formal Purple
-    "oom_kills": "#C00000"      # Formal Red
+    "cpu_usage": "#4472C4",      # Azul formal
+    "memory_usage": "#ED7D31",   # Laranja formal
+    "network_total_bandwidth": "#70AD47", # Verde formal
+    "disk_throughput_total": "#5B9BD5",  # Azul claro formal
+    "pod_restarts": "#7030A0",  # Roxo formal
+    "oom_kills": "#C00000"      # Vermelho formal
 }
-
-# --- Advanced Analysis Parameters ---
-
-SCRAPE_INTERVAL_S = 5 # Prometheus scrape interval in seconds
-INTERPOLATION_METHOD = 'linear' # Interpolation method for time series alignment
-
-# Parameters for Causality Analysis (TE, Granger, CCM)
-TE_K_LAG = 1 # k_lag for Transfer Entropy (number of lags for destination series history)
-TE_L_LAG = 1 # l_lag for Transfer Entropy (number of lags for source series history)
-# These lags will be interpreted as K_LAG * SCRAPE_INTERVAL_S seconds.
-
-# Parameters for Time-Varying Similarity Analysis (Rolling Window)
-# Window size for Time-Varying Cosine Similarity
-# Represents the window duration in seconds. Must be a multiple of SCRAPE_INTERVAL_S.
-COSINE_SIM_WINDOW_SIZE_S = 60 # Example: 1-minute window
-COSINE_SIM_WINDOW_STEP_S = 5  # Example: slide window every 5 seconds
-
-# Add any other global pipeline configurations here.
