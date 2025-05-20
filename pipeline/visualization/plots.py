@@ -33,130 +33,6 @@ def set_publication_style():
     plt.rcParams['legend.title_fontsize'] = VISUALIZATION_CONFIG.get('legend_title_size', 14)
 
 
-def plot_metric_with_anomalies(df, metric_name, time_column='experiment_elapsed_seconds', value_column='value', 
-                               anomaly_column='is_anomaly', change_points=None,
-                               phases=None, tenants=None, show_phase_markers=True, 
-                               figsize=None, use_total_duration=False, total_duration_seconds=None,
-                               show_as_percentage=False, node_config=None):
-    """
-    Creates a line plot for a metric, highlighting anomalies and change points.
-    
-    Args:
-        df (DataFrame): DataFrame with metric data and anomaly column.
-        metric_name (str): Name of the metric (key for METRIC_DISPLAY_NAMES).
-        time_column (str): Column with time values for the X-axis. Default: 'experiment_elapsed_seconds'.
-        value_column (str): Column with metric values.
-        anomaly_column (str): Boolean column indicating if a point is an anomaly.
-        change_points (list): List of timestamps/indices where significant changes occur.
-        phases (list): List of phases to include (None = all).
-        tenants (list): List of tenants to include (None = all).
-        show_phase_markers (bool): Whether to show vertical lines marking phases.
-        figsize (tuple): Figure size (optional, uses config if None).
-        use_total_duration (bool): If True, the X-axis will use 'total_elapsed_seconds'.
-        total_duration_seconds (float): Total duration of the experiment in seconds.
-        show_as_percentage (bool): If True, display values as percentages of total capacity.
-        node_config (dict): Configuration with node resource capacities.
-        
-    Returns:
-        Figure: Matplotlib figure object.
-    """
-    set_publication_style()
-    
-    display_metric_name = METRIC_DISPLAY_NAMES.get(metric_name, metric_name)
-    
-    data = df.copy()
-    if phases:
-        data = data[data['phase'].isin(phases)]
-    if tenants:
-        data = data[data['tenant'].isin(tenants)]
-    
-    if figsize is None:
-        figsize = (VISUALIZATION_CONFIG.get('figure_width', 12), VISUALIZATION_CONFIG.get('figure_height', 8))
-    fig, ax = plt.subplots(figsize=figsize)
-    
-    anomaly_label_added = False  # Flag to ensure anomaly label is added only once
-    for tenant, group in data.groupby('tenant'):
-        group = group.sort_values(time_column)
-        color = TENANT_COLORS.get(tenant, None)
-        
-        ax.plot(group[time_column], group[value_column], 
-                label=tenant, linewidth=1.5, color=color, alpha=0.8)
-        
-        # Highlight anomalies
-        anomalies = group[group[anomaly_column] == True]
-        if not anomalies.empty:
-            label_anom = 'Anomalies' if not anomaly_label_added else None
-            ax.scatter(anomalies[time_column], anomalies[value_column], 
-                       color='red', s=30, label=label_anom, 
-                       marker='x', zorder=5, alpha=0.7)  # Reduced size, added alpha
-            anomaly_label_added = True
-
-    if show_phase_markers:
-        phase_starts = {}
-        # Use PHASE_DISPLAY_NAMES for correct ordering and display
-        ordered_phases = list(PHASE_DISPLAY_NAMES.values())
-        
-        for phase_display_name in ordered_phases:
-            # Find the original phase key if it exists
-            phase_key = next((k for k, v in PHASE_DISPLAY_NAMES.items() if v == phase_display_name), None)
-            if phase_key:
-                phase_data = data[data['phase'] == phase_key]
-                if not phase_data.empty:
-                    min_time = phase_data[time_column].min()
-                    if min_time not in phase_starts:
-                        phase_starts[min_time] = []
-                    phase_starts[min_time].append(phase_display_name) # Use display name for label
-        
-        # Sort by time to draw markers correctly
-        for time_val in sorted(phase_starts.keys()):
-            phase_list = phase_starts[time_val]
-            # Avoid drawing a line at the very beginning of the plot if it's the first phase start
-            if time_val > data[time_column].min() or len(phase_starts) == 1:
-                ax.axvline(x=time_val, color='gray', linestyle='--', alpha=0.7)
-                # Adjust text position to avoid overlap, especially if multiple phases start at same time
-                ax.text(time_val + (data[time_column].max() * 0.01), ax.get_ylim()[1] * 0.95, ', '.join(phase_list), 
-                        rotation=90, verticalalignment='top', horizontalalignment='left', alpha=0.7)
-
-    if use_total_duration:
-        ax.set_xlabel('Total Experiment Time (seconds)')
-        if total_duration_seconds:
-            ax.set_xlim(0, total_duration_seconds)
-    else:
-        time_unit = "seconds" if "seconds" in time_column else time_column.split('_')[-1]
-        ax.set_xlabel(f'Elapsed Time ({time_unit.capitalize()})')
-    
-    y_axis_label = display_metric_name
-    if show_as_percentage:
-        unit_info = "%"
-        if node_config:
-            if metric_name == 'cpu_usage' and 'CPUS' in node_config:
-                unit_info = f"% of {node_config['CPUS']} CPU Cores"
-            elif metric_name == 'memory_usage' and 'MEMORY_GB' in node_config:
-                unit_info = f"% of {node_config['MEMORY_GB']} GB Memory"
-            elif metric_name == 'disk_throughput_total':
-                unit_info = "% of 500 MB/s Theoretical Throughput"
-            elif metric_name == 'network_total_bandwidth':
-                unit_info = "% of 1 Gbps Network Interface"
-        y_axis_label = f"{display_metric_name} ({unit_info})"
-    
-    ax.set_ylabel(y_axis_label)
-    ax.set_title(f'{display_metric_name} with Anomalies by Tenant')
-    
-    handles, labels = ax.get_legend_handles_labels()
-    # Filter out None labels before creating the by_label dictionary
-    filtered_handles_labels = [(h, l) for h, l in zip(handles, labels) if l is not None]
-    if filtered_handles_labels:
-        filtered_labels, filtered_handles = zip(*filtered_handles_labels)
-        by_label = dict(zip(filtered_labels, filtered_handles)) 
-        ax.legend(by_label.values(), by_label.keys(), title='Legend')
-    
-    ax.grid(True, alpha=0.3)
-    ax.xaxis.set_major_locator(MaxNLocator(nbins=10))
-    plt.tight_layout()
-    
-    return fig
-
-
 def plot_metric_by_phase(df, metric_name, time_column='experiment_elapsed_seconds', value_column='value', 
                          phases=None, tenants=None, show_phase_markers=True, 
                          figsize=None, use_total_duration=False, total_duration_seconds=None,
@@ -936,66 +812,6 @@ def plot_impact_score_trend(impact_score_df, score_col='normalized_impact_score'
     return fig
 
 
-def plot_change_points(df, metric_name, change_points, time_column='elapsed_minutes', value_column='value', figsize=None):
-    """
-    Creates a line plot for a metric, highlighting detected change points.
-
-    Args:
-        df (DataFrame): DataFrame with metric data. Must contain tenant, time, and value columns.
-        metric_name (str): Name of the metric (key for METRIC_DISPLAY_NAMES).
-        change_points (list): List of timestamps/values in the time column where changes occur.
-        time_column (str): Column with time values for the X-axis.
-        value_column (str): Column with metric values.
-        figsize (tuple): Figure size (optional, uses config if None).
-
-    Returns:
-        Figure: Matplotlib figure object.
-    """
-    set_publication_style()
-    fig, ax = plt.subplots(figsize=figsize or (VISUALIZATION_CONFIG.get('figure_width', 12), VISUALIZATION_CONFIG.get('figure_height', 6)))
-    display_metric_name = METRIC_DISPLAY_NAMES.get(metric_name, metric_name)
-
-    if 'tenant' in df.columns:
-        for tenant, group in df.groupby('tenant'):
-            group = group.sort_values(time_column)
-            color = TENANT_COLORS.get(tenant, None)
-            ax.plot(group[time_column], group[value_column],
-                    label=f'{tenant}', linewidth=1.5, color=color, alpha=0.8)
-    else:
-        df_sorted = df.sort_values(time_column)
-        ax.plot(df_sorted[time_column], df_sorted[value_column], 
-                label=display_metric_name, linewidth=1.5, alpha=0.8)
-
-    if change_points:
-        cp_label_added = False
-        for cp_time in change_points:
-            label = 'Change Point' if not cp_label_added else None
-            ax.axvline(x=cp_time, color='green', linestyle='--', linewidth=1, alpha=0.5, label=label)
-            if label:
-                cp_label_added = True
-
-    time_unit_label = 'Time'
-    if 'seconds' in time_column:
-        time_unit_label = 'Time (seconds)'
-    elif 'minutes' in time_column:
-        time_unit_label = 'Time (minutes)'
-    elif 'elapsed' in time_column:
-        time_unit_label = f'Elapsed {time_column.split("_")[-1].capitalize()}'
-        
-    ax.set_xlabel(time_unit_label)
-    ax.set_ylabel(display_metric_name)
-    ax.set_title(f'Detected Change Points in {display_metric_name}')
-    
-    handles, labels = ax.get_legend_handles_labels()
-    by_label = dict(zip(labels, handles))
-    ax.legend(by_label.values(), by_label.keys(), title='Legend')
-    
-    ax.grid(True, alpha=0.3)
-    ax.xaxis.set_major_locator(MaxNLocator(nbins=10))
-    plt.tight_layout()
-    return fig
-
-
 def create_heatmap(data, title, figsize=None, cmap='viridis', cbar_label='Value'): # Added cbar_label
     """
     Generic heatmap plotting function.
@@ -1020,62 +836,6 @@ def create_heatmap(data, title, figsize=None, cmap='viridis', cbar_label='Value'
     plt.xticks(rotation=45, ha='right')
     plt.yticks(rotation=0)
     plt.tight_layout()
-    return fig
-
-
-def plot_multivariate_anomalies(df, features, time_column='experiment_elapsed_seconds', anomaly_column='is_anomaly', figsize=None):
-    """
-    Plots multiple features over time, highlighting anomalies detected across them.
-    This is a basic implementation; more sophisticated visualizations might involve dimensionality reduction (PCA, t-SNE)
-    or specific multivariate anomaly scores if available.
-    """
-    set_publication_style()
-    
-    if not features:
-        print("No features specified for multivariate anomaly plot.")
-        fig, ax = plt.subplots()
-        ax.text(0.5,0.5, "No features to plot", ha='center', va='center')
-        return fig
-
-    n_features = len(features)
-    if figsize is None:
-        figsize = (VISUALIZATION_CONFIG.get('figure_width', 12), 
-                   VISUALIZATION_CONFIG.get('figure_height_per_facet_row', 3) * n_features)
-    
-    fig, axes = plt.subplots(n_features, 1, figsize=figsize, sharex=True)
-    if n_features == 1:
-        axes = [axes] # Ensure axes is iterable
-
-    # Ensure data is sorted by time for correct plotting
-    df_sorted = df.sort_values(time_column)
-    anomalies_df = df_sorted[df_sorted[anomaly_column] == True]
-
-    for i, feature in enumerate(features):
-        ax = axes[i]
-        display_feature_name = METRIC_DISPLAY_NAMES.get(feature, feature.replace('_',' ').title())
-        
-        # Plot the feature series
-        ax.plot(df_sorted[time_column], df_sorted[feature], label=display_feature_name, linewidth=1.5, alpha=0.8)
-        
-        # Highlight anomalies on this feature's plot
-        if not anomalies_df.empty:
-            ax.scatter(anomalies_df[time_column], anomalies_df[feature], 
-                       color='red', s=30, label='Anomaly' if i == 0 else "", 
-                       marker='x', zorder=5, alpha=0.7)
-        
-        ax.set_ylabel(display_feature_name)
-        ax.grid(True, alpha=0.3)
-        if i == 0: # Add legend only to the first plot to avoid redundancy
-            ax.legend()
-
-    # Common X-axis label
-    time_unit_label = 'Time'
-    if 'seconds' in time_column: time_unit_label = 'Time (seconds)'
-    elif 'minutes' in time_column: time_unit_label = 'Time (minutes)'
-    axes[-1].set_xlabel(time_unit_label)
-    
-    fig.suptitle('Multivariate Feature Plot with Anomalies', fontsize=VISUALIZATION_CONFIG.get('title_size', 16))
-    plt.tight_layout(rect=[0, 0.03, 1, 0.95]) # Adjust layout for suptitle
     return fig
 
 
@@ -1137,7 +897,7 @@ def plot_entropy_heatmap(entropy_results_df, metric_name, round_name, output_pat
     plt.close()
 
 
-def plot_entropy_top_pairs_barplot(entropy_results_df, metric_name, round_name, output_path, top_n=10):
+def plot_entropy_top_pairs_barplot(entropy_results_df, metric_name, round_name, output_path, top_n=6):
     """
     Generates a bar plot of the top N tenant pairs with the highest mutual information.
 

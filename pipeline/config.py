@@ -141,6 +141,7 @@ IMPACT_SCORE_WEIGHTS = {
 # Configuration for Inter-Tenant Causality Analysis
 DEFAULT_CAUSALITY_MAX_LAG = 5
 DEFAULT_CAUSALITY_THRESHOLD_P_VALUE = 0.05
+DEFAULT_GRANGER_MIN_OBSERVATIONS = 30  # Minimum number of observations required for Granger causality test
 DEFAULT_METRICS_FOR_CAUSALITY = [
     "cpu_usage",
     "memory_usage",

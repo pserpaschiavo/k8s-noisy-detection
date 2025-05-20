@@ -1,0 +1,10 @@
+# main.py:
+
+## remoções:
+- análise de métricas de aplicação;
+- comparação de tecnologias;
+- Normalização de Métricas;
+- Consolidação de Dados para Análise Avançada;
+- Análises Avançadas; Análise de Entropia; 
+- Análise de Causalidade Inter-Tenant 
+
