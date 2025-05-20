@@ -147,6 +147,10 @@ DEFAULT_METRICS_FOR_CAUSALITY = [
     "memory_usage",
     "network_total_bandwidth"
 ]
+GRANGER_CAUSALITY_DEFAULTS = { # Added this dictionary to group Granger-specific defaults
+    'max_lag': DEFAULT_CAUSALITY_MAX_LAG, # Default max lag for Granger causality
+    'test': 'ssr_chi2test', # Default test for Granger causality
+}
 CAUSALITY_FIGURE_SIZE = (12, 10)  # Default figure size for causality graphs (width, height)
 
 # Colors for metrics in causality graph (can be expanded)
@@ -159,3 +163,21 @@ CAUSALITY_METRIC_COLORS = {
     "pod_restarts": "#7030A0",  # Formal Purple
     "oom_kills": "#C00000"      # Formal Red
 }
+
+# --- Advanced Analysis Parameters ---
+
+SCRAPE_INTERVAL_S = 5 # Prometheus scrape interval in seconds
+INTERPOLATION_METHOD = 'linear' # Interpolation method for time series alignment
+
+# Parameters for Causality Analysis (TE, Granger, CCM)
+TE_K_LAG = 1 # k_lag for Transfer Entropy (number of lags for destination series history)
+TE_L_LAG = 1 # l_lag for Transfer Entropy (number of lags for source series history)
+# These lags will be interpreted as K_LAG * SCRAPE_INTERVAL_S seconds.
+
+# Parameters for Time-Varying Similarity Analysis (Rolling Window)
+# Window size for Time-Varying Cosine Similarity
+# Represents the window duration in seconds. Must be a multiple of SCRAPE_INTERVAL_S.
+COSINE_SIM_WINDOW_SIZE_S = 60 # Example: 1-minute window
+COSINE_SIM_WINDOW_STEP_S = 5  # Example: slide window every 5 seconds
+
+# Add any other global pipeline configurations here.

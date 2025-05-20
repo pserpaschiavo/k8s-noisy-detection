@@ -22,7 +22,8 @@ from pipeline.analysis.causality_analysis import (
 )
 from pipeline.analysis.similarity_analysis import (
     calculate_dtw_distance,
-    calculate_cosine_similarity
+    calculate_cosine_similarity,
+    calculate_time_varying_cosine_similarity
 )
 from pipeline.visualization.plots import (
     plot_metric_by_phase, plot_phase_comparison,
@@ -556,20 +557,58 @@ def main():
             dummy_cosine_sim_df = pd.DataFrame(dummy_cosine_sim_data, index=[s_a.name, s_c.name, s_b.name])
             plot_cosine_similarity_heatmap(dummy_cosine_sim_df, title="Dummy Cosine Similarity Heatmap", output_filename=os.path.join(similarity_dir, "dummy_cosine_similarity_heatmap.png"))
 
-        print("\n--- Time-Varying Cosine Similarity (Using Dummy Data) ---")
-        print("NOTE: The following time-varying cosine similarity plot uses DUMMY data.")
-        print("A real implementation would require calculating cosine similarity over sliding windows of actual time series.")
-        timestamps_tv = pd.date_range(start='2023-01-01', periods=10, freq='D')
-        dummy_tv_cosine_sim = pd.DataFrame({
-            'timestamp': timestamps_tv,
-            'cosine_similarity': np.random.rand(10) * 2 - 1
-        })
+        print("\n--- Time-Varying Cosine Similarity ---")
+        tv_cosine_sim_df = pd.DataFrame(columns=['timestamp', 'cosine_similarity'])
+        if not s_a.empty and not s_c.empty and \
+           isinstance(s_a.index, pd.DatetimeIndex) and isinstance(s_c.index, pd.DatetimeIndex) and \
+           not s_a.index.empty and not s_c.index.empty:
+            
+            aligned_df_tv = pd.concat([s_a.rename('s_a_tv'), s_c.rename('s_c_tv')], axis=1, join='inner')
+
+            if not aligned_df_tv.empty and len(aligned_df_tv) >= 10:
+                s_a_aligned_tv = aligned_df_tv['s_a_tv']
+                s_c_aligned_tv = aligned_df_tv['s_c_tv']
+                
+                print(f"Calculating real time-varying cosine similarity between {s_a.name} and {s_c.name} using config-defined window/step.")
+                tv_cosine_sim_df = calculate_time_varying_cosine_similarity(
+                    s_a_aligned_tv, 
+                    s_c_aligned_tv
+                )
+            else:
+                print(f"Not enough overlapping data between {s_a.name} and {s_c.name} for time-varying cosine similarity (need at least 10 points after alignment). Using dummy data for plot.")
+                timestamps_tv = pd.date_range(start='2023-01-01', periods=10, freq='D')
+                tv_cosine_sim_df = pd.DataFrame({
+                    'timestamp': timestamps_tv,
+                    'cosine_similarity': np.random.rand(10) * 2 - 1
+                })
+        else:
+            print(f"Series {s_a.name} or {s_c.name} are not suitable for real time-varying cosine similarity (empty, no DatetimeIndex, or not enough data). Using dummy data for plot.")
+            timestamps_tv = pd.date_range(start='2023-01-01', periods=10, freq='D')
+            tv_cosine_sim_df = pd.DataFrame({
+                'timestamp': timestamps_tv,
+                'cosine_similarity': np.random.rand(10) * 2 - 1
+            })
+
+        if tv_cosine_sim_df.empty:
+            print("Real time-varying cosine similarity calculation resulted in empty DataFrame. Using dummy data for plot.")
+            timestamps_tv = pd.date_range(start='2023-01-01', periods=10, freq='D')
+            tv_cosine_sim_df = pd.DataFrame({
+                'timestamp': timestamps_tv,
+                'cosine_similarity': np.random.rand(10) * 2 - 1
+            })
+
+        phase_start_for_plot = None
+        if not tv_cosine_sim_df.empty and 'timestamp' in tv_cosine_sim_df.columns and not tv_cosine_sim_df['timestamp'].empty:
+            phase_start_for_plot = tv_cosine_sim_df['timestamp'].min()
+        elif not timestamps_tv.empty:
+             phase_start_for_plot = timestamps_tv.min()
+
         plot_time_varying_cosine_similarity(
-            dummy_tv_cosine_sim, 
+            tv_cosine_sim_df, 
             series_a_name=s_a.name,
             series_b_name=s_c.name,
             output_filename=os.path.join(similarity_dir, "time_varying_cosine_sim.png"),
-            phase_start_time=timestamps_tv.min()
+            phase_start_time=phase_start_for_plot
         )
         print(f"Time-varying cosine similarity plot saved to {os.path.join(similarity_dir, 'time_varying_cosine_sim.png')}")
 
