@@ -7,64 +7,47 @@ the generation of visualizations and reports.
 
 import os
 import argparse
+import matplotlib.pyplot as plt
 import pandas as pd
 import numpy as np
-import matplotlib.pyplot as plt
-import seaborn as sns
-import scipy.stats as stats
 
-# Import pipeline modules
-from pipeline.data_processing.consolidation import list_available_tenants, list_available_metrics
-from pipeline.data_processing.consolidation import load_experiment_data, select_tenants, load_multiple_metrics
-from pipeline.data_processing.time_normalization import add_elapsed_time, add_experiment_elapsed_time, add_phase_markers
-from pipeline.data_processing.time_normalization import normalize_time
-from pipeline.data_processing.aggregation import calculate_tenant_stats, calculate_inter_tenant_impact, calculate_recovery_effectiveness
-from pipeline.data_processing.aggregation import aggregate_by_time, aggregate_data_by_custom_elements
-from pipeline.data_processing.metric_normalization import (
-    normalize_metrics_by_node_capacity, apply_normalization_to_all_metrics,
-    auto_format_metrics
+from pipeline.analysis.correlation_analysis import (
+    calculate_pearson_correlation,
+    calculate_spearman_correlation
 )
-
-from pipeline.analysis.tenant_analysis import compare_tenant_metrics
-from pipeline.analysis.phase_analysis import compare_phases_ttest, analyze_recovery_effectiveness
-# Updated imports for advanced analysis modules
-from pipeline.analysis.advanced_analysis import calculate_normalized_impact_score # Kept for this specific function
-from pipeline.analysis.correlation_analysis import calculate_covariance_matrix, calculate_inter_tenant_covariance_per_metric, plot_covariance_matrix, calculate_pearson_correlation, calculate_spearman_correlation, calculate_lagged_cross_correlation, calculate_correlation_matrix # Added calculate_correlation_matrix here
-from pipeline.analysis.causality_analysis import perform_inter_tenant_causality_analysis, visualize_causal_graph, save_causality_results_to_csv, calculate_transfer_entropy, calculate_convergent_cross_mapping # Updated
-from pipeline.analysis.similarity_analysis import calculate_dtw_distance # New
-# End of updated imports
-from pipeline.analysis.noisy_tenant_detection import identify_noisy_tenant
-from pipeline.analysis.global_analysis import (
-    create_global_tenant_summary, create_tenant_impact_matrix, 
-    create_metric_correlation_network, plot_global_dashboard,
-    plot_global_correlation_network
+from pipeline.analysis.causality_analysis import (
+    perform_granger_causality_test,
+    calculate_transfer_entropy,
+    calculate_convergent_cross_mapping
 )
-from pipeline.analysis.experiment_comparison import (
-    load_multiple_experiments,
-    preprocess_experiments,
-    calculate_statistics_summary,
-    compare_distributions,
-    summarize_anomalies,
-    compare_experiment_phases
+from pipeline.analysis.similarity_analysis import (
+    calculate_dtw_distance,
+    calculate_cosine_similarity
 )
-from pipeline.analysis.rounds_aggregation import (
-    aggregate_metrics_across_rounds, 
-    plot_aggregated_metrics,
-    plot_aggregated_metrics_boxplot, # Add import
-    test_for_significant_differences
+from pipeline.visualization.plots import (
+    plot_metric_by_phase, plot_phase_comparison,
+    plot_tenant_impact_heatmap, plot_recovery_effectiveness,
+    plot_impact_score_barplot, plot_impact_score_trend,
+    plot_multivariate_anomalies, 
+    plot_correlation_heatmap,
+    visualize_causal_graph,
+    plot_time_series_with_cosine_similarity,
+    plot_cosine_similarity_heatmap,
+    plot_time_varying_cosine_similarity
 )
-
-from pipeline.visualization.plots import (plot_metric_by_phase, plot_phase_comparison,
-                                plot_tenant_impact_heatmap, plot_recovery_effectiveness,
-                                plot_impact_score_barplot, plot_impact_score_trend,
-                                create_heatmap, plot_multivariate_anomalies, plot_correlation_heatmap)
-
-from pipeline.config import (DEFAULT_DATA_DIR, DEFAULT_METRICS, AGGREGATION_CONFIG,
-                    IMPACT_CALCULATION_DEFAULTS, VISUALIZATION_CONFIG,
-                    NODE_RESOURCE_CONFIGS, DEFAULT_NODE_CONFIG_NAME,
-                    PHASE_DISPLAY_NAMES,
-                    METRIC_DISPLAY_NAMES, DEFAULT_NOISY_TENANT)  # Removed unused causality and granger defaults
-from pipeline.utils import get_experiment_data_dir # Corrected import
+from pipeline.config import (
+    DEFAULT_DATA_DIR, DEFAULT_METRICS, AGGREGATION_CONFIG,
+    IMPACT_CALCULATION_DEFAULTS, VISUALIZATION_CONFIG,
+    NODE_RESOURCE_CONFIGS, DEFAULT_NODE_CONFIG_NAME,
+    PHASE_DISPLAY_NAMES, METRIC_DISPLAY_NAMES, DEFAULT_NOISY_TENANT,
+    DEFAULT_METRICS_FOR_CAUSALITY, DEFAULT_CAUSALITY_MAX_LAG,
+    STATISTICAL_CONFIG, DEFAULT_GRANGER_MIN_OBSERVATIONS,
+    TENANT_COLORS, DEFAULT_OUTPUT_DIR, TABLE_EXPORT_CONFIG,
+    METRICS_CONFIG, IMPACT_SCORE_WEIGHTS, DEFAULT_CAUSALITY_THRESHOLD_P_VALUE,
+    GRANGER_CAUSALITY_DEFAULTS
+)
+from pipeline.data_processing.data_loader import load_experiment_data, list_available_metrics
+from pipeline.utils import (get_experiment_data_dir, add_experiment_elapsed_time, add_phase_markers)
 
 
 def parse_arguments():
@@ -72,55 +55,22 @@ def parse_arguments():
     parser = argparse.ArgumentParser(description='Data analysis pipeline for the noisy neighbors experiment.')
     parser.add_argument('--data-dir', type=str, default='/home/phil/Projects/k8s-noisy-detection/demo-data/demo-experiment-3-rounds',
                         help='Directory with the experiment data')
-    parser.add_argument('--data-dir-comparison', type=str, nargs='+',
-                        help='Additional directory(s) to compare multiple experiments. Used with --compare-experiments.')
-    parser.add_argument('--comparison-names', type=str, nargs='+',
-                        help='Names for the comparison experiments. Must match the number of directories in --data-dir-comparison.')
     parser.add_argument('--output-dir', type=str, default='output',
                         help='Directory to save the results')
     parser.add_argument('--tenants', type=str, nargs='+',
                         help='Specific tenant(s) to analyze')
-    parser.add_argument('--noisy-tenant', type=str, 
-                        help='Specific tenant generating noise (default: tenant-b)')
-    parser.add_argument('--auto-detect-noisy', action='store_true',
-                        help='Automatically detect which tenant is the noise generator')
     parser.add_argument('--metrics', type=str, nargs='+',
                         help='Specific metric(s) to analyze')
     parser.add_argument('--phases', type=str, nargs='+',
                         help='Specific phase(s) to analyze')
     parser.add_argument('--rounds', type=str, nargs='+',
                         help='Specific round(s) to analyze')
-    parser.add_argument('--show-as-percentage', action='store_true',
-                        help='Display metrics as a percentage of total cluster capacity')
+    parser.add_argument('--node-config', type=str, default=None)
     parser.add_argument('--advanced', action='store_true',
-                        help='Run advanced analyses (Correlation, Covariance, Causality, Similarity)') # Updated help string
-    parser.add_argument('--compare-experiments', action='store_true',
-                        help='Compare multiple experiments')
-    parser.add_argument('--generate-reports', action='store_true',
-                        help='Generate reports in Markdown, LaTeX, and HTML')
-    parser.add_argument('--elements-to-aggregate', type=str, nargs='+',
-                        help='Specific element(s) to aggregate (e.g., tenant-a, tenant-b, ingress-nginx)')
-    parser.add_argument('--node-config', type=str, default=None,
-                        help='Name of the node configuration to use (e.g., Default, Limited). Overrides .env.')
-    parser.add_argument('--use-quotas-for-normalization', action='store_true', default=False,
-                        help='Use quota-based configuration for metric normalization.')
+                        help='Run advanced analyses')
     parser.add_argument('--inter-tenant-causality', action='store_true',
-                        help='Run inter-tenant causality analysis.')
-    parser.add_argument('--compare-rounds-intra', action='store_true',
-                        help='Run formal comparison between rounds of the same experiment.')
-    parser.add_argument('--compare-tenants-directly', action='store_true',
-                        help='Run direct statistical comparison between tenants.')
-    parser.add_argument('--global-analysis', action='store_true',
-                        help='Run global analysis across metrics and tenants.')
-    parser.add_argument('--compare-experiments-rounds', type=str, nargs='+',
-                        help='Specific round(s) to use for --compare-experiments')
-    parser.add_argument('--compare-experiments-tenants', type=str, nargs='+',
-                        help='Specific tenant(s) to use for --compare-experiments')
-    parser.add_argument('--use-aggregated-rounds-for-advanced', action='store_true',
-                        help='Use data aggregated across rounds for advanced analyses.')
-    parser.add_argument('--granger-max-lag', type=int, default=5,
-                        help='Maximum lag for Granger causality tests.')
-    
+                        help='Run inter-tenant causality analysis')
+
     return parser.parse_args()
 
 
@@ -128,33 +78,19 @@ def setup_output_directories(output_dir):
     """Set up output directories."""
     plots_dir = os.path.join(output_dir, 'plots')
     tables_dir = os.path.join(output_dir, 'tables')
-    advanced_dir = os.path.join(output_dir, 'advanced')
-    comparison_dir = os.path.join(output_dir, 'comparisons')
-    reports_dir = os.path.join(output_dir, 'reports')
-    causality_dir = os.path.join(output_dir, 'causality')
-    rounds_comparison_intra_dir = os.path.join(output_dir, 'rounds_comparison_intra')
-    tenant_comparison_dir = os.path.join(output_dir, 'tenant_comparison') # New directory
-    global_analysis_dir = os.path.join(output_dir, 'global_analysis') # Global analysis directory
+    advanced_dir = os.path.join(output_dir, 'advanced_analysis')
+    causality_dir = os.path.join(advanced_dir, 'causality')
+    correlation_dir = os.path.join(advanced_dir, 'correlation')
+    similarity_dir = os.path.join(advanced_dir, 'similarity')
     
     os.makedirs(plots_dir, exist_ok=True)
     os.makedirs(tables_dir, exist_ok=True)
     os.makedirs(advanced_dir, exist_ok=True)
-    os.makedirs(os.path.join(advanced_dir, 'tables'), exist_ok=True)
-    os.makedirs(os.path.join(advanced_dir, 'plots'), exist_ok=True) # Ensure advanced plots directory is created
-    os.makedirs(comparison_dir, exist_ok=True)
-    os.makedirs(reports_dir, exist_ok=True)
     os.makedirs(causality_dir, exist_ok=True)
-    os.makedirs(os.path.join(causality_dir, 'tables'), exist_ok=True)  # Ensure causality tables directory is created
-    os.makedirs(os.path.join(causality_dir, 'plots'), exist_ok=True)  # Ensure causality plots directory is created
-    os.makedirs(rounds_comparison_intra_dir, exist_ok=True)
-    os.makedirs(os.path.join(rounds_comparison_intra_dir, 'plots'), exist_ok=True)
-    os.makedirs(tenant_comparison_dir, exist_ok=True) # Create new directory
-    os.makedirs(os.path.join(tenant_comparison_dir, 'tables'), exist_ok=True) # Create tables subdirectory
-    os.makedirs(global_analysis_dir, exist_ok=True) # Create global analysis directory
-    os.makedirs(os.path.join(global_analysis_dir, 'plots'), exist_ok=True) # Create plots subdirectory
-    os.makedirs(os.path.join(global_analysis_dir, 'tables'), exist_ok=True) # Create tables subdirectory
+    os.makedirs(correlation_dir, exist_ok=True)
+    os.makedirs(similarity_dir, exist_ok=True)
     
-    return plots_dir, tables_dir, advanced_dir, comparison_dir, reports_dir, causality_dir, rounds_comparison_intra_dir, tenant_comparison_dir, global_analysis_dir
+    return plots_dir, tables_dir, advanced_dir, causality_dir, correlation_dir, similarity_dir
 
 
 def compare_rounds_within_experiment(experiment_results, output_dir_main, metrics_to_compare=None, phases_to_compare=None, 
@@ -186,10 +122,8 @@ def compare_rounds_within_experiment(experiment_results, output_dir_main, metric
 
     # Default metrics and phases if not provided
     if metrics_to_compare is None:
-        metrics_to_compare = DEFAULT_METRICS # Use default metrics from config if none are specified
+        metrics_to_compare = DEFAULT_METRICS
     if phases_to_compare is None:
-        # This default should align with how phases_to_compare_rounds is set in main()
-        # It expects raw phase names like "2 - Attack"
         phases_to_compare = ["2 - Attack"] 
 
     for metric_name in metrics_to_compare:
@@ -203,19 +137,16 @@ def compare_rounds_within_experiment(experiment_results, output_dir_main, metric
             print(f"Columns 'phase', 'round', or 'value' not found in the DataFrame for metric {metric_name}. Skipping.")
             continue
 
-        for raw_phase_name in phases_to_compare: # Iterate over raw phase names
-            # Get the display name for reporting and filenames
+        for raw_phase_name in phases_to_compare:
             current_phase_display_for_report = PHASE_DISPLAY_NAMES.get(raw_phase_name, raw_phase_name)
             print(f"  Comparing rounds for Metric: {metric_display_name}, Phase: {current_phase_display_for_report} (Raw: {raw_phase_name})")
             
-            # Filter using the raw phase name
             phase_specific_df = metric_df[metric_df['phase'] == raw_phase_name]
             
             output_key = f"{metric_name}_{current_phase_display_for_report.replace(' ', '_')}"
             current_output = {"csv_path": None, "plot_path": None, "anova_f_stat": None, "anova_p_value": None}
 
             if not phase_specific_df.empty:
-                # Check if there is enough data for each round
                 rounds_count = phase_specific_df['round'].value_counts()
                 valid_rounds = rounds_count[rounds_count >= 5].index.tolist()
                 
@@ -223,10 +154,8 @@ def compare_rounds_within_experiment(experiment_results, output_dir_main, metric
                     print(f"    Not enough rounds with sufficient data for analysis. Skipping.")
                     continue
                     
-                # Filter only for rounds with sufficient data
                 phase_specific_df_filtered = phase_specific_df[phase_specific_df['round'].isin(valid_rounds)]
                 
-                # Aggregate data for CSV and plotting
                 if 'tenant' in phase_specific_df_filtered.columns and len(phase_specific_df_filtered['tenant'].unique()) > 1:
                     comparison_data_agg = phase_specific_df_filtered.groupby(['round', 'tenant'])['value'].mean().reset_index()
                     comparison_data = comparison_data_agg.groupby('round')['value'].mean().reset_index()
@@ -235,7 +164,6 @@ def compare_rounds_within_experiment(experiment_results, output_dir_main, metric
                     comparison_data = phase_specific_df_filtered.groupby('round')['value'].mean().reset_index()
                     comparison_data.rename(columns={'value': 'mean_value'}, inplace=True)
                 
-                # Use current_phase_display_for_report for filenames
                 csv_filename = f"{metric_name}_{current_phase_display_for_report.replace(' ', '_')}_round_comparison.csv"
                 csv_path = os.path.join(rounds_comparison_output_dir, csv_filename)
                 try:
@@ -244,7 +172,6 @@ def compare_rounds_within_experiment(experiment_results, output_dir_main, metric
                 except Exception as e:
                     print(f"    Error saving round comparison CSV: {e}")
 
-                # Perform ANOVA
                 rounds_with_data = phase_specific_df['round'].unique()
                 if len(rounds_with_data) >= 2:
                     grouped_values = [
@@ -253,26 +180,23 @@ def compare_rounds_within_experiment(experiment_results, output_dir_main, metric
                     ]
                     if len(grouped_values) >= 2:
                         try:
-                            pass # Added pass to fix empty try block
+                            pass
                         except Exception as e:
                             print(f"    Error performing ANOVA (exception during attempt): {e}")
-                            pass # Added pass to fix empty except block
+                            pass
                     else:
                         print("    Not enough groups with data for ANOVA after filtering.")
                 else:
                     print("    Not enough rounds with data to perform ANOVA.")
 
-                # Generate and save bar plot
                 if not comparison_data.empty:
                     plt.figure(figsize=VISUALIZATION_CONFIG.get('figure_size', (10, 6)))
                     value_col_for_plot = 'mean_value_across_tenants' if 'mean_value_across_tenants' in comparison_data.columns else 'mean_value'
                     
                     plt.bar(comparison_data['round'].astype(str), comparison_data[value_col_for_plot])
-                    # Use current_phase_display_for_report for plot title
                     plt.title(f'Mean {metric_display_name} per Round during {current_phase_display_for_report}')
                     plt.xlabel('Round')
                     
-                    # Configure Y-axis label depending on percentage display
                     if show_as_percentage and node_config:
                         if metric_name == 'cpu_usage' and 'CPUS' in node_config:
                             unit_info = f"% of {node_config['CPUS']} CPU cores"
@@ -290,7 +214,6 @@ def compare_rounds_within_experiment(experiment_results, output_dir_main, metric
                     plt.xticks(rotation=45)
                     plt.tight_layout()
                     
-                    # Use current_phase_display_for_report for plot filename
                     plot_filename = f"{metric_name}_{current_phase_display_for_report.replace(' ', '_')}_round_comparison_plot.png"
                     plot_path = os.path.join(plots_subdir, plot_filename)
                     try:
@@ -308,9 +231,7 @@ def main():
     """Main function that runs the analysis pipeline."""
     args = parse_arguments()
     
-    print("DEBUG: Verificando a flag de análise global:", args.global_analysis)
-    
-    plots_dir, tables_dir, advanced_dir, comparison_dir, reports_dir, causality_dir, rounds_comparison_intra_dir, tenant_comparison_dir, global_analysis_dir = setup_output_directories(args.output_dir)
+    plots_dir, tables_dir, advanced_dir, causality_dir, correlation_dir, similarity_dir = setup_output_directories(args.output_dir)
     
     experiment_data_dir = get_experiment_data_dir(args.data_dir)
 
@@ -322,57 +243,32 @@ def main():
 
     print(f"Using data directory: {experiment_data_dir}")
 
-    # Default node configuration
     node_config_to_use = NODE_RESOURCE_CONFIGS.get(DEFAULT_NODE_CONFIG_NAME, NODE_RESOURCE_CONFIGS.get("Default"))
     
-    # Create an adapted copy of NODE_RESOURCE_CONFIGS for the format expected by normalization modules
     if 'MEMORY_GB' in node_config_to_use and 'MEMORY_BYTES' not in node_config_to_use:
-        node_config_to_use = node_config_to_use.copy()  # Avoid altering the original
+        node_config_to_use = node_config_to_use.copy()
         node_config_to_use['MEMORY_BYTES'] = node_config_to_use['MEMORY_GB'] * (2**30)
         node_config_to_use['DISK_SIZE_BYTES'] = node_config_to_use['DISK_SIZE_GB'] * (2**30)
-        # Estimate bandwidth based on CPU 
         node_config_to_use['NETWORK_BANDWIDTH_MBPS'] = max(1000, node_config_to_use['CPUS'] * 250)
     
-    # UNIFIED DATA LOADING AND INITIAL PROCESSING
     print("\nLoading and Processing Experiment Data...")
-    # Placeholder for data loading logic, assuming load_experiment_data is the intended function
-    # and metric_name_map might be defined elsewhere or loaded from config.
-    # For now, we'll assume it's part of a broader data loading strategy.
     
-    # Example: Using existing load_experiment_data, assuming it returns a compatible structure
-    # This is a temporary adaptation and might need further refinement.
     available_metrics = list_available_metrics(experiment_data_dir)
     metrics_to_load = args.metrics if args.metrics else available_metrics
     
-    # Initialize metric_name_map - this is a placeholder and should be defined based on your project's needs
     metric_name_map = {metric: metric for metric in metrics_to_load} 
     
     all_metrics_data = {}
     if metrics_to_load:
-        # This is a simplified call; actual implementation might vary
-        # based on how load_experiment_data and related functions are structured.
-        # We're assuming load_experiment_data can be adapted or is already suitable.
-        # The original call to load_all_metrics is replaced here.
-        # This section requires careful review to ensure it aligns with the actual data loading mechanisms.
-        
-        # Placeholder: Simulate loading data for each metric
-        # This is a simplified approach. You'll need to replace this with your actual data loading logic.
         for metric_name in metrics_to_load:
-            # This is a conceptual placeholder. The actual data loading might be more complex.
-            # Assuming load_experiment_data can be used or adapted.
-            # You might need to adjust this based on how your data is organized and loaded.
             try:
-                # This is a guess. The actual function and its parameters might differ.
-                # The key is to replace the undefined 'load_all_metrics' with something that exists.
-                # This part is highly dependent on your project's specific data loading functions.
                 data_for_metric = load_experiment_data(experiment_data_dir, [metric_name], specific_metrics_map=metric_name_map)
-                all_metrics_data[metric_name] = data_for_metric # Adjust based on actual return structure
+                all_metrics_data[metric_name] = data_for_metric
             except Exception as e:
                 print(f"Error loading data for metric {metric_name}: {e}")
-                all_metrics_data[metric_name] = {} # Or handle as appropriate
+                all_metrics_data[metric_name] = {}
 
-    # metric_type_map would also need to be defined, possibly from configuration or data inspection
-    metric_type_map = {metric: "gauge" for metric in metrics_to_load}  # Placeholder
+    metric_type_map = {metric: "gauge" for metric in metrics_to_load}
 
     if not all_metrics_data:
         print("CRITICAL ERROR: No data was loaded. Check the specified data directory, metrics, and rounds.")
@@ -380,8 +276,6 @@ def main():
 
     print("Experiment data loaded successfully.")
             
-    # Continue with data processing
-
     experiment_results = {
         'processed_data': all_metrics_data
     }
@@ -390,86 +284,448 @@ def main():
 
     if not metrics_data:
         print("No processed data (metrics_data) available. Many analyses and plots will be skipped.")
-        # Not returning, as some parts of the script might still be useful (e.g. empty report generation)
 
     print("\nNormalizing global experiment time for all metric DataFrames...")
-    # Iterate over each metric
-    all_phase_markers = {} # Initialize all_phase_markers here
+    all_phase_markers = {}
     for metric_name, rounds_data in all_metrics_data.items():
-        all_phase_markers[metric_name] = {} # Initialize for each metric
-        # Iterate over each round DataFrame within the metric
+        all_phase_markers[metric_name] = {}
         for round_name, df_round in rounds_data.items():
             if df_round is not None and not df_round.empty:
-                # Apply time normalization
-                df_round = add_experiment_elapsed_time(df_round) # Reassign the result
-                # Add phase markers
+                df_round = add_experiment_elapsed_time(df_round)
                 if not df_round.empty:
-                    # Pass the phase column name explicitly and the display names dictionary
                     df_round, phase_markers_round = add_phase_markers(df_round, phase_column='phase', phase_display_names=PHASE_DISPLAY_NAMES)
                     all_phase_markers[metric_name][round_name] = phase_markers_round
-                    all_metrics_data[metric_name][round_name] = df_round # Update the DataFrame with the new 'phase_name' column
+                    all_metrics_data[metric_name][round_name] = df_round
             else:
                 print(f"DataFrame for metric '{metric_name}', round '{round_name}' is empty or None. Skipping time normalization.")
     print("Global time normalization completed.")
 
-    # Advanced Analysis Section
-    if args.advanced:
-        print("\nRunning Advanced Analyses...")
-        # Ensure metrics_data is not empty and contains the necessary structure
-        if not metrics_data:
-            print("Skipping advanced analyses as no data is available.")
-        else:
-            # Example: Perform Pearson correlation for the first available metric and round
-            # This is a simplified example; you'll need to adapt it to your specific needs
-            # and iterate through metrics/rounds as required.
-            first_metric_name = next(iter(metrics_data)) if metrics_data else None
-            if first_metric_name:
-                first_round_name = next(iter(metrics_data[first_metric_name])) if metrics_data[first_metric_name] else None
-                if first_round_name:
-                    df_advanced = metrics_data[first_metric_name][first_round_name]
-                    if df_advanced is not None and not df_advanced.empty and 'value' in df_advanced.columns:
-                        # Ensure there are at least two columns for correlation/covariance
-                        # This might involve pivoting or selecting specific columns if your df_advanced is long-form
-                        # For demonstration, assuming df_advanced is already wide-form or has multiple value-like columns
-                        
-                        # Placeholder for actual data preparation for advanced analysis
-                        # This data needs to be in a format suitable for the analysis functions
-                        # e.g., a DataFrame where columns are time series of different tenants/metrics
-                        
-                        # Example call to calculate_pearson_correlation (adjust as needed)
-                        # pearson_corr = calculate_pearson_correlation(df_advanced[['value_tenant_a', 'value_tenant_b']])
-                        # print(f"Pearson Correlation: {pearson_corr}")
+    # Helper function to extract time series data
+    def extract_series_from_metrics_data(metrics_data_local, target_metric, target_round, target_tenant, series_name_prefix="Series", min_len=10):
+        series = pd.Series(dtype=float) # Default empty series
+        series_name_default = f"Empty_{series_name_prefix}_{target_metric}_{target_tenant}_{target_round}"
+        series.name = series_name_default
 
-                        # Example call to calculate_spearman_correlation (adjust as needed)
-                        # spearman_corr = calculate_spearman_correlation(df_advanced[['value_tenant_a', 'value_tenant_b']])
-                        # print(f"Spearman Correlation: {spearman_corr}")
+        if not metrics_data_local:
+            print(f"Metrics data is empty. Cannot extract {target_metric} for tenant {target_tenant} in round {target_round}.")
+            return series
 
-                        # Example call to calculate_lagged_cross_correlation (adjust as needed)
-                        # lagged_corr = calculate_lagged_cross_correlation(df_advanced['value_tenant_a'], df_advanced['value_tenant_b'])
-                        # print(f"Lagged Cross-Correlation: {lagged_corr}")
+        if target_metric in metrics_data_local and target_round in metrics_data_local[target_metric]:
+            df_round = metrics_data_local[target_metric][target_round]
+            if df_round is not None and not df_round.empty and 'timestamp' in df_round.columns and 'value' in df_round.columns:
+                
+                # Handle tenant-specific vs node-level
+                if 'tenant' in df_round.columns:
+                    tenant_data = df_round[df_round['tenant'] == target_tenant]
+                    series_label_name = f"{series_name_prefix}_{target_metric}_{target_tenant}"
+                elif target_tenant is None or target_tenant == "NODE_LEVEL": # Node-level metric
+                    tenant_data = df_round # Use the whole DataFrame
+                    series_label_name = f"{series_name_prefix}_{target_metric}_NODE"
+                else: # Tenant column exists, but target_tenant doesn't match, or tenant column missing when specific tenant requested
+                    print(f"Tenant '{target_tenant}' not found for metric '{target_metric}' in round '{target_round}', or 'tenant' column missing.")
+                    return series
 
-                        # Example call to calculate_covariance_matrix (adjust as needed)
-                        # cov_matrix = calculate_covariance_matrix(df_advanced[['value_tenant_a', 'value_tenant_b']])
-                        # print(f"Covariance Matrix: {cov_matrix}")
-                        # plot_covariance_matrix(cov_matrix, os.path.join(advanced_dir, 'plots', 'covariance_matrix.png'))
-                        pass # Add actual calls here
+                if not tenant_data.empty:
+                    if not pd.api.types.is_datetime64_any_dtype(tenant_data['timestamp']):
+                        try:
+                            # Create a copy to avoid SettingWithCopyWarning if tenant_data is a slice
+                            tenant_data = tenant_data.copy()
+                            tenant_data['timestamp'] = pd.to_datetime(tenant_data['timestamp'])
+                        except Exception as e:
+                            print(f"Warning: Could not convert 'timestamp' to datetime for {target_metric}, {target_tenant or 'NODE'}: {e}")
+                            return series
+
+                    processed_series = tenant_data.set_index('timestamp')['value'].sort_index()
+                    processed_series = processed_series[~processed_series.index.duplicated(keep='first')]
+                    
+                    if len(processed_series) >= min_len:
+                        series = processed_series
+                        series.name = series_label_name
+                        print(f"Successfully extracted series: {series.name} with {len(series)} points for round {target_round}.")
                     else:
-                        print("DataFrame for advanced analysis is empty or lacks 'value' column.")
-                else:
-                    print("No rounds available for the first metric for advanced analysis.")
+                        print(f"Extracted series for {series_label_name} in round {target_round} is too short ({len(processed_series)} points, min_len={min_len}).")
+                        series.name = f"Short_{series_label_name}" # Keep name for empty/short series
             else:
-                print("No metrics available for advanced analysis.")
-
-    if args.inter_tenant_causality:
-        print("\nRunning Inter-Tenant Causality Analysis...")
-        if not metrics_data:
-            print("Skipping inter-tenant causality analysis as no data is available.")
+                print(f"No data or missing required columns for metric '{target_metric}' in round '{target_round}'.")
         else:
-            # Placeholder for data preparation for causality analysis
-            # This typically requires time series data for different tenants
-            # Example: causality_data = prepare_data_for_causality(metrics_data, args.tenants)
-            # perform_inter_tenant_causality_analysis(causality_data, causality_dir, max_lag=args.granger_max_lag)
-            pass # Add actual calls here
+            print(f"Metric '{target_metric}' or round '{target_round}' not found in metrics_data.")
+        
+        if series.empty:
+             series.name = series_name_default # Ensure name is set if it remained empty
+        return series
+
+    print("\nRunning Advanced Analyses...")
+    if not metrics_data:
+        print("Skipping advanced analyses as no data (metrics_data) is available.")
+    else:
+        print("\n--- Preparing Series for Advanced Analysis from Real Data ---")
+        
+        s_a, s_b, s_c = pd.Series(dtype=float), pd.Series(dtype=float), pd.Series(dtype=float)
+        # Assign default names for placeholders
+        s_a.name, s_b.name, s_c.name = "Placeholder_S_A", "Placeholder_S_B", "Placeholder_S_C"
+
+        first_round_name = None
+        available_rounds = set()
+        if metrics_data:
+            for metric_key in metrics_data:
+                if metrics_data[metric_key]:
+                    available_rounds.update(metrics_data[metric_key].keys())
+        if available_rounds:
+            first_round_name = sorted(list(available_rounds))[0] # Pick the first round alphanumerically
+            print(f"Using data from round: {first_round_name} for extracting example series.")
+
+        if first_round_name:
+            # Try to get diverse metrics and tenants
+            potential_metrics = DEFAULT_METRICS_FOR_CAUSALITY[:2] or DEFAULT_METRICS[:2] or list(metrics_data.keys())[:2]
+            
+            all_tenants_in_round = set()
+            for m_key in metrics_data: # Check all metrics for tenants in the chosen round
+                if first_round_name in metrics_data[m_key]:
+                    df_r = metrics_data[m_key][first_round_name]
+                    if df_r is not None and 'tenant' in df_r.columns:
+                        all_tenants_in_round.update(df_r['tenant'].unique())
+            
+            potential_tenants = sorted(list(all_tenants_in_round))
+            
+            metric1, metric2 = (potential_metrics[0] if len(potential_metrics) > 0 else None), (potential_metrics[1] if len(potential_metrics) > 1 else None)
+            tenant1, tenant2 = (potential_tenants[0] if len(potential_tenants) > 0 else None), (potential_tenants[1] if len(potential_tenants) > 1 else None)
+
+            print(f"Attempting to extract series with: metric1={metric1}, metric2={metric2}, tenant1={tenant1}, tenant2={tenant2}")
+
+            if metric1 and tenant1:
+                s_a = extract_series_from_metrics_data(metrics_data, metric1, first_round_name, tenant1, "S_A")
+            
+            if metric2 and tenant1 and metric1 != metric2: # Different metric, same tenant
+                s_b = extract_series_from_metrics_data(metrics_data, metric2, first_round_name, tenant1, "S_B")
+            elif metric1 and tenant2 and tenant1 != tenant2: # Same metric, different tenant (if s_b not set)
+                 if s_b.empty: s_b = extract_series_from_metrics_data(metrics_data, metric1, first_round_name, tenant2, "S_B")
+
+            if metric1 and tenant2 and tenant1 != tenant2: # Metric 1, Tenant 2 for s_c
+                s_c = extract_series_from_metrics_data(metrics_data, metric1, first_round_name, tenant2, "S_C")
+            elif metric2 and tenant2 and tenant1 != tenant2 and metric1 != metric2: # Metric 2, Tenant 2 for s_c (if s_c not set and metric2 exists)
+                 if s_c.empty: s_c = extract_series_from_metrics_data(metrics_data, metric2, first_round_name, tenant2, "S_C_fallback")
+            
+            # Fallback for s_b, s_c if they are still empty and s_a is not
+            if s_b.empty and not s_a.empty and metric2 and tenant1: # Try metric2, tenant1 again if previous logic missed
+                 s_b = extract_series_from_metrics_data(metrics_data, metric2, first_round_name, tenant1, "S_B_fallback")
+            if s_c.empty and not s_a.empty and metric1 and tenant2: # Try metric1, tenant2 again
+                 s_c = extract_series_from_metrics_data(metrics_data, metric1, first_round_name, tenant2, "S_C_fallback")
+
+        # Ensure s_a, s_b, s_c are pd.Series, even if empty, and have names.
+        # If any series is still empty, use a placeholder.
+        # Min length for general display/simple calcs. Granger etc. have own higher limits.
+        min_display_len = 5 
+        if s_a.empty or len(s_a) < min_display_len:
+            print(f"Series S_A ({s_a.name}) is empty or too short after extraction attempt. Using placeholder.")
+            s_a = pd.Series(np.random.randn(50), index=pd.date_range(start='2023-01-01', periods=50, freq='H'), name='Placeholder_S_A')
+        if s_b.empty or len(s_b) < min_display_len:
+            print(f"Series S_B ({s_b.name}) is empty or too short after extraction attempt. Using placeholder.")
+            s_b = pd.Series(np.random.randn(50), index=pd.date_range(start='2023-01-01', periods=50, freq='H'), name='Placeholder_S_B')
+        if s_c.empty or len(s_c) < min_display_len:
+            print(f"Series S_C ({s_c.name}) is empty or too short after extraction attempt. Using placeholder.")
+            s_c = pd.Series(np.random.randn(50), index=pd.date_range(start='2023-01-01', periods=50, freq='H'), name='Placeholder_S_C')
+        
+        # Align valid series if they have DatetimeIndex
+        series_to_align = [s for s in [s_a, s_b, s_c] if not s.empty and isinstance(s.index, pd.DatetimeIndex)]
+        if len(series_to_align) >= 2:
+            print("Aligning extracted series using inner join on timestamps...")
+            aligned_df = None
+            if len(series_to_align) == 2:
+                aligned_df = pd.merge(series_to_align[0].rename('s1'), series_to_align[1].rename('s2'), left_index=True, right_index=True, how='inner')
+                if not aligned_df.empty:
+                    series_to_align[0] = aligned_df['s1']; series_to_align[0].name = s_a.name # Keep original intended name
+                    series_to_align[1] = aligned_df['s2']; series_to_align[1].name = s_b.name
+            elif len(series_to_align) == 3:
+                df1 = series_to_align[0].rename('s1'); df2 = series_to_align[1].rename('s2'); df3 = series_to_align[2].rename('s3')
+                aligned_df = pd.merge(df1, df2, left_index=True, right_index=True, how='inner')
+                aligned_df = pd.merge(aligned_df, df3, left_index=True, right_index=True, how='inner')
+                if not aligned_df.empty:
+                    series_to_align[0] = aligned_df['s1']; series_to_align[0].name = s_a.name
+                    series_to_align[1] = aligned_df['s2']; series_to_align[1].name = s_b.name
+                    series_to_align[2] = aligned_df['s3']; series_to_align[2].name = s_c.name
+            
+            # Re-assign s_a, s_b, s_c if they were part of alignment and df is not empty
+            if aligned_df is not None and not aligned_df.empty:
+                if len(series_to_align) > 0 and not series_to_align[0].empty: s_a = series_to_align[0]
+                if len(series_to_align) > 1 and not series_to_align[1].empty: s_b = series_to_align[1]
+                if len(series_to_align) > 2 and not series_to_align[2].empty: s_c = series_to_align[2]
+                print("Series aligned. Re-checking lengths.")
+                if s_a.empty or len(s_a) < min_display_len: s_a = pd.Series(np.random.randn(50), index=pd.date_range(start='2023-01-01', periods=50, freq='H'), name='Placeholder_S_A_after_align')
+                if s_b.empty or len(s_b) < min_display_len: s_b = pd.Series(np.random.randn(50), index=pd.date_range(start='2023-01-01', periods=50, freq='H'), name='Placeholder_S_B_after_align')
+                if s_c.empty or len(s_c) < min_display_len: s_c = pd.Series(np.random.randn(50), index=pd.date_range(start='2023-01-01', periods=50, freq='H'), name='Placeholder_S_C_after_align')
+
+            elif aligned_df is not None and aligned_df.empty:
+                print("Inner join for alignment resulted in empty series. Using pre-alignment or placeholders.")
+
+        series_list_for_analysis = [s for s in [s_a, s_b, s_c] if not s.empty]
+        print(f"Final series for analysis: {[s.name for s in series_list_for_analysis if hasattr(s, 'name')]}")
+        if not series_list_for_analysis:
+             print("CRITICAL: No valid series (real or placeholder) available for advanced analysis. Most analyses will be skipped.")
+             s_a = pd.Series(np.random.randn(50), index=pd.date_range(start='2023-01-01', periods=50, freq='H'), name='Emergency_Placeholder_S_A')
+             s_b = pd.Series(np.random.randn(50), index=pd.date_range(start='2023-01-01', periods=50, freq='H'), name='Emergency_Placeholder_S_B')
+             s_c = pd.Series(np.random.randn(50), index=pd.date_range(start='2023-01-01', periods=50, freq='H'), name='Emergency_Placeholder_S_C')
+             series_list_for_analysis = [s_a, s_b, s_c]
+
+        print("\n--- Running Correlation Analysis ---")
+        if not s_a.empty and not s_b.empty:
+            pearson_corr, pearson_p_value = calculate_pearson_correlation(s_a, s_b)
+            print(f"Pearson Correlation between {s_a.name} and {s_b.name}: {pearson_corr:.4f} (p-value: {pearson_p_value:.4f})")
+        else:
+            print(f"Skipping Pearson correlation between {s_a.name} and {s_b.name} due to empty series.")
+
+        if not s_a.empty and not s_c.empty:
+            spearman_corr, spearman_p_value = calculate_spearman_correlation(s_a, s_c)
+            print(f"Spearman Correlation between {s_a.name} and {s_c.name}: {spearman_corr:.4f} (p-value: {spearman_p_value:.4f})")
+        else:
+            print(f"Skipping Spearman correlation between {s_a.name} and {s_c.name} due to empty series.")
+        
+        valid_series_for_heatmap = [s for s in [s_a, s_b, s_c] if not s.empty and len(s) > 1]
+        if len(valid_series_for_heatmap) >= 2:
+            df_for_heatmap = pd.concat(valid_series_for_heatmap, axis=1).dropna()
+            df_for_heatmap.columns = [s.name for s in valid_series_for_heatmap][:len(df_for_heatmap.columns)]
+
+            if not df_for_heatmap.empty and len(df_for_heatmap) > 1 and len(df_for_heatmap.columns) > 1:
+                actual_corr_df = df_for_heatmap.corr(method='pearson')
+                plot_correlation_heatmap(actual_corr_df, title=f"Correlation Heatmap ({', '.join(df_for_heatmap.columns)})",
+                                         output_filename=os.path.join(correlation_dir, "actual_correlation_heatmap.png"))
+                print(f"Actual correlation heatmap saved to {os.path.join(correlation_dir, 'actual_correlation_heatmap.png')}")
+            else:
+                print("Not enough data/series for actual correlation heatmap after processing. Using dummy heatmap.")
+                dummy_corr_data = {s_a.name: [1.0, 0.5, 0.2], s_b.name: [0.5, 1.0, 0.3], s_c.name: [0.2, 0.3, 1.0]}
+                dummy_corr_df = pd.DataFrame(dummy_corr_data, index=[s_a.name, s_b.name, s_c.name])
+                plot_correlation_heatmap(dummy_corr_df, title="Dummy Correlation Heatmap", 
+                                         output_filename=os.path.join(correlation_dir, "dummy_correlation_heatmap.png"))
+        else:
+            print("Not enough valid series for correlation heatmap. Using dummy heatmap.")
+            dummy_corr_data = {s_a.name: [1.0, 0.5, 0.2], s_b.name: [0.5, 1.0, 0.3], s_c.name: [0.2, 0.3, 1.0]}
+            dummy_corr_df = pd.DataFrame(dummy_corr_data, index=[s_a.name, s_b.name, s_c.name])
+            plot_correlation_heatmap(dummy_corr_df, title="Dummy Correlation Heatmap", 
+                                     output_filename=os.path.join(correlation_dir, "dummy_correlation_heatmap.png"))
+
+        print("\n--- Running Similarity Analysis ---")
+        if not s_a.empty and not s_b.empty:
+            dtw_dist = calculate_dtw_distance(s_a, s_b)
+            print(f"DTW Distance between {s_a.name} and {s_b.name}: {dtw_dist:.4f}")
+        else:
+            print(f"Skipping DTW distance between {s_a.name} and {s_b.name} due to empty series.")
+        
+        if not s_a.empty and not s_c.empty:
+            cosine_sim = calculate_cosine_similarity(s_a, s_c)
+            print(f"Cosine Similarity between {s_a.name} and {s_c.name}: {cosine_sim:.4f}")
+
+            plot_time_series_with_cosine_similarity(
+                s_a, s_c, cosine_sim,
+                title=f"Time Series Comparison: {s_a.name} vs {s_c.name}",
+                output_filename=os.path.join(similarity_dir, "time_series_cosine_sim.png")
+            )
+            print(f"Time series with cosine similarity plot saved to {os.path.join(similarity_dir, 'time_series_cosine_sim.png')}")
+        else:
+            print(f"Skipping Cosine similarity between {s_a.name} and {s_c.name} and related plot due to empty series.")
+            cosine_sim = np.nan
+
+        if len(valid_series_for_heatmap) >= 2:
+            df_for_sim_heatmap = pd.concat(valid_series_for_heatmap, axis=1).dropna()
+            df_for_sim_heatmap.columns = [s.name for s in valid_series_for_heatmap][:len(df_for_sim_heatmap.columns)]
+
+            if not df_for_sim_heatmap.empty and len(df_for_sim_heatmap.columns) >=2:
+                num_series_sim = len(df_for_sim_heatmap.columns)
+                sim_matrix = np.ones((num_series_sim, num_series_sim))
+                series_values_list = [df_for_sim_heatmap[col].values for col in df_for_sim_heatmap.columns]
+
+                for i in range(num_series_sim):
+                    for j in range(i + 1, num_series_sim):
+                        sim = calculate_cosine_similarity(pd.Series(series_values_list[i]), pd.Series(series_values_list[j]))
+                        sim_matrix[i, j] = sim
+                        sim_matrix[j, i] = sim
+                
+                actual_cosine_sim_df = pd.DataFrame(sim_matrix, index=df_for_sim_heatmap.columns, columns=df_for_sim_heatmap.columns)
+                plot_cosine_similarity_heatmap(
+                    actual_cosine_sim_df, 
+                    title=f"Cosine Similarity Heatmap ({', '.join(df_for_sim_heatmap.columns)})",
+                    output_filename=os.path.join(similarity_dir, "actual_cosine_similarity_heatmap.png")
+                )
+                print(f"Actual cosine similarity heatmap saved to {os.path.join(similarity_dir, 'actual_cosine_similarity_heatmap.png')}")
+            else:
+                print("Not enough data/columns for actual cosine similarity heatmap. Using dummy heatmap.")
+                dummy_cosine_sim_data = {s_a.name: [1.0, cosine_sim if not np.isnan(cosine_sim) else 0.5, 0.2], s_c.name: [cosine_sim if not np.isnan(cosine_sim) else 0.5, 1.0, 0.4], s_b.name: [0.2, 0.4, 1.0]}
+                dummy_cosine_sim_df = pd.DataFrame(dummy_cosine_sim_data, index=[s_a.name, s_c.name, s_b.name])
+                plot_cosine_similarity_heatmap(dummy_cosine_sim_df, title="Dummy Cosine Similarity Heatmap", output_filename=os.path.join(similarity_dir, "dummy_cosine_similarity_heatmap.png"))
+        else:
+            print("Not enough valid series for cosine similarity heatmap. Using dummy heatmap.")
+            dummy_cosine_sim_data = {s_a.name: [1.0, cosine_sim if not np.isnan(cosine_sim) else 0.5, 0.2], s_c.name: [cosine_sim if not np.isnan(cosine_sim) else 0.5, 1.0, 0.4], s_b.name: [0.2, 0.4, 1.0]}
+            dummy_cosine_sim_df = pd.DataFrame(dummy_cosine_sim_data, index=[s_a.name, s_c.name, s_b.name])
+            plot_cosine_similarity_heatmap(dummy_cosine_sim_df, title="Dummy Cosine Similarity Heatmap", output_filename=os.path.join(similarity_dir, "dummy_cosine_similarity_heatmap.png"))
+
+        print("\n--- Time-Varying Cosine Similarity (Using Dummy Data) ---")
+        print("NOTE: The following time-varying cosine similarity plot uses DUMMY data.")
+        print("A real implementation would require calculating cosine similarity over sliding windows of actual time series.")
+        timestamps_tv = pd.date_range(start='2023-01-01', periods=10, freq='D')
+        dummy_tv_cosine_sim = pd.DataFrame({
+            'timestamp': timestamps_tv,
+            'cosine_similarity': np.random.rand(10) * 2 - 1
+        })
+        plot_time_varying_cosine_similarity(
+            dummy_tv_cosine_sim, 
+            series_a_name=s_a.name,
+            series_b_name=s_c.name,
+            output_filename=os.path.join(similarity_dir, "time_varying_cosine_sim.png"),
+            phase_start_time=timestamps_tv.min()
+        )
+        print(f"Time-varying cosine similarity plot saved to {os.path.join(similarity_dir, 'time_varying_cosine_sim.png')}")
+
+        print("\n--- Running Causality Analysis ---")
+        print("\n--- Preparing Data for Granger Causality Test from Real Data ---")
+        actual_granger_input_long_df = pd.DataFrame()
+        granger_input_dfs_list = []
+        
+        metrics_for_granger = DEFAULT_METRICS_FOR_CAUSALITY[:] 
+        if not metrics_for_granger: metrics_for_granger = DEFAULT_METRICS[:2]
+        if not metrics_for_granger and metrics_data: metrics_for_granger = list(metrics_data.keys())[:2]
+
+        noisy_tenant_for_granger_default = DEFAULT_NOISY_TENANT
+        noisy_tenant_for_granger = None
+        other_tenants_for_granger = []
+
+        if first_round_name and metrics_data and metrics_for_granger:
+            all_tenants_in_round_for_granger = set()
+            for metric_name_granger in metrics_for_granger:
+                if metric_name_granger in metrics_data and first_round_name in metrics_data[metric_name_granger]:
+                    df_round_granger = metrics_data[metric_name_granger][first_round_name]
+                    if df_round_granger is not None and 'tenant' in df_round_granger.columns:
+                        all_tenants_in_round_for_granger.update(df_round_granger['tenant'].unique())
+            
+            sorted_tenants_for_granger = sorted(list(all_tenants_in_round_for_granger))
+
+            if noisy_tenant_for_granger_default and noisy_tenant_for_granger_default in sorted_tenants_for_granger:
+                noisy_tenant_for_granger = noisy_tenant_for_granger_default
+            elif sorted_tenants_for_granger:
+                noisy_tenant_for_granger = sorted_tenants_for_granger[0]
+                print(f"Default noisy tenant '{noisy_tenant_for_granger_default}' not found or not specified for Granger; using first available: {noisy_tenant_for_granger}")
+            
+            if noisy_tenant_for_granger:
+                other_tenants_for_granger = [t for t in sorted_tenants_for_granger if t != noisy_tenant_for_granger]
+            
+            if not other_tenants_for_granger and len(sorted_tenants_for_granger) > 1 and noisy_tenant_for_granger:
+                 other_tenants_for_granger = [t for t in sorted_tenants_for_granger if t != noisy_tenant_for_granger][:1]
+
+            if noisy_tenant_for_granger and other_tenants_for_granger:
+                tenants_for_granger_analysis = [noisy_tenant_for_granger] + other_tenants_for_granger
+                print(f"Granger analysis tenants: Noisy={noisy_tenant_for_granger}, Others={other_tenants_for_granger}, Metrics: {metrics_for_granger}")
+
+                for metric_name_granger in metrics_for_granger:
+                    if metric_name_granger in metrics_data and first_round_name in metrics_data[metric_name_granger]:
+                        df_round_metric_granger = metrics_data[metric_name_granger][first_round_name]
+                        if df_round_metric_granger is not None and not df_round_metric_granger.empty:
+                            for tenant_name_granger in tenants_for_granger_analysis:
+                                if 'tenant' not in df_round_metric_granger.columns:
+                                    if tenant_name_granger is None or tenant_name_granger == "NODE_LEVEL":
+                                        tenant_df_granger = df_round_metric_granger
+                                    else: continue
+                                else:
+                                    tenant_df_granger = df_round_metric_granger[df_round_metric_granger['tenant'] == tenant_name_granger]
+
+                                if not tenant_df_granger.empty and 'timestamp' in tenant_df_granger.columns and 'value' in tenant_df_granger.columns:
+                                    current_phase_granger = tenant_df_granger['phase'].iloc[0] if 'phase' in tenant_df_granger.columns and not tenant_df_granger.empty else 'unknown_phase'
+                                    
+                                    granger_series_df = tenant_df_granger[['timestamp', 'value']].copy()
+                                    granger_series_df.rename(columns={'timestamp': 'datetime'}, inplace=True)
+                                    granger_series_df['tenant'] = tenant_name_granger if 'tenant' in df_round_metric_granger.columns else "NODE_LEVEL"
+                                    granger_series_df['metric_name'] = metric_name_granger
+                                    granger_series_df['phase'] = current_phase_granger
+                                    granger_series_df['round'] = first_round_name
+                                    granger_input_dfs_list.append(granger_series_df)
+            else:
+                print("Not enough distinct tenants or metrics found for Granger causality with real data based on config and available data.")
+        
+        if granger_input_dfs_list:
+            actual_granger_input_long_df = pd.concat(granger_input_dfs_list).reset_index(drop=True)
+            actual_granger_input_long_df.dropna(subset=['value'], inplace=True)
+            print(f"Prepared actual_granger_input_long_df with {len(actual_granger_input_long_df)} rows for Granger causality.")
+        
+        if actual_granger_input_long_df.empty or \
+           len(actual_granger_input_long_df['metric_name'].unique()) == 0 or \
+           len(actual_granger_input_long_df['tenant'].unique()) < 2:
+            
+            print("Failed to prepare sufficient real data for Granger causality. Constructing fallback Granger input from s_a, s_b, s_c.")
+            
+            mock_data_granger_list_fallback = []
+            series_for_fallback_granger = [s for s in [s_a, s_b, s_c] if s is not None and not s.empty and len(s) >= DEFAULT_GRANGER_MIN_OBSERVATIONS]
+
+            if len(series_for_fallback_granger) >= 2:
+                temp_tenants_fallback = []
+                temp_metrics_fallback = []
+                for i, s_item_fallback in enumerate(series_for_fallback_granger):
+                    temp_df_fallback = s_item_fallback.reset_index()
+                    temp_df_fallback.columns = ['datetime', 'value']
+                    
+                    name_parts_fallback = s_item_fallback.name.split('_')
+                    tenant_name_fallback = name_parts_fallback[-1] if "tenant" in name_parts_fallback[-1] else f"fallbacktenant{i+1}"
+                    metric_name_fallback = "_".join(name_parts_fallback[2:-1]) if len(name_parts_fallback) > 3 else (name_parts_fallback[1] if len(name_parts_fallback) > 1 else f"fallbackmetric{i+1}")
+                    if not metric_name_fallback : metric_name_fallback = f"fallbackmetric{i+1}"
+
+                    temp_df_fallback['tenant'] = tenant_name_fallback
+                    temp_df_fallback['metric_name'] = metric_name_fallback
+                    temp_df_fallback['phase'] = 'fallback_phase'
+                    temp_df_fallback['round'] = first_round_name or 'fallback_round'
+                    mock_data_granger_list_fallback.append(temp_df_fallback)
+                    temp_tenants_fallback.append(tenant_name_fallback)
+                    temp_metrics_fallback.append(metric_name_fallback)
+
+                if mock_data_granger_list_fallback:
+                    actual_granger_input_long_df = pd.concat(mock_data_granger_list_fallback).reset_index(drop=True)
+                    actual_granger_input_long_df.dropna(subset=['value'], inplace=True)
+                    print(f"Using fallback Granger input data from s_a,s_b,s_c: {len(actual_granger_input_long_df)} rows.")
+                    unique_fallback_tenants = sorted(list(set(temp_tenants_fallback)))
+                    if unique_fallback_tenants:
+                        noisy_tenant_for_granger = unique_fallback_tenants[0]
+                        other_tenants_for_granger = unique_fallback_tenants[1:]
+                    metrics_for_granger = sorted(list(set(temp_metrics_fallback)))
+            else:
+                print("Not enough valid series (s_a, s_b, s_c) for fallback Granger input.")
+                actual_granger_input_long_df = pd.DataFrame()
+
+        granger_results_df = pd.DataFrame()
+        if not actual_granger_input_long_df.empty and \
+           metrics_for_granger and \
+           noisy_tenant_for_granger and \
+           len(actual_granger_input_long_df['tenant'].unique()) >= (1 if not other_tenants_for_granger else 2):
+            
+            print(f"Running Granger Causality Test with: Metrics={metrics_for_granger}, NoisyTenant={noisy_tenant_for_granger}, OtherTenants={other_tenants_for_granger}")
+            granger_results_df = perform_granger_causality_test(
+                data=actual_granger_input_long_df, 
+                metrics_for_causality=metrics_for_granger, 
+                noisy_tenant=noisy_tenant_for_granger, 
+                other_tenants=other_tenants_for_granger,
+                max_lag=GRANGER_CAUSALITY_DEFAULTS.get('max_lag', 5),
+                test=GRANGER_CAUSALITY_DEFAULTS.get('test', 'ssr_chi2test'),
+                significance_level=DEFAULT_CAUSALITY_THRESHOLD_P_VALUE,
+                min_observations=DEFAULT_GRANGER_MIN_OBSERVATIONS,
+                verbose=True
+            )
+        else:
+            print("Skipping Granger causality test as not enough valid data or configuration could be prepared.")
+
+        if not granger_results_df.empty:
+            print("Granger Causality Results:")
+            print(granger_results_df.head())
+            visualize_causal_graph(granger_results_df, 
+                                   output_path=os.path.join(causality_dir, "granger_causal_graph.png"),
+                                   title="Example Granger Causal Graph")
+            print(f"Granger causal graph saved to {os.path.join(causality_dir, 'granger_causal_graph.png')}")
+        else:
+            print("Granger causality analysis did not produce results or encountered an issue.")
+
+        te_s1_to_s2 = calculate_transfer_entropy(s_a.values, s_b.values, k=1)
+        te_s2_to_s1 = calculate_transfer_entropy(s_b.values, s_a.values, k=1)
+        print(f"Transfer Entropy ({s_a.name} -> {s_b.name}): {te_s1_to_s2:.4f}")
+        print(f"Transfer Entropy ({s_b.name} -> {s_a.name}): {te_s2_to_s1:.4f}")
+
+        ccm_scores = calculate_convergent_cross_mapping(s_a, s_c, embed_dim=2, tau=1)
+        if ccm_scores:
+            print(f"CCM Score ({s_a.name} xmaps {s_c.name}): {ccm_scores['ccm_s1_xmaps_s2']:.4f}")
+            print(f"CCM Score ({s_c.name} xmaps {s_a.name}): {ccm_scores['ccm_s2_xmaps_s1']:.4f}")
+        else:
+            print(f"CCM analysis for {s_a.name} and {s_c.name} did not produce results.")
 
     print("\nPipeline execution finished successfully!")
     

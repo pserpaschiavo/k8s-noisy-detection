@@ -5,15 +5,11 @@ import pandas as pd
 from statsmodels.tsa.stattools import grangercausalitytests
 import networkx as nx
 import matplotlib.pyplot as plt
-import pyinform
 from pyinform.transferentropy import transfer_entropy
 from sklearn.preprocessing import MinMaxScaler
 import numpy as np
-
-# Placeholder for Convergent Cross Mapping specific imports if needed later
-# For example, if using a library like skccm, you would import it here.
-# from skccm.utilities import train_test_split
-# from skccm import CCM
+from skccm import CCM
+from skccm.utilities import train_test_split
 
 def perform_inter_tenant_causality_analysis(
     data, metrics_for_causality, noisy_tenant, other_tenants, 
@@ -24,32 +20,33 @@ def perform_inter_tenant_causality_analysis(
 ):
     """
     Performs inter-tenant Granger causality analysis.
-    (Original function from advanced_analysis.py, adapted)
+    (Original function from advanced_analysis.py, adapted and enhanced)
     """
     results = []
     if data.empty:
-        print("Input data for causality analysis is empty. Skipping.")
+        if verbose:
+            print("Input data for causality analysis is empty. Skipping.")
         return pd.DataFrame(results)
 
     # Ensure 'datetime' is the index if it exists and is not already
     if time_col in data.columns and data.index.name != time_col:
         data = data.set_index(time_col)
     elif data.index.name != time_col: # If time_col is not in columns and not index name
-        print(f"Time column '{time_col}' not found in data. Causality analysis might be incorrect.")
-        # Attempt to use the existing index if it's a DatetimeIndex
+        if verbose:
+            print(f"Time column '{time_col}' not found in data. Causality analysis might be incorrect.")
         if not isinstance(data.index, pd.DatetimeIndex):
-            print("Index is not a DatetimeIndex. Cannot proceed with causality analysis without a proper time column.")
+            if verbose:
+                print("Index is not a DatetimeIndex. Cannot proceed with causality analysis without a proper time column.")
             return pd.DataFrame(results)
 
     for metric in metrics_for_causality:
         metric_data_frames = {}
         all_tenants_for_metric = [noisy_tenant] + other_tenants
 
-        for tenant in all_tenants_for_metric:
-            # Filter data for the current tenant, metric, round, and phase
+        for tenant_name_loop in all_tenants_for_metric: # Renamed to avoid conflict with tenant_col parameter
             tenant_metric_data = data[
-                (data[tenant_col] == tenant) &
-                (data['metric_name'] == metric)  # Assuming 'metric_name' column exists
+                (data[tenant_col] == tenant_name_loop) &
+                (data['metric_name'] == metric)
             ]
             
             if phase_filter and phase_col in tenant_metric_data.columns:
@@ -58,160 +55,146 @@ def perform_inter_tenant_causality_analysis(
             if round_col in tenant_metric_data.columns:
                  tenant_metric_data = tenant_metric_data[tenant_metric_data[round_col] == current_round]
 
-            # Select and rename the value column to the tenant's name for pivoting
-            # Ensure we are working with a copy to avoid SettingWithCopyWarning
             ts = tenant_metric_data[[value_col]].copy()
-            ts.rename(columns={value_col: tenant}, inplace=True)
+            ts.rename(columns={value_col: tenant_name_loop}, inplace=True)
             
             if not ts.empty:
-                metric_data_frames[tenant] = ts
+                metric_data_frames[tenant_name_loop] = ts
 
         if not metric_data_frames or len(metric_data_frames) < 2:
-            # print(f"Not enough tenant data for metric {metric} to perform causality analysis. Skipping.")
-            continue
-
-        # Combine all tenant time series for the current metric
-        # Ensure all series are aligned by their DatetimeIndex
-        combined_ts = pd.concat(metric_data_frames.values(), axis=1) # Pass a list of DataFrames
-
-        # Handle missing values - forward fill then backward fill
-        combined_ts.ffill(inplace=True)
-        combined_ts.bfill(inplace=True)
-        combined_ts.dropna(inplace=True) # Drop any remaining NaNs (e.g. if a series was all NaN)
-
-
-        if combined_ts.shape[0] < min_observations:
-            # print(f"Not enough observations for metric {metric} after alignment and NaN handling ({combined_ts.shape[0]} < {min_observations}). Skipping.")
+            if verbose:
+                print(f"Not enough tenant data for metric {metric} (found {len(metric_data_frames)}) to perform causality analysis. Skipping.")
             continue
         
-        # Perform Granger causality from noisy_tenant to each other_tenant
+        combined_ts = pd.concat(metric_data_frames.values(), axis=1)
+        combined_ts.ffill(inplace=True)
+        combined_ts.bfill(inplace=True)
+        # No dropna here on combined_ts yet, will be handled per pair
+
+        # Check overall observations after initial ffill/bfill, but before pair-specific dropna
+        # This is a general check; pair-specific checks are more critical below.
+        if combined_ts.dropna().shape[0] < min_observations:
+            if verbose:
+                print(f"Not enough observations for metric {metric} after initial alignment and NaN handling ({combined_ts.dropna().shape[0]} < {min_observations}). Skipping.")
+            # Optionally, add a general error entry for the metric here if desired
+            continue
+        
         if noisy_tenant not in combined_ts.columns:
-            # print(f"Noisy tenant '{noisy_tenant}' not found in combined data for metric {metric}. Skipping.")
+            if verbose:
+                print(f"Noisy tenant '{noisy_tenant}' not found in combined data for metric {metric}. Skipping causality tests for this metric.")
+            # Record error for all pairs involving noisy_tenant for this metric
+            for target_tenant_loop in other_tenants: # Renamed to avoid conflict
+                 results.append({
+                    'metric': metric, 'source_tenant': noisy_tenant, 'target_tenant': target_tenant_loop,
+                    'lag': np.nan, 'p_value': np.nan, 'significant': False, 
+                    'direction': f"{noisy_tenant} -> {target_tenant_loop}", 'error': f"Noisy tenant '{noisy_tenant}' not found"
+                })
+                 results.append({
+                    'metric': metric, 'source_tenant': target_tenant_loop, 'target_tenant': noisy_tenant,
+                    'lag': np.nan, 'p_value': np.nan, 'significant': False,
+                    'direction': f"{target_tenant_loop} -> {noisy_tenant}", 'error': f"Noisy tenant '{noisy_tenant}' not found"
+                })
             continue
 
         for target_tenant in other_tenants:
+            error_message_skip = None
             if target_tenant not in combined_ts.columns:
-                # print(f"Target tenant '{target_tenant}' not found in combined data for metric {metric}. Skipping.")
+                error_message_skip = f"Target tenant '{target_tenant}' not found in combined data for metric {metric}"
+                if verbose:
+                    print(error_message_skip)
+                results.append({
+                    'metric': metric, 'source_tenant': noisy_tenant, 'target_tenant': target_tenant,
+                    'lag': np.nan, 'p_value': np.nan, 'significant': False,
+                    'direction': f"{noisy_tenant} -> {target_tenant}", 'error': error_message_skip
+                })
+                results.append({
+                    'metric': metric, 'source_tenant': target_tenant, 'target_tenant': noisy_tenant,
+                    'lag': np.nan, 'p_value': np.nan, 'significant': False,
+                    'direction': f"{target_tenant} -> {noisy_tenant}", 'error': error_message_skip
+                })
                 continue
 
             # Test causality from noisy_tenant to target_tenant
+            causal_lag_nt_tt = np.nan
+            p_value_nt_tt = np.nan
+            error_nt_tt = None
             try:
-                gc_test_result = grangercausalitytests(
-                    combined_ts[[target_tenant, noisy_tenant]], 
-                    maxlag=max_lag, verbose=False
+                pair_data_nt_tt = combined_ts[[target_tenant, noisy_tenant]].dropna()
+                if pair_data_nt_tt.shape[0] < min_observations:
+                    raise ValueError(f"Not enough observations for pair ({target_tenant}, {noisy_tenant}) after dropna: {pair_data_nt_tt.shape[0]} < {min_observations}")
+
+                gc_test_result_nt_tt = grangercausalitytests(
+                    pair_data_nt_tt, maxlag=max_lag, verbose=False
                 )
-                min_p_value = min(gc_test_result[lag][0][test][1] for lag in gc_test_result)
-                significant = min_p_value < significance_level
-                results.append({
-                    'metric': metric,
-                    'source_tenant': noisy_tenant,
-                    'target_tenant': target_tenant,
-                    'lag': max_lag, # This is max_lag tested, not necessarily the optimal lag
-                    'p_value': min_p_value,
-                    'significant': significant,
-                    'direction': f"{noisy_tenant} -> {target_tenant}"
-                })
-                if verbose:
-                    print(f"Granger causality ({noisy_tenant} -> {target_tenant}) for {metric}: p-value={min_p_value:.4f} (Significant: {significant})")
+                
+                p_values_at_lags_nt_tt = {}
+                for lag_val in range(1, max_lag + 1):
+                    if lag_val in gc_test_result_nt_tt:
+                         # test result is a tuple, first element contains dict of test stats
+                        test_stats = gc_test_result_nt_tt[lag_val][0]
+                        if test in test_stats:
+                             p_values_at_lags_nt_tt[lag_val] = test_stats[test][1] # p-value is the second element
+                
+                if p_values_at_lags_nt_tt:
+                    causal_lag_nt_tt = min(p_values_at_lags_nt_tt, key=p_values_at_lags_nt_tt.get)
+                    p_value_nt_tt = p_values_at_lags_nt_tt[causal_lag_nt_tt]
+                else:
+                    error_nt_tt = f"Granger test (noisy -> target) returned no valid p-values for test '{test}'"
             except Exception as e:
+                error_nt_tt = str(e)
                 if verbose:
                     print(f"Error in Granger causality test ({noisy_tenant} -> {target_tenant}) for {metric}: {e}")
+            
+            significant_nt_tt = (p_value_nt_tt < significance_level) if pd.notna(p_value_nt_tt) else False
+            results.append({
+                'metric': metric, 'source_tenant': noisy_tenant, 'target_tenant': target_tenant,
+                'lag': causal_lag_nt_tt, 'p_value': p_value_nt_tt, 'significant': significant_nt_tt,
+                'direction': f"{noisy_tenant} -> {target_tenant}", 'error': error_nt_tt
+            })
+            if verbose and not error_nt_tt and pd.notna(p_value_nt_tt):
+                print(f"Granger causality ({noisy_tenant} -> {target_tenant}) for {metric} at lag {causal_lag_nt_tt}: p-value={p_value_nt_tt:.4f} (Significant: {significant_nt_tt})")
 
             # Test causality from target_tenant to noisy_tenant (reverse direction)
+            causal_lag_tt_nt = np.nan
+            p_value_tt_nt = np.nan
+            error_tt_nt = None
             try:
-                gc_test_result_reverse = grangercausalitytests(
-                    combined_ts[[noisy_tenant, target_tenant]], 
-                    maxlag=max_lag, verbose=False
+                pair_data_tt_nt = combined_ts[[noisy_tenant, target_tenant]].dropna()
+                if pair_data_tt_nt.shape[0] < min_observations:
+                    raise ValueError(f"Not enough observations for pair ({noisy_tenant}, {target_tenant}) after dropna: {pair_data_tt_nt.shape[0]} < {min_observations}")
+
+                gc_test_result_tt_nt = grangercausalitytests(
+                    pair_data_tt_nt, maxlag=max_lag, verbose=False
                 )
-                min_p_value_reverse = min(gc_test_result_reverse[lag][0][test][1] for lag in gc_test_result_reverse)
-                significant_reverse = min_p_value_reverse < significance_level
-                results.append({
-                    'metric': metric,
-                    'source_tenant': target_tenant, # Reversed
-                    'target_tenant': noisy_tenant,  # Reversed
-                    'lag': max_lag,
-                    'p_value': min_p_value_reverse,
-                    'significant': significant_reverse,
-                    'direction': f"{target_tenant} -> {noisy_tenant}"
-                })
-                if verbose:
-                    print(f"Granger causality ({target_tenant} -> {noisy_tenant}) for {metric}: p-value={min_p_value_reverse:.4f} (Significant: {significant_reverse})")
+                p_values_at_lags_tt_nt = {}
+                for lag_val in range(1, max_lag + 1):
+                    if lag_val in gc_test_result_tt_nt:
+                        test_stats = gc_test_result_tt_nt[lag_val][0]
+                        if test in test_stats:
+                            p_values_at_lags_tt_nt[lag_val] = test_stats[test][1]
+
+                if p_values_at_lags_tt_nt:
+                    causal_lag_tt_nt = min(p_values_at_lags_tt_nt, key=p_values_at_lags_tt_nt.get)
+                    p_value_tt_nt = p_values_at_lags_tt_nt[causal_lag_tt_nt]
+                else:
+                    error_tt_nt = f"Granger test (target -> noisy) returned no valid p-values for test '{test}'"
             except Exception as e:
+                error_tt_nt = str(e)
                 if verbose:
                     print(f"Error in Granger causality test ({target_tenant} -> {noisy_tenant}) for {metric}: {e}")
 
+            significant_tt_nt = (p_value_tt_nt < significance_level) if pd.notna(p_value_tt_nt) else False
+            results.append({
+                'metric': metric, 'source_tenant': target_tenant, 'target_tenant': noisy_tenant,
+                'lag': causal_lag_tt_nt, 'p_value': p_value_tt_nt, 'significant': significant_tt_nt,
+                'direction': f"{target_tenant} -> {noisy_tenant}", 'error': error_tt_nt
+            })
+            if verbose and not error_tt_nt and pd.notna(p_value_tt_nt):
+                print(f"Granger causality ({target_tenant} -> {noisy_tenant}) for {metric} at lag {causal_lag_tt_nt}: p-value={p_value_tt_nt:.4f} (Significant: {significant_tt_nt})")
+
     return pd.DataFrame(results)
 
-def visualize_causal_graph(causality_results_df, output_path, title='Causal Graph', significance_level=0.05):
-    """
-    Visualizes the causal relationships as a directed graph.
-    (Original function from advanced_analysis.py, adapted)
-    """
-    if causality_results_df.empty:
-        print("Causality results are empty. Cannot generate graph.")
-        return
-
-    G = nx.DiGraph()
-    
-    # Filter for significant relationships
-    significant_results = causality_results_df[causality_results_df['p_value'] < significance_level]
-
-    if significant_results.empty:
-        print(f"No significant causal relationships found at p < {significance_level}. Graph will be empty or show no edges.")
-        # Add all unique tenants as nodes even if no edges
-        all_tenants_in_results = pd.unique(causality_results_df[['source_tenant', 'target_tenant']].values.ravel('K'))
-        for tenant in all_tenants_in_results:
-            if tenant: G.add_node(str(tenant)) # Ensure nodes are strings
-    else:
-        for _, row in significant_results.iterrows():
-            source = str(row['source_tenant'])
-            target = str(row['target_tenant'])
-            metric = str(row['metric'])
-            p_value = row['p_value']
-            
-            G.add_node(source)
-            G.add_node(target)
-            
-            # Add edge with metric and p-value as attributes
-            # If an edge already exists, this will update its attributes (NetworkX behavior for DiGraph)
-            # Or, if you want to represent multiple metrics, you might need a MultiDiGraph
-            # For simplicity, let's assume one dominant metric or label with the strongest p-value if multiple exist
-            
-            # Check if edge exists and if new p-value is smaller (more significant)
-            if G.has_edge(source, target):
-                if p_value < G[source][target].get('p_value', float('inf')):
-                    G[source][target]['label'] = f"{metric}\n(p={p_value:.3f})"
-                    G[source][target]['p_value'] = p_value
-                    G[source][target]['weight'] = 1 / (p_value + 1e-6) # Weight inversely proportional to p-value
-            else:
-                G.add_edge(source, target, label=f"{metric}\n(p={p_value:.3f})", p_value=p_value, weight=1/(p_value + 1e-6))
-
-    if not G.nodes():
-        print("No nodes to draw in the causal graph.")
-        return
-
-    plt.figure(figsize=(12, 10))
-    pos = nx.spring_layout(G, k=0.5, iterations=50) # k adjusts distance, iterations for stability
-    
-    nx.draw_networkx_nodes(G, pos, node_size=3000, node_color='skyblue', alpha=0.8)
-    nx.draw_networkx_labels(G, pos, font_size=10)
-    
-    # Draw edges
-    edges = G.edges(data=True)
-    if edges:
-        nx.draw_networkx_edges(G, pos, edgelist=[(u,v) for u,v,d in edges],
-                               arrowstyle='-|>', arrowsize=20, edge_color='gray', alpha=0.6)
-        edge_labels = {(u,v): d['label'] for u,v,d in edges if 'label' in d}
-        nx.draw_networkx_edge_labels(G, pos, edge_labels=edge_labels, font_size=8, label_pos=0.3)
-
-    plt.title(title, fontsize=15)
-    plt.axis('off')
-    try:
-        plt.savefig(output_path, bbox_inches='tight')
-        print(f"Causal graph saved to {output_path}")
-    except Exception as e:
-        print(f"Error saving causal graph: {e}")
-    plt.close()
+# visualize_causal_graph has been moved to pipeline/visualization/plots.py
 
 def save_causality_results_to_csv(causality_results_df, output_path):
     """
@@ -268,37 +251,70 @@ def calculate_transfer_entropy(series1: pd.Series | np.ndarray, series2: pd.Seri
         te = np.nan
     return te
 
-def calculate_convergent_cross_mapping(series1: pd.Series | np.ndarray, series2: pd.Series | np.ndarray, embed_dim: int = 2, tau: int = 1, lib_len: int | None = None, pred_len: int | None = None):
+def calculate_convergent_cross_mapping(series1: pd.Series | np.ndarray, series2: pd.Series | np.ndarray, embed_dim: int = 2, tau: int = 1, lib_len: int | None = None, pred_len: int | None = None, random_state: int | None = None):
     """
-    Placeholder for Convergent Cross Mapping (CCM) calculation.
+    Calculates Convergent Cross Mapping (CCM) scores between two time series.
     CCM assesses causality by measuring if the historical record of one variable
     can reliably estimate the state of another.
 
-    NOTE: This is a placeholder. A full CCM implementation requires a library like `skccm`
-    or a custom implementation. `pyinform` does not directly provide CCM.
-
     Args:
-        series1: The first time series (potential cause or effect).
-        series2: The second time series (potential cause or effect).
+        series1: The first time series (pandas Series or NumPy array).
+        series2: The second time series (pandas Series or NumPy array).
         embed_dim: Embedding dimension for state space reconstruction.
         tau: Time delay for state space reconstruction.
-        lib_len: Length of the library (training) segment.
-        pred_len: Length of the prediction (testing) segment.
+        lib_len: Length of the library (training) segment. If None, uses 75% of the data.
+        pred_len: Length of the prediction (testing) segment. If None, uses the remainder after lib_len.
+        random_state: Seed for reproducibility if train_test_split involves random sampling.
 
     Returns:
-        A dictionary with CCM scores (currently np.nan).
+        A dictionary with CCM scores:
+        - "ccm_s1_xmaps_s2": Score indicating how well s1 can be predicted from s2's library.
+        - "ccm_s2_xmaps_s1": Score indicating how well s2 can be predicted from s1's library.
     """
-    print("Convergent Cross Mapping (calculate_convergent_cross_mapping) is a placeholder and not fully implemented. It will return NaN values. A dedicated library like skccm or a custom implementation is needed.")
-    # Example structure if using skccm:
-    # s1_np = np.asarray(series1).flatten()
-    # s2_np = np.asarray(series2).flatten()
-    # if lib_len is None: lib_len = int(0.75 * len(s1_np))
-    # ccm = CCM(X=s1_np, Y=s2_np, tau=tau, E=embed_dim, L=lib_len)
-    # score_s1_xmap_s2 = ccm.score()
-    # ccm = CCM(X=s2_np, Y=s1_np, tau=tau, E=embed_dim, L=lib_len)
-    # score_s2_xmap_s1 = ccm.score()
-    # return {
-    #     "ccm_s1_xmaps_s2": np.mean(score_s1_xmap_s2) if score_s1_xmap_s2 is not None else np.nan,
-    #     "ccm_s2_xmaps_s1": np.mean(score_s2_xmap_s1) if score_s2_xmap_s1 is not None else np.nan
-    # }
-    return {"ccm_s1_xmaps_s2": np.nan, "ccm_s2_xmaps_s1": np.nan}
+    s1_np = np.asarray(series1).flatten()
+    s2_np = np.asarray(series2).flatten()
+
+    if len(s1_np) != len(s2_np):
+        raise ValueError("Series must have the same length for CCM calculation.")
+    
+    min_len_required = embed_dim * tau + 1
+    if len(s1_np) < min_len_required:
+        print(f"Warning: Series length ({len(s1_np)}) is too short for the given embedding dimension ({embed_dim}) and tau ({tau}). Needs at least {min_len_required}. Returning NaN.")
+        return {"ccm_s1_xmaps_s2": np.nan, "ccm_s2_xmaps_s1": np.nan}
+
+    # Determine library and prediction lengths
+    if lib_len is None:
+        lib_len = int(0.75 * len(s1_np))
+    
+    if pred_len is None:
+        pred_len = len(s1_np) - lib_len
+
+    if lib_len + pred_len > len(s1_np):
+        print(f"Warning: Sum of lib_len ({lib_len}) and pred_len ({pred_len}) exceeds series length ({len(s1_np)}). Adjusting pred_len. Returning NaN.")
+        return {"ccm_s1_xmaps_s2": np.nan, "ccm_s2_xmaps_s1": np.nan}
+    
+    if lib_len <= 0 or pred_len <= 0:
+        print(f"Warning: lib_len ({lib_len}) or pred_len ({pred_len}) is not positive. Returning NaN.")
+        return {"ccm_s1_xmaps_s2": np.nan, "ccm_s2_xmaps_s1": np.nan}
+
+    try:
+        # CCM: Does s2 cause s1? (s1_np is X, s2_np is Y)
+        ccm_s1_s2 = CCM(X=s1_np, Y=s2_np, tau=tau, E=embed_dim, L=lib_len)
+        score_s1_xmap_s2 = ccm_s1_s2.score()
+
+        # CCM: Does s1 cause s2? (s2_np is X, s1_np is Y)
+        ccm_s2_s1 = CCM(X=s2_np, Y=s1_np, tau=tau, E=embed_dim, L=lib_len)
+        score_s2_xmap_s1 = ccm_s2_s1.score()
+        
+        final_score_s1_xmap_s2 = np.mean(score_s1_xmap_s2) if score_s1_xmap_s2 is not None else np.nan
+        final_score_s2_xmap_s1 = np.mean(score_s2_xmap_s1) if score_s2_xmap_s1 is not None else np.nan
+
+    except Exception as e:
+        print(f"Error during CCM calculation: {e}")
+        final_score_s1_xmap_s2 = np.nan
+        final_score_s2_xmap_s1 = np.nan
+        
+    return {
+        "ccm_s1_xmaps_s2": final_score_s1_xmap_s2,
+        "ccm_s2_xmaps_s1": final_score_s2_xmap_s1
+    }

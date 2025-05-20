@@ -6,7 +6,6 @@ import seaborn as sns
 import matplotlib.pyplot as plt
 from scipy.stats import pearsonr, spearmanr
 import numpy as np
-from pipeline.visualization.plots import create_heatmap
 
 # Functions from covariance_analysis.py will be moved here
 
@@ -155,30 +154,7 @@ def calculate_covariance_matrix(metrics_dict, tenants=None, phase=None, round_na
     
     return covariance_matrix, correlation_matrix
 
-def plot_covariance_matrix(covariance_matrix, output_path, title='Covariance Matrix', cmap='coolwarm', annot=True, fmt=".2f"):
-    """
-    Plots a covariance matrix as a heatmap.
-
-    Args:
-        covariance_matrix (pd.DataFrame): The covariance matrix to plot.
-        output_path (str): Path to save the plot.
-        title (str): Title of the plot.
-        cmap (str): Colormap for the heatmap.
-        annot (bool): Whether to annotate cells with values.
-        fmt (str): String format for annotations.
-    """
-    plt.figure(figsize=(12, 10))
-    sns.heatmap(covariance_matrix, annot=annot, fmt=fmt, cmap=cmap, linewidths=.5)
-    plt.title(title)
-    plt.xticks(rotation=45, ha='right')
-    plt.yticks(rotation=0)
-    plt.tight_layout()
-    try:
-        plt.savefig(output_path)
-        print(f"Covariance matrix plot saved to {output_path}")
-    except Exception as e:
-        print(f"Error saving covariance matrix plot: {e}")
-    plt.close()
+# plot_covariance_matrix has been moved to pipeline/visualization/plots.py
 
 def calculate_inter_tenant_covariance_per_metric(
     metrics_data,

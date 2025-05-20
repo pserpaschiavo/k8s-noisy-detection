@@ -22,6 +22,9 @@ nolds>=0.5.2
 tslearn>=0.6.3
 h5py>=3.10.0
 
+# Convergent Cross Mapping
+skccm>=0.1.2
+
 # General utilities
 tqdm>=4.65.0
 
