@@ -28,7 +28,16 @@ os.makedirs(OUTPUT_DIR, exist_ok=True)
 
 def save_plot(fig: plt.Figure, filename: str):
     """Função auxiliar para salvar o plot no diretório de saída."""
-    filepath = os.path.join(OUTPUT_DIR, filename)
+    # If filename is already an absolute path or contains path separators, 
+    # use it directly. Otherwise, join with OUTPUT_DIR
+    if os.path.isabs(filename) or os.sep in filename:
+        filepath = filename
+        # Ensure the directory exists
+        os.makedirs(os.path.dirname(filepath), exist_ok=True)
+    else:
+        filepath = os.path.join(OUTPUT_DIR, filename)
+        os.makedirs(os.path.dirname(filepath), exist_ok=True)
+    
     fig.tight_layout() # Ajusta o layout para evitar cortes de rótulos
     fig.savefig(filepath, dpi=300, bbox_inches='tight') # Salva em alta resolução
     plt.close(fig) # Fecha a figura para liberar memória
@@ -469,6 +478,39 @@ def plot_bar_chart_slo_violations(df_slo_violations: pd.DataFrame, output_filena
     for p in ax.patches:
         ax.annotate(f"{p.get_height():.1f}%", (p.get_x() + p.get_width() / 2., p.get_height()),
                     ha='center', va='center', xytext=(0, 5), textcoords='offset points')
+    save_plot(fig, output_filename)
+
+
+def plot_violinplot_causality_across_rounds_and_setups(
+    df_aggregated_results: pd.DataFrame, 
+    source_col: str, 
+    target_col: str, 
+    causality_value_col: str = 'te_value',
+    title: str = "Distribuição da Causalidade por Fase e Configuração de Isolamento",
+    output_filename: str = "violinplot_causality_comparison.png"
+):
+    """
+    Gera um violin plot para comparar a distribuição de valores de causalidade
+    (TE/CCM) através de diferentes fases e/ou setups de isolamento.
+    """
+    fig, ax = plt.subplots(figsize=(14, 8))
+
+    df_filtered = df_aggregated_results # Assumindo que já está filtrado ou pronto para uso
+    
+    x_col = 'phase_label'
+    if 'experiment_name' in df_filtered.columns:
+        df_filtered['phase_setup_display'] = df_filtered['phase_label'] + ' (' + df_filtered['experiment_name'] + ')'
+        x_col = 'phase_setup_display'
+
+    # AQUI ESTÁ A MUDANÇA: sns.violinplot em vez de sns.boxplot
+    sns.violinplot(x=x_col, y=causality_value_col, data=df_filtered, ax=ax, palette="colorblind", inner="quartile") 
+    # inner="quartile" adiciona as linhas dos quartis e mediana dentro do violino, combinando o melhor dos dois mundos.
+    # sns.stripplot(x=x_col, y=causality_value_col, data=df_filtered, color=".3", size=4, jitter=True, ax=ax) # Se quiser ver os pontos individuais
+
+    ax.set_title(f"{title}\n({source_col} -> {target_col})")
+    ax.set_xlabel("Fase e Configuração de Isolamento")
+    ax.set_ylabel(f"{causality_value_col.replace('_', ' ').title()}")
+    ax.tick_params(axis='x', rotation=45, ha='right')
     save_plot(fig, output_filename)
 
 
