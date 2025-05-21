@@ -16,10 +16,15 @@ def calculate_correlation_matrix(metrics_dict, tenants=None, round_name='round-1
     Returns:
         DataFrame: Matriz de correlação entre métricas dos tenants
     """
-    from pipeline.config import DEFAULT_NOISY_TENANT # TODO: Refactor to remove this direct import or pass as arg
+    # This function is likely to be deprecated or heavily refactored.
+    # The new approach focuses on per-metric, inter-tenant correlation using
+    # calculate_inter_tenant_correlation_per_metric, which takes a pre-filtered
+    # DataFrame for a single metric and round.
+    # If a global noisy_tenant is still needed, it should be passed from new_config.py
+    # via the main script.
     
     # Determinar qual é o tenant gerador de ruído
-    noisy_tenant = noisy_tenant if noisy_tenant else DEFAULT_NOISY_TENANT
+    # noisy_tenant = noisy_tenant if noisy_tenant else DEFAULT_NOISY_TENANT # Example if using a passed config
     
     # Preparar dados para correlação
     correlation_data = {}

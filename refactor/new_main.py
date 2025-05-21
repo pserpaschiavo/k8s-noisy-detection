@@ -23,7 +23,7 @@ from refactor.analysis_modules.correlation_covariance import (
     calculate_inter_tenant_covariance_per_metric # Not used in this basic setup yet
 )
 # Corrected import for plot_correlation_heatmap
-from refactor.visualization.new_plots import plot_correlation_heatmap
+from refactor.visualization.new_plots import plot_correlation_heatmap, plot_covariance_heatmap # Added plot_covariance_heatmap
 
 # Existing pipeline modules (will be gradually replaced or integrated)
 from refactor.data_handling.new_time_normalization import add_experiment_elapsed_time, add_phase_markers # For potential future use
@@ -56,6 +56,12 @@ def parse_arguments():
                         help='One or more correlation methods to run. E.g., pearson spearman. Defaults to [\'pearson\'] if --run-correlation is set and this is not provided. Overridden by --run-all-correlation-methods.')
     parser.add_argument('--run-all-correlation-methods', action='store_true',
                         help='Run correlation analysis for all methods (pearson, spearman, kendall). Overrides --correlation-methods.')
+
+    # Arguments for Covariance Analysis
+    parser.add_argument('--run-covariance', action='store_true', help='Run covariance analysis')
+    # Covariance typically doesn't have multiple "methods" like correlation,
+    # but adding for consistency in argument structure if variations arise.
+    # For now, it's a simple flag to run it or not.
 
     return parser.parse_args()
 
@@ -216,6 +222,78 @@ def main():
                         print(f"      Error during correlation analysis for metric {metric_name}, round {round_name} ({current_method}): {e}")
                         import traceback
                         traceback.print_exc()
+
+    # --- Covariance Analysis ---
+    if args.run_covariance:
+        print("\nRunning Covariance Analysis...")
+        covariance_plots_dir = os.path.join(plots_dir, 'covariance')
+        os.makedirs(covariance_plots_dir, exist_ok=True)
+        covariance_tables_dir = os.path.join(tables_dir, 'covariance')
+        os.makedirs(covariance_tables_dir, exist_ok=True)
+
+        for metric_name, rounds_data in all_metrics_data.items():
+            print(f"  Processing metric: {metric_name}")
+            if not isinstance(rounds_data, dict):
+                print(f"    Skipping metric {metric_name}: Expected a dictionary of round data, got {type(rounds_data)}.")
+                continue
+
+            for round_name, metric_df_original in rounds_data.items():
+                print(f"    Processing round: {round_name} for metric: {metric_name}")
+                if not isinstance(metric_df_original, pd.DataFrame):
+                    print(f"      Skipping round {round_name} for metric {metric_name}: Expected a DataFrame, got {type(metric_df_original)}.")
+                    continue
+                
+                if metric_df_original.empty or 'value' not in metric_df_original.columns or 'tenant' not in metric_df_original.columns:
+                    print(f"      Skipping covariance for metric {metric_name}, round {round_name} due to missing data or columns.")
+                    continue
+
+                metric_df = metric_df_original.copy()
+
+                print(f"      Calculating covariance for metric: {metric_name}, round: {round_name}")
+                try:
+                    if 'timestamp' not in metric_df.columns:
+                        print(f"      Skipping {metric_name}, round {round_name}: 'timestamp' column not found.")
+                        continue
+                    if not pd.api.types.is_datetime64_any_dtype(metric_df['timestamp']):
+                        metric_df['timestamp'] = pd.to_datetime(metric_df['timestamp'], format='%Y%m%d_%H%M%S')
+                    
+                    if 'experiment_elapsed_seconds' not in metric_df.columns:
+                        metric_df_sorted = metric_df.sort_values(by=['timestamp'])
+                        min_timestamp_overall = metric_df_sorted['timestamp'].min()
+                        metric_df['experiment_elapsed_seconds'] = (metric_df['timestamp'] - min_timestamp_overall).dt.total_seconds()
+
+                    # Call the refactored covariance function
+                    covariance_matrix_df = calculate_inter_tenant_covariance_per_metric(
+                        metric_df,
+                        time_col='timestamp'
+                    )
+
+                    if covariance_matrix_df is not None and not covariance_matrix_df.empty:
+                        display_metric_name = METRIC_DISPLAY_NAMES.get(metric_name, metric_name)
+                        
+                        # Plotting (similar to correlation heatmap, but for covariance)
+                        plot_filename = f"{metric_name}_{round_name}_covariance_heatmap.png"
+                        plot_title = f"Inter-Tenant Covariance: {display_metric_name} (Round: {round_name})"
+                        fig = plot_covariance_heatmap( 
+                            covariance_matrix_df,
+                            title=plot_title,
+                            output_dir=covariance_plots_dir,
+                            filename=plot_filename
+                        )
+                        if fig:
+                            print(f"      Covariance heatmap for {metric_name}, round {round_name} generated and saved.")
+                            plt.close(fig)
+
+                        csv_filename_name_only = f"{metric_name}_{round_name}_covariance_matrix.csv"
+                        full_csv_path = os.path.join(covariance_tables_dir, csv_filename_name_only)
+                        export_to_csv(covariance_matrix_df, full_csv_path)
+                        print(f"      Covariance matrix for {metric_name}, round {round_name} saved to {full_csv_path}")
+                    else:
+                        print(f"      Skipping save for {metric_name}, round {round_name}: Covariance matrix is empty or could not be calculated.")
+                except Exception as e:
+                    print(f"      Error during covariance analysis for metric {metric_name}, round {round_name}: {e}")
+                    import traceback
+                    traceback.print_exc()
 
     print("\nRefactored pipeline processing finished.")
 
