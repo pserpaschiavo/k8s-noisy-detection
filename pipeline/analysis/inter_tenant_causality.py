@@ -9,6 +9,7 @@ import pandas as pd
 from typing import Dict, List, Tuple, Optional
 from statsmodels.tsa.stattools import grangercausalitytests
 import numpy as np
+from refactor.data_handling.save_results import save_figure # Added import
 
 def calculate_causal_impact_between_tenants(
     metric_df: pd.DataFrame,
@@ -312,7 +313,7 @@ def visualize_causal_graph(
 
     if output_path:
         try:
-            plt.savefig(output_path, bbox_inches='tight', dpi=kwargs.get('dpi', 300))
+            save_figure(plt.gcf(), output_path, None, bbox_inches='tight', dpi=kwargs.get('dpi', 300)) # Replaced savefig
             print(f"Grafo de causalidade salvo em {output_path}")
             plt.close() # Fechar a figura para liberar memória
             return None

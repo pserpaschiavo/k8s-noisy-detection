@@ -11,6 +11,9 @@ import numpy as np
 from skccm import CCM
 from skccm.utilities import train_test_split
 
+# Import the new centralized CSV saving function
+from refactor.data_handling.save_results import save_causality_results_to_csv as new_save_causality_csv
+
 def perform_inter_tenant_causality_analysis(
     data, metrics_for_causality, noisy_tenant, other_tenants, 
     max_lag=5, test='ssr_chi2test', significance_level=0.05, 
@@ -195,16 +198,6 @@ def perform_inter_tenant_causality_analysis(
     return pd.DataFrame(results)
 
 # visualize_causal_graph has been moved to pipeline/visualization/plots.py
-
-def save_causality_results_to_csv(causality_results_df, output_path):
-    """
-    Saves the causality analysis results to a CSV file.
-    """
-    try:
-        causality_results_df.to_csv(output_path, index=False)
-        print(f"Causality results saved to {output_path}")
-    except Exception as e:
-        print(f"Error saving causality results to CSV: {e}")
 
 def calculate_transfer_entropy(series1: pd.Series | np.ndarray, series2: pd.Series | np.ndarray, k: int = 1) -> float:
     """

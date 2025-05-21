@@ -13,6 +13,7 @@ from typing import Dict, List, Tuple, Optional, Union
 from matplotlib.colors import LinearSegmentedColormap
 from scipy import stats
 import os
+from refactor.data_handling.save_results import save_figure
 
 def normalize_metrics_between_experiments(exp1_data, exp2_data, metrics_list=None):
     """
@@ -490,7 +491,7 @@ def compare_technologies(exp1_data, exp2_data, metrics_list=None, tenants_list=N
         if fig_all:
             plot_filename = f'comparison_{exp1_name}_vs_{exp2_name}_all_phases{rounds_suffix}.png'
             try:
-                fig_all.savefig(os.path.join(plots_dir, plot_filename))
+                save_figure(fig_all, plot_filename, plots_dir)
                 print(f"Plot geral salvo em: {os.path.join(plots_dir, plot_filename)}")
             except Exception as e:
                 print(f"Erro ao salvar plot geral: {e}")
@@ -507,7 +508,7 @@ def compare_technologies(exp1_data, exp2_data, metrics_list=None, tenants_list=N
             if fig_phase:
                 plot_filename = f'comparison_{exp1_name}_vs_{exp2_name}_{phase_label}{rounds_suffix}.png'
                 try:
-                    fig_phase.savefig(os.path.join(plots_dir, plot_filename))
+                    save_figure(fig_phase, plot_filename, plots_dir)
                     print(f"Plot da fase {phase} salvo em: {os.path.join(plots_dir, plot_filename)}")
                 except Exception as e:
                     print(f"Erro ao salvar plot da fase {phase}: {e}")
@@ -531,7 +532,7 @@ def compare_technologies(exp1_data, exp2_data, metrics_list=None, tenants_list=N
             if fig_metric:
                 plot_filename = f'comparison_{exp1_name}_vs_{exp2_name}_{metric}{rounds_suffix}.png'
                 try:
-                    fig_metric.savefig(os.path.join(plots_dir, plot_filename))
+                    save_figure(fig_metric, plot_filename, plots_dir)
                     print(f"Plot da métrica {metric} salvo em: {os.path.join(plots_dir, plot_filename)}")
                 except Exception as e:
                     print(f"Erro ao salvar plot da métrica {metric}: {e}")

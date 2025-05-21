@@ -388,7 +388,7 @@ def identify_noisy_tenant(
         Dict: Scores finais para cada tenant
         Dict: Scores detalhados por método de detecção
     """
-    from pipeline.analysis.tenant_analysis import calculate_correlation_matrix
+    from refactor.analysis_modules.correlation_covariance import calculate_correlation_matrix
     
     try:
         # Calcular matriz de correlação

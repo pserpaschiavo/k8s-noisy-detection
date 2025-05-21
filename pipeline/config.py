@@ -1,10 +1,12 @@
 """
 Arquivo de configuração para o pipeline de análise de dados do experimento de noisy neighbors.
 """
+import os  # Adicionado para os.path
 
 # Configurações gerais
-DEFAULT_DATA_DIR = "/home/phil/Projects/k8s-noisy-detection/demo-data/demo-experiment-3-rounds"
-DEFAULT_OUTPUT_DIR = "output"
+PROJECT_ROOT = os.path.abspath(os.path.join(os.path.dirname(__file__), '..'))
+DEFAULT_DATA_DIR = os.path.join(PROJECT_ROOT, "demo-data", "demo-experiment-3-rounds")
+DEFAULT_OUTPUT_DIR = os.path.join(PROJECT_ROOT, "output")
 
 # Configurações de métricas
 DEFAULT_METRICS = [

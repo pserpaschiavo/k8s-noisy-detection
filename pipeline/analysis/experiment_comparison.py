@@ -17,6 +17,7 @@ from typing import Dict, List, Tuple, Optional, Union, Any
 
 from ..data_processing.time_normalization import normalize_time
 from ..data_processing.aggregation import aggregate_by_time
+from refactor.data_handling.loader import load_experiment_data # Atualizado
 
 def load_multiple_experiments(experiment_paths: List[str]) -> Dict[str, Dict]:
     """
@@ -28,7 +29,6 @@ def load_multiple_experiments(experiment_paths: List[str]) -> Dict[str, Dict]:
     Returns:
         Dict[str, Dict]: Dicionário com dados e metadados dos experimentos
     """
-    from ..data_processing.consolidation import load_experiment_data
     
     experiments = {}
     

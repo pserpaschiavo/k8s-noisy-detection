@@ -15,8 +15,9 @@ from datetime import datetime
 import scipy.stats as stats
 
 # Importar módulos do pipeline
-from pipeline.data_processing.consolidation import list_available_tenants, list_available_metrics
-from pipeline.data_processing.consolidation import load_experiment_data, select_tenants, load_multiple_metrics
+from refactor.data_handling.loader import list_available_tenants, list_available_metrics
+from refactor.data_handling.loader import load_experiment_data, select_tenants, load_multiple_metrics
+from refactor.data_handling.save_results import export_to_csv, save_causality_results_to_csv, save_figure
 from pipeline.data_processing.time_normalization import add_elapsed_time, add_experiment_elapsed_time, add_phase_markers
 from pipeline.data_processing.time_normalization import normalize_time
 from pipeline.data_processing.aggregation import calculate_tenant_stats, calculate_inter_tenant_impact, calculate_recovery_effectiveness
@@ -29,11 +30,9 @@ from pipeline.data_processing.quota_parser import (
     get_tenant_quotas, create_node_config_from_quotas,
     get_quota_summary, format_value_with_unit, convert_to_best_unit
 )
-from pipeline.analysis.tenant_analysis import calculate_correlation_matrix, compare_tenant_metrics
-from pipeline.analysis.phase_analysis import compare_phases_ttest, analyze_recovery_effectiveness
-from pipeline.analysis.advanced_analysis import calculate_covariance_matrix, calculate_entropy_metrics
+from pipeline.analysis.tenant_analysis import compare_tenant_metrics
+from pipeline.analysis.advanced_analysis import calculate_entropy_metrics
 from pipeline.analysis.advanced_analysis import granger_causality_test, analyze_causal_relationships, calculate_normalized_impact_score
-from pipeline.analysis.tenant_analysis import calculate_inter_tenant_correlation_per_metric, calculate_inter_tenant_covariance_per_metric
 from pipeline.analysis.anomaly_detection import (
     detect_anomalies_ensemble, detect_pattern_changes
 )
@@ -51,10 +50,10 @@ from pipeline.visualization.plots import (plot_metric_by_phase, plot_phase_compa
                                 plot_tenant_impact_heatmap, plot_recovery_effectiveness,
                                 plot_impact_score_barplot, plot_impact_score_trend,
                                 plot_metric_with_anomalies, plot_change_points,
-                                create_heatmap, plot_multivariate_anomalies, plot_correlation_heatmap,
+                                create_heatmap, plot_multivariate_anomalies, 
                                 plot_entropy_heatmap, plot_entropy_top_pairs_barplot)
-from pipeline.visualization.table_generator import (export_to_latex, export_to_csv,
-                                         create_phase_comparison_table, create_impact_summary_table,
+from refactor.visualization.new_plots import plot_correlation_heatmap
+from pipeline.visualization.table_generator import (create_phase_comparison_table, create_impact_summary_table,
                                          convert_df_to_markdown, create_causality_results_table)
 from pipeline.config import (DEFAULT_DATA_DIR, DEFAULT_METRICS, AGGREGATION_CONFIG,
                     IMPACT_CALCULATION_DEFAULTS, VISUALIZATION_CONFIG,
@@ -71,6 +70,14 @@ from pipeline.analysis.technology_comparison import (
     plot_experiment_comparison, compare_technologies
 )
 from dotenv import load_dotenv
+
+# Imports for refactored analysis modules
+from refactor.analysis_modules.correlation_covariance import (
+    calculate_correlation_matrix,
+    calculate_inter_tenant_correlation_per_metric,
+    calculate_inter_tenant_covariance_per_metric,
+    calculate_covariance_matrix
+)
 
 
 def parse_arguments():
@@ -308,11 +315,9 @@ def compare_rounds_within_experiment(experiment_results, output_dir_main, metric
                     
                     # Use current_phase_display_for_report for plot filename
                     plot_filename = f"{metric_name}_{current_phase_display_for_report.replace(' ', '_')}_round_comparison_plot.png"
-                    plot_path = os.path.join(plots_subdir, plot_filename)
                     try:
-                        plt.savefig(plot_path)
-                        print(f"    Gráfico de comparação de rodadas salvo em: {plot_path}")
-                        current_output["plot_path"] = plot_path
+                        save_figure(plt.gcf(), plots_subdir, plot_filename)
+                        current_output["plot_path"] = os.path.join(plots_subdir, plot_filename)
                     except Exception as e:
                         print(f"    Erro ao salvar gráfico de comparação de rodadas: {e}")
                     plt.close()
@@ -792,15 +797,14 @@ def main():
                     )
 
                     if correlation_matrix is not None and not correlation_matrix.empty:
-                        plot_path_corr = os.path.join(advanced_plots_dir, f'correlation_heatmap_round_{round_name_to_analyze}.png')
-                        print(f"      Gerando heatmap de correlação para o round: {round_name_to_analyze} em {plot_path_corr}")
+                        plot_filename_corr = f'correlation_heatmap_round_{round_name_to_analyze}.png'
+                        print(f"      Gerando heatmap de correlação para o round: {round_name_to_analyze} em {os.path.join(advanced_plots_dir, plot_filename_corr)}")
                         fig_corr = plot_correlation_heatmap(
                             correlation_matrix,
                             title=f'Inter-Metric Correlation Heatmap (Round: {round_name_to_analyze})'
                         )
-                        fig_corr.savefig(plot_path_corr)
+                        save_figure(fig_corr, advanced_plots_dir, plot_filename_corr)
                         plt.close(fig_corr)
-                        print(f"      Heatmap de correlação salvo em: {plot_path_corr}")
                         advanced_analysis_results.setdefault('correlation_matrices', {})[round_name_to_analyze] = correlation_matrix
                     else:
                         print(f"      Matriz de correlação vazia ou None para o round: {round_name_to_analyze}. Pulando plot.")
@@ -817,16 +821,15 @@ def main():
                     )
 
                     if covariance_matrix is not None and not covariance_matrix.empty:
-                        plot_path_cov = os.path.join(advanced_plots_dir, f'covariance_heatmap_round_{round_name_to_analyze}.png')
-                        print(f"      Gerando heatmap de covariância para o round: {round_name_to_analyze} em {plot_path_cov}")
+                        plot_filename_cov = f'covariance_heatmap_round_{round_name_to_analyze}.png'
+                        print(f"      Gerando heatmap de covariância para o round: {round_name_to_analyze} em {os.path.join(advanced_plots_dir, plot_filename_cov)}")
                         fig_cov = plot_correlation_heatmap(
                             covariance_matrix,
                             title=f'Inter-Metric Covariance Heatmap (Round: {round_name_to_analyze})',
                             cmap='coolwarm'
                         )
-                        fig_cov.savefig(plot_path_cov)
+                        save_figure(fig_cov, advanced_plots_dir, plot_filename_cov)
                         plt.close(fig_cov)
-                        print(f"      Heatmap de covariância salvo em: {plot_path_cov}")
                         advanced_analysis_results.setdefault('covariance_matrices', {})[round_name_to_analyze] = covariance_matrix
                     else:
                         print(f"      Matriz de covariância vazia ou None para o round: {round_name_to_analyze}. Pulando plot.")
@@ -860,15 +863,14 @@ def main():
                                 print(f"      Matriz de correlação inter-tenant (CSV) salva em: {csv_path_inter_tenant_corr}")
                                 
                                 # Plot Heatmap
-                                plot_path_inter_tenant_corr = os.path.join(advanced_plots_dir, f'inter_tenant_correlation_heatmap_{metric_name_inter_tenant}_round_{round_name_inter_tenant}.png')
+                                plot_filename_inter_corr = f'inter_tenant_correlation_heatmap_{metric_name_inter_tenant}_round_{round_name_inter_tenant}.png'
                                 fig_inter_tenant_corr = plot_correlation_heatmap(
                                     inter_tenant_corr_matrix,
                                     title=f'Inter-Tenant Correlation - {METRIC_DISPLAY_NAMES.get(metric_name_inter_tenant, metric_name_inter_tenant)} (Round: {round_name_inter_tenant})',
                                     cbar_label='Correlation Coefficient'
                                 )
-                                fig_inter_tenant_corr.savefig(plot_path_inter_tenant_corr)
+                                save_figure(fig_inter_tenant_corr, advanced_plots_dir, plot_filename_inter_corr)
                                 plt.close(fig_inter_tenant_corr)
-                                print(f"      Heatmap de correlação inter-tenant salvo em: {plot_path_inter_tenant_corr}")
                                 advanced_analysis_results.setdefault('inter_tenant_correlation_matrices', {}).setdefault(metric_name_inter_tenant, {})[round_name_inter_tenant] = inter_tenant_corr_matrix
                             else:
                                 print(f"      Matriz de correlação inter-tenant vazia ou None para {metric_name_inter_tenant}, round {round_name_inter_tenant}.")
@@ -886,15 +888,14 @@ def main():
                                 print(f"      Matriz de covariância inter-tenant (CSV) salva em: {csv_path_inter_tenant_cov}")
 
                                 # Plot Heatmap
-                                plot_path_inter_tenant_cov = os.path.join(advanced_plots_dir, f'inter_tenant_covariance_heatmap_{metric_name_inter_tenant}_round_{round_name_inter_tenant}.png')
+                                plot_filename_inter_cov = f'inter_tenant_covariance_heatmap_{metric_name_inter_tenant}_round_{round_name_inter_tenant}.png'
                                 fig_inter_tenant_cov = plot_correlation_heatmap(
                                     inter_tenant_cov_matrix,
                                     title=f'Inter-Tenant Covariance - {METRIC_DISPLAY_NAMES.get(metric_name_inter_tenant, metric_name_inter_tenant)} (Round: {round_name_inter_tenant})',
                                     cbar_label='Covariance' # Use the new cbar_label argument
                                 )
-                                fig_inter_tenant_cov.savefig(plot_path_inter_tenant_cov)
+                                save_figure(fig_inter_tenant_cov, advanced_plots_dir, plot_filename_inter_cov)
                                 plt.close(fig_inter_tenant_cov)
-                                print(f"      Heatmap de covariância inter-tenant salvo em: {plot_path_inter_tenant_cov}")
                                 advanced_analysis_results.setdefault('inter_tenant_covariance_matrices', {}).setdefault(metric_name_inter_tenant, {})[round_name_inter_tenant] = inter_tenant_cov_matrix
                             else:
                                 print(f"      Matriz de covariância inter-tenant vazia ou None para {metric_name_inter_tenant}, round {round_name_inter_tenant}.")
@@ -998,7 +999,7 @@ def main():
                                 all_causality_results.append(causality_results_df)
                                 causality_table_filename = f'granger_causality_{metric_name_causality}_round_{round_name_causality}.csv'
                                 causality_table_path = os.path.join(causality_dir, 'tables', causality_table_filename)
-                                export_to_csv(causality_results_df, causality_table_path)
+                                save_causality_results_to_csv(causality_results_df, causality_table_path)
                                 print(f"      Tabela de causalidade salva em: {causality_table_path}")
 
                                 if not causality_results_df[causality_results_df['significant_causal_relationship']].empty:
@@ -1061,8 +1062,8 @@ def main():
                         if isinstance(df_round_plot, pd.DataFrame) and not df_round_plot.empty:
                             required_cols = ['experiment_elapsed_seconds', 'value', 'phase_name', 'tenant']
                             if all(col in df_round_plot.columns for col in required_cols):
-                                plot_m_path = os.path.join(advanced_plots_dir, f'{metric_name_plot}_by_phase_round_{round_name_plot}.png')
-                                print(f"    Gerando plot de {metric_name_plot} por fase para round {round_name_plot} em {plot_m_path}")
+                                plot_filename_metric_phase = f'{metric_name_plot}_by_phase_round_{round_name_plot}.png'
+                                print(f"    Gerando plot de {metric_name_plot} por fase para round {round_name_plot} em {os.path.join(advanced_plots_dir, plot_filename_metric_phase)}")
                                 try:
                                     fig_metric_phase = plot_metric_by_phase(
                                         df_round_plot,
@@ -1075,9 +1076,8 @@ def main():
                                         use_formatted_values=True,
                                         tenants=args.tenants
                                     )
-                                    fig_metric_phase.savefig(plot_m_path)
+                                    save_figure(fig_metric_phase, advanced_plots_dir, plot_filename_metric_phase)
                                     plt.close(fig_metric_phase)
-                                    print(f"      Plot de {metric_name_plot} por fase salvo em: {plot_m_path}")
                                 except Exception as e_plot_metric:
                                     print(f"      Erro ao gerar plot de {metric_name_plot} por fase para round {round_name_plot}: {e_plot_metric}")
                             else:
@@ -1239,12 +1239,10 @@ def main():
                 if title_suffix:
                     plt.title(f"Distribuição de {METRIC_DISPLAY_NAMES.get(metric_name, metric_name)} Entre Experimentos\n({'; '.join(title_suffix)})")
 
-                plot_filename = f"comparison_distribution_plot_{metric_name}.png"
-                plot_path = os.path.join(comparison_dir, plot_filename)
+                plot_filename_dist_comp = f"comparison_distribution_plot_{metric_name}.png"
                 try:
                     plt.tight_layout()
-                    plt.savefig(plot_path)
-                    print(f"    Gráfico de comparação de distribuição para {metric_name} salvo em: {plot_path}")
+                    save_figure(plt.gcf(), comparison_dir, plot_filename_dist_comp)
                 except Exception as e:
                     print(f"    Erro ao salvar gráfico de comparação de distribuição: {e}")
                 plt.close()

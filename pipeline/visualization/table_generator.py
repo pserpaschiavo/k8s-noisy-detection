@@ -8,137 +8,30 @@ do experimento, adequadas para publicações acadêmicas.
 import pandas as pd
 import numpy as np
 import os
-from pipeline.config import TABLE_EXPORT_CONFIG  # Import TABLE_EXPORT_CONFIG
 
 
-def format_float_columns(df, float_format='.2f'):
-    """
-    Formata colunas de ponto flutuante em um DataFrame.
-    
-    Args:
-        df (DataFrame): DataFrame a ser formatado
-        float_format (str): Formato a ser aplicado (ex: '.2f', '.3f')
-        
-    Returns:
-        DataFrame: DataFrame com colunas formatadas
-    """
-    # Fazer uma cópia para não modificar o original
-    result = df.copy()
-    
-    # Para cada coluna, verificar se é ponto flutuante
-    for col in result.columns:
-        if result[col].dtype in [np.float32, np.float64]:
-            result[col] = result[col].map(lambda x: f"{x:{float_format}}" if not pd.isna(x) else "")
-    
-    return result
-
-
-def convert_df_to_markdown(df, float_format=None, index=None):
+def convert_df_to_markdown(df, float_format='.2f', index=False):
     """
     Converte um DataFrame para uma tabela em formato Markdown.
     
     Args:
         df (DataFrame): DataFrame a ser convertido
-        float_format (str, optional): Formato para valores de ponto flutuante. Usa config se None.
-        index (bool, optional): Se deve incluir o índice na tabela. Usa config se None.
+        float_format (str, optional): Formato para valores de ponto flutuante. Default '.2f'.
+        index (bool, optional): Se deve incluir o índice na tabela. Default False.
         
     Returns:
         str: String contendo a tabela em formato Markdown
     """
-    # Usar valores do TABLE_EXPORT_CONFIG se não fornecidos
-    final_float_format = float_format if float_format is not None else TABLE_EXPORT_CONFIG.get('float_format', '.2f')
-    final_index = index if index is not None else TABLE_EXPORT_CONFIG.get('include_index', False)
-
     # Formatar float columns antes de converter
-    formatted_df = format_float_columns(df, final_float_format)
-    
+    formatted_df = df.copy()
+    for col in formatted_df.columns:
+        if formatted_df[col].dtype in [np.float32, np.float64]:
+            formatted_df[col] = formatted_df[col].map(lambda x: f"{x:{float_format}}" if not pd.isna(x) else "")
+
     # Converter para Markdown
-    markdown_table = formatted_df.to_markdown(index=final_index)
+    markdown_table = formatted_df.to_markdown(index=index)
     
     return markdown_table
-
-
-def export_to_latex(df, caption, label, filename, float_format=None, index=None, 
-                   column_format=None, escape=True, longtable=None):
-    """
-    Exporta um DataFrame para uma tabela LaTeX formatada.
-    
-    Args:
-        df (DataFrame): DataFrame a ser exportado
-        caption (str): Legenda da tabela
-        label (str): Identificador para referência cruzada
-        filename (str): Nome do arquivo de saída
-        float_format (str, optional): Formato para valores de ponto flutuante. Usa config se None.
-        index (bool, optional): Se deve incluir o índice na tabela. Usa config se None.
-        column_format (str): Formato de coluna personalizado para LaTeX
-        escape (bool): Se deve escapar caracteres especiais
-        longtable (bool, optional): Se deve usar o ambiente longtable. Usa config se None.
-    """
-    # Garantir que o diretório existe
-    os.makedirs(os.path.dirname(os.path.abspath(filename)), exist_ok=True)
-
-    # Usar valores do TABLE_EXPORT_CONFIG se não fornecidos
-    final_float_format_str = float_format if float_format is not None else TABLE_EXPORT_CONFIG.get('float_format', '.2f')
-    final_index = index if index is not None else TABLE_EXPORT_CONFIG.get('include_index', False)
-    final_longtable = longtable if longtable is not None else TABLE_EXPORT_CONFIG.get('longtable', False)
-
-    # Formatar colunas de ponto flutuante para string ANTES de to_latex
-    formatted_df = format_float_columns(df, final_float_format_str)
-    
-    # Exportar para LaTeX
-    latex_table = formatted_df.to_latex(
-        index=final_index,
-        caption=caption,
-        label=label,
-        float_format=None,  # Floats já são strings formatadas
-        column_format=column_format,
-        escape=escape,
-        longtable=final_longtable
-    )
-    
-    # Adicionar pacotes e formatação adicional
-    latex_preamble = """\\documentclass{article}
-\\usepackage{booktabs}
-\\usepackage{siunitx}
-\\usepackage{caption}
-\\usepackage{longtable}
-\\usepackage{multirow}
-\\usepackage{array}
-\\usepackage{colortbl}
-\\begin{document}
-"""
-    latex_end = "\\end{document}"
-    
-    with open(filename, 'w') as f:
-        f.write(latex_preamble)
-        f.write(latex_table)
-        f.write(latex_end)
-    
-    print(f"Tabela exportada como LaTeX para {filename}")
-
-
-def export_to_csv(df, filename, float_format=None):
-    """
-    Exporta um DataFrame para um arquivo CSV formatado.
-    
-    Args:
-        df (DataFrame): DataFrame a ser exportado
-        filename (str): Nome do arquivo de saída
-        float_format (str, optional): Formato para valores de ponto flutuante. Usa config se None.
-    """
-    # Garantir que o diretório existe
-    os.makedirs(os.path.dirname(os.path.abspath(filename)), exist_ok=True)
-    
-    # Usar valor do TABLE_EXPORT_CONFIG se não fornecido
-    final_float_format = float_format if float_format is not None else TABLE_EXPORT_CONFIG.get('float_format', '.2f')
-
-    # Formatar float columns antes de exportar
-    formatted_df = format_float_columns(df, final_float_format)
-    
-    # Exportar para CSV
-    formatted_df.to_csv(filename, index=False)
-    
-    print(f"Tabela exportada como CSV para {filename}")
 
 
 def create_phase_comparison_table(df, metric_name, phases=None, tenants=None, 

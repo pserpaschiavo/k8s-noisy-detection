@@ -14,57 +14,6 @@ from sklearn.preprocessing import StandardScaler
 from pipeline.config import METRICS_CONFIG, IMPACT_SCORE_WEIGHTS, PHASE_DISPLAY_NAMES
 
 
-def calculate_covariance_matrix(metrics_dict, tenants=None, phase=None, round_name='round-1'):
-    """
-    Calcula uma matriz de covariância entre métricas de diferentes tenants.
-    
-    Args:
-        metrics_dict (dict): Dicionário com DataFrames para cada métrica
-        tenants (list): Lista de tenants a incluir (None = todos)
-        phase (str): Fase específica para análise (None = todas)
-        round_name (str): Round a ser analisado
-        
-    Returns:
-        DataFrame: Matriz de covariância entre métricas dos tenants
-        DataFrame: Matriz de correlação (para comparação)
-    """
-    # Preparar dados para covariância
-    covariance_data = {}
-    
-    for metric_name, metric_df in metrics_dict.items():
-        # Filtrar pelo round especificado
-        round_df = metric_df[metric_df['round'] == round_name]
-        
-        # Filtrar pela fase se especificada
-        if phase:
-            round_df = round_df[round_df['phase'] == phase]
-            
-        if tenants:
-            round_df = round_df[round_df['tenant'].isin(tenants)]
-        
-        # Pivotar para ter uma coluna para cada tenant
-        pivot = round_df.pivot_table(
-            index='datetime',
-            columns='tenant',
-            values='value'
-        )
-        
-        # Adicionar ao dicionário com prefixo da métrica
-        for tenant in pivot.columns:
-            covariance_data[f"{metric_name}_{tenant}"] = pivot[tenant]
-    
-    # Criar DataFrame com todas as séries
-    cov_df = pd.DataFrame(covariance_data)
-    
-    # Calcular covariância
-    covariance_matrix = cov_df.cov()
-    
-    # Calcular correlação para comparação
-    correlation_matrix = cov_df.corr()
-    
-    return covariance_matrix, correlation_matrix
-
-
 def calculate_cross_tenant_entropy(df, tenant1, tenant2, metric_column='value'):
     """
     Calcula a entropia cruzada entre dois tenants para uma métrica.
