@@ -9,6 +9,7 @@ if project_root not in sys.path:
 import argparse
 import pandas as pd
 import matplotlib.pyplot as plt
+import numpy as np
 import itertools  # Added import
 
 """
@@ -17,17 +18,18 @@ New main script for the refactored noisy neighbor experiment analysis pipeline.
 
 # Refactored modules
 from refactor.data_handling.loader import load_experiment_data
-from refactor.data_handling.save_results import export_to_csv, save_figure
+from refactor.data_handling.save_results import export_to_csv, save_figure  # Corrected import
 from refactor.analysis_modules.correlation_covariance import (
-    calculate_inter_tenant_correlation_per_metric,  # Changed from calculate_correlation_matrix
+    calculate_correlation_matrix,  # Corrected import name
     calculate_covariance_matrix,  # Not used in this basic setup yet
     calculate_inter_tenant_covariance_per_metric  # Not used in this basic setup yet
 )
 from refactor.analysis_modules.descritive_statistics import calculate_descriptive_statistics  # Added import
-# Import new placeholder modules
-from refactor.analysis_modules.anomaly_detection import run_anomaly_detection_analysis
-from refactor.analysis_modules.tenant_analysis import run_tenant_specific_analysis
-from refactor.analysis_modules.advanced_analysis import run_advanced_pipeline_analysis
+# Corrected placeholder import names
+from refactor.analysis_modules.anomaly_detection import run_anomaly_detection_placeholder
+from refactor.analysis_modules.tenant_analysis import run_tenant_analysis_placeholder
+from refactor.analysis_modules.advanced_analysis import run_advanced_analysis_placeholder
+from refactor.analysis_modules.multivariate_exploration import perform_pca, perform_ica, get_top_features_per_component  # Added PCA, ICA, and top features comparison
 # Corrected import for plot_correlation_heatmap
 from refactor.visualization.new_plots import (
     plot_correlation_heatmap, plot_covariance_heatmap, plot_scatter_comparison,
@@ -80,6 +82,19 @@ def parse_arguments():
     parser.add_argument('--run-tenant-analysis', action='store_true', help='Run tenant-specific analysis.')
     parser.add_argument('--run-advanced-analysis', action='store_true', help='Run advanced analysis modules.')
 
+    # Arguments for PCA
+    parser.add_argument('--run-pca', action='store_true', help="Run Principal Component Analysis.")
+    parser.add_argument('--pca-n-components', type=str, default=None, help="Number of PCA components (int) or variance explained (float, e.g., 0.95).")
+    parser.add_argument('--pca-variance-threshold', type=float, default=None, help="PCA variance threshold to select number of components (e.g., 0.95 for 95%%).")
+
+    # Arguments for ICA
+    parser.add_argument('--run-ica', action='store_true', help="Run Independent Component Analysis.")
+    parser.add_argument('--ica-n-components', type=int, default=None, help="Number of ICA components.")
+
+    # Argument for PCA vs ICA comparison
+    parser.add_argument('--compare-pca-ica', action='store_true', help="Generate a comparison table of top features for PCA and ICA.")
+    parser.add_argument('--n-top-features-comparison', type=int, default=5, help="Number of top features to show in PCA/ICA comparison.")
+
     # Argument for analysis scope
     parser.add_argument('--consolidated-analysis', action='store_true',
                         help='Run analysis consolidated across all phases (old behavior). If not set, analysis will be per-phase.')
@@ -91,12 +106,31 @@ def setup_output_directories(output_dir):
     """Configures output directories."""
     plots_dir = os.path.join(output_dir, 'plots')
     tables_dir = os.path.join(output_dir, 'tables')
-    # Add more specific directories as needed (e.g., advanced, anomalies)
+    descriptive_stats_plots_dir = os.path.join(plots_dir, "descriptive_stats")
+    descriptive_stats_tables_dir = os.path.join(tables_dir, "descriptive_stats")
+    correlation_plots_dir = os.path.join(plots_dir, "correlation")
+    correlation_tables_dir = os.path.join(tables_dir, "correlation")
+    covariance_plots_dir = os.path.join(plots_dir, "covariance")
+    covariance_tables_dir = os.path.join(tables_dir, "covariance")
+    multivariate_dir = os.path.join(output_dir, "multivariate")  # New directory for PCA/ICA
+    pca_output_dir = os.path.join(multivariate_dir, "pca")
+    ica_output_dir = os.path.join(multivariate_dir, "ica")
+    comparison_output_dir = os.path.join(multivariate_dir, "comparison")  # New directory for PCA vs ICA comparison
 
     os.makedirs(plots_dir, exist_ok=True)
     os.makedirs(tables_dir, exist_ok=True)
+    os.makedirs(descriptive_stats_plots_dir, exist_ok=True)
+    os.makedirs(descriptive_stats_tables_dir, exist_ok=True)
+    os.makedirs(correlation_plots_dir, exist_ok=True)
+    os.makedirs(correlation_tables_dir, exist_ok=True)
+    os.makedirs(covariance_plots_dir, exist_ok=True)
+    os.makedirs(covariance_tables_dir, exist_ok=True)
+    os.makedirs(multivariate_dir, exist_ok=True)  # Create multivariate directory
+    os.makedirs(pca_output_dir, exist_ok=True)  # Create PCA output directory
+    os.makedirs(ica_output_dir, exist_ok=True)  # Create ICA output directory
+    os.makedirs(comparison_output_dir, exist_ok=True)  # Create comparison directory
 
-    return plots_dir, tables_dir
+    return plots_dir, tables_dir, pca_output_dir, ica_output_dir, comparison_output_dir
 
 
 def main():
@@ -107,7 +141,7 @@ def main():
     if not os.path.exists(args.output_dir):
         os.makedirs(args.output_dir)
 
-    plots_dir, tables_dir = setup_output_directories(args.output_dir)
+    plots_dir, tables_dir, pca_output_dir, ica_output_dir, comparison_output_dir = setup_output_directories(args.output_dir)
 
     # Resolve data directory path
     experiment_data_dir_input = args.data_dir
@@ -181,6 +215,287 @@ def main():
                 else:
                     print(f"    Skipping time normalization for {metric_name}, {round_name} (Consolidated): DataFrame not found or 'datetime' column missing.")
 
+    # --- PCA and ICA Analysis ---
+    if args.run_pca or args.run_ica:
+        print("\nRunning PCA and ICA Analysis...")
+        for metric_name, rounds_or_phases_data in all_metrics_data.items():
+            print(f"Processing metric: {metric_name}")
+            if not isinstance(rounds_or_phases_data, dict):
+                print(f"  Skipping metric {metric_name}: Expected a dictionary of round/phase data, got {type(rounds_or_phases_data)}.")
+                continue
+
+            for round_name, phases_or_metric_df in rounds_or_phases_data.items():
+                if run_per_phase_analysis:
+                    if not isinstance(phases_or_metric_df, dict):
+                        print(f"  Skipping round {round_name} for metric {metric_name}: Expected a dictionary of phase data, got {type(phases_or_metric_df)}.")
+                        continue
+                    for phase_name, phase_df in phases_or_metric_df.items():
+                        print(f"  Processing round: {round_name}, phase: {phase_name} for metric: {metric_name}")
+                        if not isinstance(phase_df, pd.DataFrame):
+                            print(f"    Skipping round {round_name}, phase {phase_name} for metric {metric_name}: Expected a DataFrame, got {type(phase_df)}.")
+                            continue
+                        if phase_df.empty:
+                            print(f"    Skipping PCA/ICA for metric {metric_name}, round {round_name}, phase {phase_name} due to empty DataFrame.")
+                            continue
+
+                        numeric_df_for_multivariate = phase_df.select_dtypes(include=np.number).dropna()
+                        numeric_df_for_multivariate_cleaned = numeric_df_for_multivariate.copy()
+
+                        if numeric_df_for_multivariate_cleaned.empty or numeric_df_for_multivariate_cleaned.shape[0] < 2 or numeric_df_for_multivariate_cleaned.shape[1] < 1:
+                            print(f"Skipping PCA/ICA for {metric_name} - {phase_name if phase_name else 'consolidated'} due to insufficient data after cleaning (NaNs) or too few features/samples (Shape: {numeric_df_for_multivariate_cleaned.shape}).")
+                        else:
+                            print(f"Preparing for PCA/ICA for {metric_name} - {phase_name if phase_name else 'consolidated'}. Shape of data: {numeric_df_for_multivariate_cleaned.shape}")
+                            
+                            pca_components_df_for_comparison = None  # Initialize for comparison
+                            ica_components_df_for_comparison = None  # Initialize for comparison
+
+                            # PCA Analysis
+                            if args.run_pca:
+                                print(f"Running PCA for {metric_name} ({phase_name if phase_name else 'consolidated'})...")
+                                try:
+                                    pca_n_components_arg = args.pca_n_components
+                                    if pca_n_components_arg:
+                                        try:
+                                            pca_n_components_arg = int(pca_n_components_arg)
+                                        except ValueError:
+                                            try:
+                                                pca_n_components_arg = float(pca_n_components_arg)
+                                                if not (0 < pca_n_components_arg < 1):
+                                                    raise ValueError("PCA n_components float must be between 0 and 1.")
+                                            except ValueError:
+                                                print(f"Warning: Invalid format for --pca-n-components '{args.pca_n_components}'. Using default.")
+                                                pca_n_components_arg = None
+                                    
+                                    pca_results_df, pca_components_df, pca_explained_variance = perform_pca(
+                                        numeric_df_for_multivariate_cleaned.copy(), 
+                                        n_components=pca_n_components_arg,
+                                        variance_threshold=args.pca_variance_threshold
+                                    )
+                                    pca_components_df_for_comparison = pca_components_df  # Store for comparison
+                                    
+                                    base_filename_pca = f"{metric_name}_{phase_name if phase_name else 'consolidated'}_pca"
+                                    export_to_csv(pca_results_df, os.path.join(pca_output_dir, f"{base_filename_pca}_principal_components.csv"))
+                                    export_to_csv(pca_components_df, os.path.join(pca_output_dir, f"{base_filename_pca}_loadings.csv"))
+                                    
+                                    explained_variance_df = pd.DataFrame({
+                                        'Component': [f'PC{i+1}' for i in range(len(pca_explained_variance))],
+                                        'ExplainedVarianceRatio': pca_explained_variance,
+                                        'CumulativeVarianceRatio': np.cumsum(pca_explained_variance)
+                                    })
+                                    export_to_csv(explained_variance_df, os.path.join(pca_output_dir, f"{base_filename_pca}_explained_variance.csv"))
+                                    print(f"PCA results saved for {metric_name} ({phase_name if phase_name else 'consolidated'}).")
+
+                                except ValueError as e:
+                                    print(f"Error during PCA for {metric_name} ({phase_name if phase_name else 'consolidated'}): {e}")
+                                except Exception as e:
+                                    print(f"An unexpected error occurred during PCA for {metric_name} ({phase_name if phase_name else 'consolidated'}): {e}")
+
+                            # ICA Analysis
+                            if args.run_ica:
+                                print(f"Running ICA for {metric_name} ({phase_name if phase_name else 'consolidated'}). Input data shape: {numeric_df_for_multivariate_cleaned.shape}")
+                                if numeric_df_for_multivariate_cleaned.shape[1] == 0:
+                                    print(f"Skipping ICA for {metric_name} ({phase_name if phase_name else 'consolidated'}) as there are no features.")
+                                else:
+                                    try:
+                                        ica_results_df, ica_components_df = perform_ica(
+                                            numeric_df_for_multivariate_cleaned.copy(), 
+                                            n_components=args.ica_n_components
+                                        )
+                                        ica_components_df_for_comparison = ica_components_df  # Store for comparison
+
+                                        print(f"ICA function call completed for {metric_name} ({phase_name if phase_name else 'consolidated'}).")
+                                        print(f"  Shape of ica_results_df: {ica_results_df.shape}")
+                                        print(f"  Shape of ica_components_df: {ica_components_df.shape}")
+
+                                        base_filename_ica = f"{metric_name}_{phase_name if phase_name else 'consolidated'}_ica"
+                                        files_saved_count = 0
+
+                                        if not ica_results_df.empty:
+                                            export_to_csv(ica_results_df, os.path.join(ica_output_dir, f"{base_filename_ica}_independent_components.csv"))
+                                            files_saved_count += 1
+                                        else:
+                                            print(f"Warning: ica_results_df is empty for {metric_name} ({phase_name if phase_name else 'consolidated'}). Skipping save of independent components.")
+
+                                        if not ica_components_df.empty:
+                                            export_to_csv(ica_components_df, os.path.join(ica_output_dir, f"{base_filename_ica}_unmixing_matrix.csv"))
+                                            files_saved_count += 1
+                                        else:
+                                            print(f"Warning: ica_components_df is empty for {metric_name} ({phase_name if phase_name else 'consolidated'}). Skipping save of unmixing matrix.")
+                                        
+                                        if files_saved_count > 0:
+                                            print(f"ICA results partially or fully saved for {metric_name} ({phase_name if phase_name else 'consolidated'}).")
+                                        else:
+                                            print(f"ICA results NOT saved due to empty dataframes for {metric_name} ({phase_name if phase_name else 'consolidated'}).")
+                                    
+                                    except ValueError as e:
+                                        print(f"VALUE ERROR during ICA for {metric_name} ({phase_name if phase_name else 'consolidated'}): {e}")
+                                    except Exception as e:
+                                        import traceback
+                                        print(f"UNEXPECTED ERROR during ICA for {metric_name} ({phase_name if phase_name else 'consolidated'}): {e}")
+                                        print(f"Full traceback:\n{traceback.format_exc()}")
+                            
+                            # PCA vs ICA Comparison
+                            if args.compare_pca_ica and pca_components_df_for_comparison is not None and ica_components_df_for_comparison is not None:
+                                print(f"Generating PCA vs ICA top features comparison for {metric_name} ({phase_name if phase_name else 'consolidated'})...")
+                                try:
+                                    top_pca_features = get_top_features_per_component(pca_components_df_for_comparison, args.n_top_features_comparison)
+                                    top_ica_features = get_top_features_per_component(ica_components_df_for_comparison, args.n_top_features_comparison)
+
+                                    # Add a 'Method' column to distinguish PCA and ICA features
+                                    top_pca_features['Method'] = 'PCA'
+                                    top_ica_features['Method'] = 'ICA'
+
+                                    # Concatenate the two DataFrames
+                                    comparison_df = pd.concat([top_pca_features, top_ica_features], ignore_index=True)
+                                    
+                                    # Reorder columns for better readability
+                                    comparison_df = comparison_df[['Method', 'Component', 'Rank', 'Feature', 'Coefficient']]
+
+                                    base_filename_comparison = f"{metric_name}_{phase_name if phase_name else 'consolidated'}_pca_ica_top_features_comparison.csv"
+                                    export_to_csv(comparison_df, os.path.join(comparison_output_dir, base_filename_comparison))
+                                    print(f"PCA vs ICA top features comparison table saved for {metric_name} ({phase_name if phase_name else 'consolidated'}).")
+                                
+                                except Exception as e:
+                                    import traceback
+                                    print(f"Error generating PCA vs ICA comparison for {metric_name} ({phase_name if phase_name else 'consolidated'}): {e}")
+                                    print(f"Full traceback:\n{traceback.format_exc()}")
+                            elif args.compare_pca_ica:
+                                print(f"Skipping PCA vs ICA comparison for {metric_name} ({phase_name if phase_name else 'consolidated'}) as PCA or ICA components are missing.")
+
+                else:  # Consolidated Analysis
+                    metric_df_consolidated = phases_or_metric_df
+                    print(f"  Processing round: {round_name} for metric: {metric_name} (Consolidated)")
+                    if not isinstance(metric_df_consolidated, pd.DataFrame):
+                        print(f"    Skipping round {round_name} for metric {metric_name} (Consolidated): Expected a DataFrame, got {type(metric_df_consolidated)}.")
+                        continue
+                    if metric_df_consolidated.empty:
+                        print(f"    Skipping PCA/ICA for metric {metric_name}, round {round_name} (Consolidated) due to empty DataFrame.")
+                        continue
+
+                    numeric_df_for_multivariate = metric_df_consolidated.select_dtypes(include=np.number).dropna()
+                    numeric_df_for_multivariate_cleaned = numeric_df_for_multivariate.copy()
+
+                    if numeric_df_for_multivariate_cleaned.empty or numeric_df_for_multivariate_cleaned.shape[0] < 2 or numeric_df_for_multivariate_cleaned.shape[1] < 1:
+                        print(f"Skipping PCA/ICA for {metric_name} - consolidated due to insufficient data after cleaning (NaNs) or too few features/samples (Shape: {numeric_df_for_multivariate_cleaned.shape}).")
+                    else:
+                        print(f"Preparing for PCA/ICA for {metric_name} - consolidated. Shape of data: {numeric_df_for_multivariate_cleaned.shape}")
+                        
+                        pca_components_df_for_comparison = None  # Initialize for comparison
+                        ica_components_df_for_comparison = None  # Initialize for comparison
+
+                        # PCA Analysis
+                        if args.run_pca:
+                            print(f"Running PCA for {metric_name} (Consolidated)...")
+                            try:
+                                pca_n_components_arg = args.pca_n_components
+                                if pca_n_components_arg:
+                                    try:
+                                        pca_n_components_arg = int(pca_n_components_arg)
+                                    except ValueError:
+                                        try:
+                                            pca_n_components_arg = float(pca_n_components_arg)
+                                            if not (0 < pca_n_components_arg < 1):
+                                                raise ValueError("PCA n_components float must be between 0 and 1.")
+                                        except ValueError:
+                                            print(f"Warning: Invalid format for --pca-n-components '{args.pca_n_components}'. Using default.")
+                                            pca_n_components_arg = None
+                                
+                                pca_results_df, pca_components_df, pca_explained_variance = perform_pca(
+                                    numeric_df_for_multivariate_cleaned.copy(), 
+                                    n_components=pca_n_components_arg,
+                                    variance_threshold=args.pca_variance_threshold
+                                )
+                                pca_components_df_for_comparison = pca_components_df  # Store for comparison
+                                
+                                base_filename_pca = f"{metric_name}_consolidated_pca"
+                                export_to_csv(pca_results_df, os.path.join(pca_output_dir, f"{base_filename_pca}_principal_components.csv"))
+                                export_to_csv(pca_components_df, os.path.join(pca_output_dir, f"{base_filename_pca}_loadings.csv"))
+                                
+                                explained_variance_df = pd.DataFrame({
+                                    'Component': [f'PC{i+1}' for i in range(len(pca_explained_variance))],
+                                    'ExplainedVarianceRatio': pca_explained_variance,
+                                    'CumulativeVarianceRatio': np.cumsum(pca_explained_variance)
+                                })
+                                export_to_csv(explained_variance_df, os.path.join(pca_output_dir, f"{base_filename_pca}_explained_variance.csv"))
+                                print(f"PCA results saved for {metric_name} (Consolidated).")
+
+                            except ValueError as e:
+                                print(f"Error during PCA for {metric_name} (Consolidated): {e}")
+                            except Exception as e:
+                                print(f"An unexpected error occurred during PCA for {metric_name} (Consolidated): {e}")
+
+                        # ICA Analysis
+                        if args.run_ica:
+                            print(f"Running ICA for {metric_name} (Consolidated). Input data shape: {numeric_df_for_multivariate_cleaned.shape}")
+                            if numeric_df_for_multivariate_cleaned.shape[1] == 0:
+                                print(f"Skipping ICA for {metric_name} (Consolidated) as there are no features.")
+                            else:
+                                try:
+                                    ica_results_df, ica_components_df = perform_ica(
+                                        numeric_df_for_multivariate_cleaned.copy(), 
+                                        n_components=args.ica_n_components
+                                    )
+                                    ica_components_df_for_comparison = ica_components_df  # Store for comparison
+
+                                    print(f"ICA function call completed for {metric_name} (Consolidated).")
+                                    print(f"  Shape of ica_results_df: {ica_results_df.shape}")
+                                    print(f"  Shape of ica_components_df: {ica_components_df.shape}")
+
+                                    base_filename_ica = f"{metric_name}_consolidated_ica"
+                                    files_saved_count = 0
+
+                                    if not ica_results_df.empty:
+                                        export_to_csv(ica_results_df, os.path.join(ica_output_dir, f"{base_filename_ica}_independent_components.csv"))
+                                        files_saved_count += 1
+                                    else:
+                                        print(f"Warning: ica_results_df is empty for {metric_name} (Consolidated). Skipping save of independent components.")
+
+                                    if not ica_components_df.empty:
+                                        export_to_csv(ica_components_df, os.path.join(ica_output_dir, f"{base_filename_ica}_unmixing_matrix.csv"))
+                                        files_saved_count += 1
+                                    else:
+                                        print(f"Warning: ica_components_df is empty for {metric_name} (Consolidated). Skipping save of unmixing matrix.")
+                                    
+                                    if files_saved_count > 0:
+                                        print(f"ICA results partially or fully saved for {metric_name} (Consolidated).")
+                                    else:
+                                        print(f"ICA results NOT saved due to empty dataframes for {metric_name} (Consolidated).")
+                                
+                                except ValueError as e:
+                                    print(f"VALUE ERROR during ICA for {metric_name} (Consolidated): {e}")
+                                except Exception as e:
+                                    import traceback
+                                    print(f"UNEXPECTED ERROR during ICA for {metric_name} (Consolidated): {e}")
+                                    print(f"Full traceback:\n{traceback.format_exc()}")
+                        
+                        # PCA vs ICA Comparison
+                        if args.compare_pca_ica and pca_components_df_for_comparison is not None and ica_components_df_for_comparison is not None:
+                            print(f"Generating PCA vs ICA top features comparison for {metric_name} (Consolidated)...")
+                            try:
+                                top_pca_features = get_top_features_per_component(pca_components_df_for_comparison, args.n_top_features_comparison)
+                                top_ica_features = get_top_features_per_component(ica_components_df_for_comparison, args.n_top_features_comparison)
+
+                                # Add a 'Method' column to distinguish PCA and ICA features
+                                top_pca_features['Method'] = 'PCA'
+                                top_ica_features['Method'] = 'ICA'
+
+                                # Concatenate the two DataFrames
+                                comparison_df = pd.concat([top_pca_features, top_ica_features], ignore_index=True)
+                                
+                                # Reorder columns for better readability
+                                comparison_df = comparison_df[['Method', 'Component', 'Rank', 'Feature', 'Coefficient']]
+
+                                base_filename_comparison = f"{metric_name}_consolidated_pca_ica_top_features_comparison.csv"
+                                export_to_csv(comparison_df, os.path.join(comparison_output_dir, base_filename_comparison))
+                                print(f"PCA vs ICA top features comparison table saved for {metric_name} (Consolidated).")
+                            
+                            except Exception as e:
+                                import traceback
+                                print(f"Error generating PCA vs ICA comparison for {metric_name} (Consolidated): {e}")
+                                print(f"Full traceback:\n{traceback.format_exc()}")
+                        elif args.compare_pca_ica:
+                            print(f"Skipping PCA vs ICA comparison for {metric_name} (Consolidated) as PCA or ICA components are missing.")
+
     # --- Example: Correlation Analysis ---
     if args.run_correlation:
         print("\nRunning Correlation Analysis...")
@@ -235,7 +550,7 @@ def main():
                                         print(f"      Skipping {metric_name}, round {round_name}, phase {phase_name} ({current_method_inner_loop}): 'timestamp' column not found.")
                                         continue
 
-                                    correlation_matrix_df = calculate_inter_tenant_correlation_per_metric(
+                                    correlation_matrix_df = calculate_correlation_matrix(
                                         metric_df, method=current_method_inner_loop, time_col='timestamp'
                                     )
                                     if correlation_matrix_df is not None and not correlation_matrix_df.empty:
@@ -322,7 +637,7 @@ def main():
                                     print(f"      Skipping {metric_name}, round {round_name} ({current_method_inner_loop}): 'timestamp' column not found.")
                                     continue
 
-                                correlation_matrix_df = calculate_inter_tenant_correlation_per_metric(
+                                correlation_matrix_df = calculate_correlation_matrix(
                                     metric_df, method=current_method_inner_loop, time_col='timestamp'
                                 )
                                 if correlation_matrix_df is not None and not correlation_matrix_df.empty:
@@ -647,28 +962,48 @@ def main():
         print("\nRunning Anomaly Detection Analysis...")
         anomaly_output_dir = os.path.join(args.output_dir, 'anomaly_detection')
         os.makedirs(anomaly_output_dir, exist_ok=True)
-        # This is a placeholder call. You'll need to adapt how data is passed
-        # and how results are handled based on the actual implementation.
-        run_anomaly_detection_analysis(all_metrics_data, anomaly_output_dir, args)
-        print("  Anomaly Detection (placeholder) finished.")
+        for metric_name, rounds_or_phases_data in all_metrics_data.items():
+            for round_name, phases_or_metric_df in rounds_or_phases_data.items():
+                if run_per_phase_analysis:
+                    for phase_name, data_df in phases_or_metric_df.items():
+                        print(f"Running anomaly detection (placeholder) for {metric_name} ({phase_name})...")
+                        run_anomaly_detection_placeholder(data_df, args.output_dir, metric_name, phase_name)
+                else:
+                    data_df = phases_or_metric_df
+                    print(f"Running anomaly detection (placeholder) for {metric_name} (consolidated)...")
+                    run_anomaly_detection_placeholder(data_df, args.output_dir, metric_name, None)
 
     # --- Tenant-Specific Analysis ---
     if args.run_tenant_analysis:
         print("\nRunning Tenant-Specific Analysis...")
         tenant_output_dir = os.path.join(args.output_dir, 'tenant_analysis')
         os.makedirs(tenant_output_dir, exist_ok=True)
-        # Placeholder call
-        run_tenant_specific_analysis(all_metrics_data, tenant_output_dir, args)
-        print("  Tenant-Specific Analysis (placeholder) finished.")
+        for metric_name, rounds_or_phases_data in all_metrics_data.items():
+            for round_name, phases_or_metric_df in rounds_or_phases_data.items():
+                if run_per_phase_analysis:
+                    for phase_name, data_df in phases_or_metric_df.items():
+                        print(f"Running tenant analysis (placeholder) for {metric_name} ({phase_name})...")
+                        run_tenant_analysis_placeholder(data_df, args.output_dir, metric_name, phase_name)
+                else:
+                    data_df = phases_or_metric_df
+                    print(f"Running tenant analysis (placeholder) for {metric_name} (consolidated)...")
+                    run_tenant_analysis_placeholder(data_df, args.output_dir, metric_name, None)
 
     # --- Advanced Analysis ---
     if args.run_advanced_analysis:
         print("\nRunning Advanced Analysis...")
         advanced_output_dir = os.path.join(args.output_dir, 'advanced_analysis')
         os.makedirs(advanced_output_dir, exist_ok=True)
-        # Placeholder call
-        run_advanced_pipeline_analysis(all_metrics_data, advanced_output_dir, args)
-        print("  Advanced Analysis (placeholder) finished.")
+        for metric_name, rounds_or_phases_data in all_metrics_data.items():
+            for round_name, phases_or_metric_df in rounds_or_phases_data.items():
+                if run_per_phase_analysis:
+                    for phase_name, data_df in phases_or_metric_df.items():
+                        print(f"Running advanced analysis (placeholder) for {metric_name} ({phase_name})...")
+                        run_advanced_analysis_placeholder(data_df, args.output_dir, metric_name, phase_name)
+                else:
+                    data_df = phases_or_metric_df
+                    print(f"Running advanced analysis (placeholder) for {metric_name} (consolidated)...")
+                    run_advanced_analysis_placeholder(data_df, args.output_dir, metric_name, None)
 
     print("\nRefactored pipeline processing finished.")
 
