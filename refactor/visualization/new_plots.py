@@ -5,6 +5,9 @@ import numpy as np
 import os
 from matplotlib.colors import LinearSegmentedColormap
 from matplotlib.ticker import MaxNLocator
+from matplotlib.patches import Rectangle # Ensure Rectangle is imported
+from matplotlib.lines import Line2D # Import Line2D
+from typing import Sequence # Import Sequence for type hinting
 
 from refactor.new_config import VISUALIZATION_CONFIG, METRIC_DISPLAY_NAMES, TENANT_COLORS, PHASE_DISPLAY_NAMES
 from refactor.data_handling.save_results import save_figure
@@ -23,7 +26,7 @@ def set_publication_style():
     plt.rcParams['legend.fontsize'] = VISUALIZATION_CONFIG.get('legend_size', 12)
     plt.rcParams['legend.title_fontsize'] = VISUALIZATION_CONFIG.get('legend_title_size', 14)
 
-def plot_correlation_heatmap(correlation_matrix, title='Correlation Heatmap', cmap='vlag', cbar_label='Correlation Coefficient', output_dir=None, filename=None):
+def plot_correlation_heatmap(correlation_matrix, title='Correlation Heatmap', cmap='vlag', cbar_label='Correlation Coefficient', output_dir: str | None = None, filename: str | None = None):
     """
     Plots a correlation matrix as a heatmap.
 
@@ -57,7 +60,7 @@ def plot_correlation_heatmap(correlation_matrix, title='Correlation Heatmap', cm
             print(f"Error saving heatmap to {full_path}: {e}")
     return fig
 
-def plot_covariance_heatmap(covariance_matrix, title='Covariance Heatmap', cmap='coolwarm', cbar_label='Covariance', output_dir=None, filename=None):
+def plot_covariance_heatmap(covariance_matrix, title='Covariance Heatmap', cmap='coolwarm', cbar_label='Covariance', output_dir: str | None = None, filename: str | None = None):
     """
     Plots a covariance matrix as a heatmap.
 
@@ -90,7 +93,7 @@ def plot_covariance_heatmap(covariance_matrix, title='Covariance Heatmap', cmap=
             print(f"Error saving covariance heatmap to {os.path.join(output_dir, filename)}: {e}")
     return fig
 
-def plot_cross_correlation(cross_corr_series: pd.Series, title: str = 'Cross-Correlation Plot', output_dir: str = None, filename: str = None):
+def plot_cross_correlation(cross_corr_series: pd.Series, title: str = 'Cross-Correlation Plot', output_dir: str | None = None, filename: str | None = None):
     """
     Plots the results of a cross-correlation analysis.
 
@@ -128,12 +131,12 @@ def plot_cross_correlation(cross_corr_series: pd.Series, title: str = 'Cross-Cor
 def plot_metric_with_anomalies(df, metric_name, time_column='experiment_elapsed_seconds', value_column='value', 
                                anomaly_column='is_anomaly', change_points=None,
                                phases=None, tenants=None, show_phase_markers=True, 
-                               output_dir=None, filename=None, 
-                               figsize=None, use_total_duration=False, total_duration_seconds=None,
+                               output_dir: str | None = None, filename: str | None = None, 
+                               figsize: tuple[float, float] | None = None, use_total_duration=False, total_duration_seconds=None,
                                show_as_percentage=False, node_config=None):
     """
     Creates a line plot for a metric, highlighting anomalies and change points.
-    Adapted for the refactored structure.
+    Adapted for the refactored structure
     
     Args:
         df (pd.DataFrame): DataFrame with metric data and anomaly column.
@@ -145,8 +148,8 @@ def plot_metric_with_anomalies(df, metric_name, time_column='experiment_elapsed_
         phases (list): List of phases to include (None = all).
         tenants (list): List of tenants to include (None = all).
         show_phase_markers (bool): Whether to show vertical lines marking phases.
-        output_dir (str, optional): Directory to save the plot. If None, plot is not saved.
-        filename (str, optional): Filename for the saved plot. If None, a default is generated.
+        output_dir (str | None, optional): Directory to save the plot. If None, plot is not saved.
+        filename (str | None, optional): Filename for the saved plot. If None, a default is generated.
         figsize (tuple): Figure size (optional, uses config if None).
         use_total_duration (bool): If True, the X-axis will use 'total_elapsed_seconds'.
         total_duration_seconds (float): Total duration of the experiment in seconds.
@@ -158,7 +161,7 @@ def plot_metric_with_anomalies(df, metric_name, time_column='experiment_elapsed_
     """
     set_publication_style()
     
-    display_metric_name = METRIC_DISPLAY_NAMES.get(metric_name, metric_name)
+    display_metric_name = METRIC_DISPLAY_NAMES.get(metric_name, str(metric_name)) # Ensure string
     
     data = df.copy()
     if phases:
@@ -256,7 +259,7 @@ def plot_metric_with_anomalies(df, metric_name, time_column='experiment_elapsed_
     
     return fig
 
-def plot_entropy_heatmap(entropy_results_df, metric_name, round_name, output_dir=None, filename=None):
+def plot_entropy_heatmap(entropy_results_df, metric_name, round_name: str | None = None, output_dir: str | None = None, filename: str | None = None):
     """
     Generates a heatmap of entropy (mutual information) results between tenant pairs.
     Adapted for the refactored structure.
@@ -317,7 +320,7 @@ def plot_entropy_heatmap(entropy_results_df, metric_name, round_name, output_dir
     
     return fig
 
-def plot_entropy_top_pairs_barplot(entropy_results_df, metric_name, round_name, output_dir=None, filename=None, top_n=10):
+def plot_entropy_top_pairs_barplot(entropy_results_df, metric_name, round_name: str | None = None, output_dir: str | None = None, filename: str | None = None, top_n=10):
     """
     Generates a bar plot of the top N tenant pairs with the highest mutual information.
     Adapted for the refactored structure.
@@ -376,123 +379,102 @@ def plot_entropy_top_pairs_barplot(entropy_results_df, metric_name, round_name, 
     return fig_bar
 
 def plot_scatter_comparison(
-    data_dict: dict, 
+    x_values: list | pd.Series,
+    y_values: list | pd.Series,
     x_label: str, 
     y_label: str, 
     title: str, 
     output_dir: str, 
     filename: str,
-    add_identity_line: bool = True,
-    annotate_points: bool = False,
-    annotation_subset: list = None 
+    point_labels: list | pd.Series | None = None, # Moved to be after required arguments
+    add_identity_line: bool = True
 ):
     """
-    Generates a scatter plot comparing one or more pairs of data series.
+    Generates a scatter plot comparing two sets of values.
 
     Args:
-        data_dict (dict): Dictionary where keys are labels for the legend and 
-                          values are tuples of (pd.Series_x, pd.Series_y).
-                          Example: {"Method1 vs Method2": (series_x1, series_y1), ...}
+        x_values (list | pd.Series): Data for the x-axis.
+        y_values (list | pd.Series): Data for the y-axis.
         x_label (str): Label for the x-axis.
         y_label (str): Label for the y-axis.
         title (str): Title of the plot.
         output_dir (str): Directory to save the plot.
         filename (str): Filename for the saved plot.
-        add_identity_line (bool): If True, adds a y=x identity line.
-        annotate_points (bool): If True, annotates points (can be slow for many points).
-        annotation_subset (list, optional): A subset of indices from x_data/y_data to annotate.
-                                            If None and annotate_points is True, all points are attempted.
+        point_labels (list | pd.Series, optional): Labels for each point, used for annotation.
+                                                   If provided, points will be annotated. Defaults to None.
+        add_identity_line (bool): If True, adds a y=x identity line. Defaults to True.
     """
     set_publication_style()
     fig, ax = plt.subplots(figsize=VISUALIZATION_CONFIG.get('scatter_figsize', (8, 8)))
 
-    all_x_values = []
-    all_y_values = []
+    x_data = pd.Series(x_values) if not isinstance(x_values, pd.Series) else x_values.copy()
+    y_data = pd.Series(y_values) if not isinstance(y_values, pd.Series) else y_values.copy()
 
-    for label, (x_data_orig, y_data_orig) in data_dict.items():
-        x_data = pd.Series(x_data_orig) if not isinstance(x_data_orig, pd.Series) else x_data_orig.copy()
-        y_data = pd.Series(y_data_orig) if not isinstance(y_data_orig, pd.Series) else y_data_orig.copy()
+    if len(x_data) != len(y_data):
+        print(f"Warning: x_values (len {len(x_data)}) and y_values (len {len(y_data)}) have different lengths for scatter plot '{title}'. Skipping.")
+        plt.close(fig)
+        return None
+    
+    if x_data.empty or y_data.empty:
+        print(f"Warning: No data to plot for scatter plot '{title}'. Skipping.")
+        plt.close(fig)
+        return None
 
-        common_index = x_data.index.intersection(y_data.index)
-        if common_index.empty and (len(x_data) == len(y_data)):
-            x_data.index = pd.RangeIndex(len(x_data))
-            y_data.index = pd.RangeIndex(len(y_data))
-            common_index = x_data.index
-        elif common_index.empty:
-             print(f"Warning: No common data points or mismatched lengths for '{label}' in scatter plot '{title}'. Skipping this series pair.")
-             continue
+    # Reset index to ensure alignment if they are series with different indices but same length
+    x_data.index = pd.RangeIndex(len(x_data))
+    y_data.index = pd.RangeIndex(len(y_data))
 
-        x_data = x_data.loc[common_index]
-        y_data = y_data.loc[common_index]
-
-        if x_data.empty or y_data.empty:
-            print(f"Warning: No data to plot for series pair '{label}' in scatter plot '{title}'. Skipping.")
-            continue
-
-        sns.scatterplot(x=x_data, y=y_data, ax=ax, 
-                        s=VISUALIZATION_CONFIG.get('scatter_marker_size', 50), 
-                        alpha=VISUALIZATION_CONFIG.get('scatter_marker_alpha', 0.7),
-                        edgecolor=VISUALIZATION_CONFIG.get('scatter_marker_edgecolor', 'k'),
-                        linewidth=VISUALIZATION_CONFIG.get('scatter_marker_linewidth', 0.5),
-                        label=label if len(data_dict) > 1 else None)
-        
-        all_x_values.extend(x_data.tolist())
-        all_y_values.extend(y_data.tolist())
+    sns.scatterplot(x=x_data, y=y_data, ax=ax, 
+                    s=VISUALIZATION_CONFIG.get('scatter_marker_size', 50), 
+                    alpha=VISUALIZATION_CONFIG.get('scatter_marker_alpha', 0.7),
+                    edgecolor=VISUALIZATION_CONFIG.get('scatter_marker_edgecolor', 'k'),
+                    linewidth=VISUALIZATION_CONFIG.get('scatter_marker_linewidth', 0.5))
+    
+    all_x_values_list = x_data.tolist() # Renamed to avoid conflict
+    all_y_values_list = y_data.tolist() # Renamed to avoid conflict
 
     ax.set_xlabel(x_label, fontsize=VISUALIZATION_CONFIG.get('label_size', 14))
     ax.set_ylabel(y_label, fontsize=VISUALIZATION_CONFIG.get('label_size', 14))
     ax.set_title(title, fontsize=VISUALIZATION_CONFIG.get('title_size', 16))
 
     if add_identity_line:
-        all_values = pd.Series(all_x_values + all_y_values).dropna()
-        if not all_values.empty:
-            min_val = all_values.min()
-            max_val = all_values.max()
-            buffer = (max_val - min_val) * 0.05 if (max_val - min_val) > 1e-6 else 0.1
+        all_plot_values = pd.Series(all_x_values_list + all_y_values_list).dropna()
+        if not all_plot_values.empty:
+            min_val = all_plot_values.min()
+            max_val = all_plot_values.max()
+            buffer = (max_val - min_val) * 0.05 if (max_val - min_val) > 1e-9 else 0.1 
             lims = [min_val - buffer, max_val + buffer]
             
             ax.plot(lims, lims, 'k--', alpha=0.75, zorder=0, label='y=x (Identity)')
-            ax.set_xlim(lims)
-            ax.set_ylim(lims)
+            ax.set_xlim(lims[0], lims[1]) # Pass elements separately
+            ax.set_ylim(lims[0], lims[1]) # Pass elements separately
+            ax.legend(fontsize=VISUALIZATION_CONFIG.get('legend_size', 12)) 
         else:
-            print("Warning: Cannot draw identity line as no valid data points found across all series.")
+            print("Warning: Cannot draw identity line as no valid data points found.")
 
-    if len(data_dict) > 1 or (add_identity_line and all_x_values and all_y_values):
-        ax.legend(fontsize=VISUALIZATION_CONFIG.get('legend_size', 12))
-
-    if annotate_points and len(data_dict) == 1:
-        label_key = list(data_dict.keys())[0]
-        x_data_for_annot, y_data_for_annot = data_dict[label_key]
-        x_data_for_annot = pd.Series(x_data_for_annot) if not isinstance(x_data_for_annot, pd.Series) else x_data_for_annot
-        y_data_for_annot = pd.Series(y_data_for_annot) if not isinstance(y_data_for_annot, pd.Series) else y_data_for_annot
-        
-        common_index_annot = x_data_for_annot.index.intersection(y_data_for_annot.index)
-        if common_index_annot.empty and (len(x_data_for_annot) == len(y_data_for_annot)):
-            x_data_for_annot.index = pd.RangeIndex(len(x_data_for_annot))
-            y_data_for_annot.index = pd.RangeIndex(len(y_data_for_annot))
-            common_index_annot = x_data_for_annot.index
-
-        if not common_index_annot.empty:
-            x_data_final_annot = x_data_for_annot.loc[common_index_annot]
-            y_data_final_annot = y_data_for_annot.loc[common_index_annot]
-
-            points_to_annotate = annotation_subset if annotation_subset else x_data_final_annot.index
+    if point_labels is not None:
+        labels_series = pd.Series(point_labels) if not isinstance(point_labels, pd.Series) else point_labels
+        if len(labels_series) == len(x_data):
+            labels_series.index = pd.RangeIndex(len(labels_series)) 
             annot_count = 0
             max_annots = VISUALIZATION_CONFIG.get('scatter_max_annotations', 20)
             
-            for point_label in points_to_annotate:
+            for idx in x_data.index: 
                 if annot_count >= max_annots:
                     print(f"Warning: Reached max annotations ({max_annots}) for scatter plot. Not all points annotated.")
                     break
-                if point_label in x_data_final_annot.index and point_label in y_data_final_annot.index:
-                    ax.text(x_data_final_annot[point_label], y_data_final_annot[point_label], 
-                            str(point_label), fontsize=VISUALIZATION_CONFIG.get('annotation_fontsize_small', 8),
+                # Ensure idx is valid for all series before attempting to access
+                if idx < len(x_data) and idx < len(y_data) and idx < len(labels_series):
+                    ax.text(x_data.iloc[idx], y_data.iloc[idx], # Use .iloc for position-based access
+                            str(labels_series.iloc[idx]), fontsize=VISUALIZATION_CONFIG.get('annotation_fontsize_small', 8),
                             ha='left', va='bottom')
                     annot_count +=1
+        else:
+            print(f"Warning: Length of point_labels (len {len(labels_series)}) does not match data length (len {len(x_data)}). Skipping annotations.")
     
     plt.tight_layout()
 
-    if not all_x_values or not all_y_values:
+    if not all_x_values_list or not all_y_values_list: 
         print(f"Warning: No data was plotted for scatter plot '{title}'. Skipping save.")
         plt.close(fig)
         return None
@@ -514,10 +496,10 @@ def plot_descriptive_stats_lineplot(
     metric_name: str, 
     value_column: str, 
     title: str, 
-    output_dir: str, 
-    filename: str,
-    round_name: str = None,
-    phase_name: str = None
+    output_dir: str | None = None, 
+    filename: str | None = None,
+    round_name: str | None = None,
+    phase_name: str | None = None
 ):
     """
     Generates a line plot of a metric over time for each tenant.
@@ -548,8 +530,9 @@ def plot_descriptive_stats_lineplot(
         # Position legend automatically for best location
         ax.legend(title='Tenant', loc='best', 
                   fontsize=VISUALIZATION_CONFIG.get('legend_size', 10)) 
-        if ax.get_legend():
-            plt.setp(ax.get_legend().get_title(), fontsize=VISUALIZATION_CONFIG.get('legend_title_size', 12))
+        legend = ax.get_legend()
+        if legend: # Check if legend exists
+            plt.setp(legend.get_title(), fontsize=VISUALIZATION_CONFIG.get('legend_title_size', 12))
     else:
         # Plot without tenant breakdown
         sns.lineplot(x=time_col, y=value_column, data=data_df, ax=ax,
@@ -559,7 +542,7 @@ def plot_descriptive_stats_lineplot(
     ax.set_xlabel("Time (seconds)", fontsize=VISUALIZATION_CONFIG.get('label_size', 12))
     ax.set_ylabel(f"{display_metric_name} ({value_column.capitalize()})", fontsize=VISUALIZATION_CONFIG.get('label_size', 12))
     ax.tick_params(axis='both', which='major', labelsize=VISUALIZATION_CONFIG.get('tick_size', 10))
-    ax.grid(VISUALIZATION_CONFIG.get('grid_enabled', True), 
+    ax.grid(bool(VISUALIZATION_CONFIG.get('grid_enabled', True)), # Cast to bool
             linestyle=VISUALIZATION_CONFIG.get('grid_linestyle', '--'), 
             alpha=VISUALIZATION_CONFIG.get('grid_alpha', 0.7))
 
@@ -576,10 +559,10 @@ def plot_descriptive_stats_boxplot(
     metric_name: str, 
     value_column: str, 
     title: str, 
-    output_dir: str, 
-    filename: str,
-    round_name: str = None,
-    phase_name: str = None
+    output_dir: str | None = None, 
+    filename: str | None = None,
+    round_name: str | None = None,
+    phase_name: str | None = None
 ):
     """
     Generates a box plot of a metric for each tenant.
@@ -588,50 +571,49 @@ def plot_descriptive_stats_boxplot(
     set_publication_style()
     fig, ax = plt.subplots(figsize=VISUALIZATION_CONFIG.get('boxplot_figsize', (10, 7)))
 
-    display_metric_name = METRIC_DISPLAY_NAMES.get(metric_name, metric_name)
+    display_metric_name = METRIC_DISPLAY_NAMES.get(metric_name, str(metric_name))
     plot_title = f"{title}"
     if phase_name:
-        plot_title += f" - Phase: {PHASE_DISPLAY_NAMES.get(phase_name, phase_name)}"
+        plot_title += f" - Phase: {PHASE_DISPLAY_NAMES.get(phase_name, str(phase_name))}"
     if round_name:
         plot_title += f" (Round: {round_name})"
     
     ax.set_title(plot_title, fontsize=VISUALIZATION_CONFIG.get('title_size', 16))
+    unique_tenants = [] # Initialize unique_tenants
 
     if 'tenant' in data_df.columns and data_df['tenant'].nunique() > 0:
         unique_tenants = sorted(data_df['tenant'].unique())
-        # Create a list of colors for the palette argument when hue is used
-        palette_list = [TENANT_COLORS.get(tenant, '#333333') for tenant in unique_tenants]
+        palette_list = [TENANT_COLORS.get(str(tenant), '#333333') for tenant in unique_tenants]
         sns.boxplot(x='tenant', y=value_column, hue='tenant', data=data_df, ax=ax, 
-                    palette=palette_list, hue_order=unique_tenants, legend=False) # MODIFIED
+                    palette=palette_list, hue_order=unique_tenants, legend=False) 
         ax.set_xlabel("Tenant")
     else:
-        # No tenant column or single/no tenants for distinct boxes by tenant
         default_palette_str = VISUALIZATION_CONFIG.get('boxplot_palette', 'Set2')
+        # Ensure palette is a string or a compatible type for seaborn
+        current_palette = str(default_palette_str) if not isinstance(default_palette_str, (list, dict)) else default_palette_str
         if 'tenant' in data_df.columns and data_df['tenant'].nunique() == 1:
-            # Plotting a single tenant's box, x-axis can still be 'tenant'
-            sns.boxplot(x='tenant', y=value_column, data=data_df, ax=ax, palette=default_palette_str)
+            sns.boxplot(x='tenant', y=value_column, data=data_df, ax=ax, palette=current_palette)
             ax.set_xlabel("Tenant")
-        else: # No 'tenant' column for x-axis, or it's not appropriate
-            sns.boxplot(y=value_column, data=data_df, ax=ax, palette=default_palette_str)
-            ax.set_xlabel("") # No specific x-label or a generic one
+        else: 
+            sns.boxplot(y=value_column, data=data_df, ax=ax, palette=current_palette)
+            ax.set_xlabel("") 
 
     ax.set_ylabel(f"{display_metric_name} ({value_column.capitalize()})")
     ax.tick_params(axis='x', rotation=45)
 
-    # Legend handling - this should work fine with legend=False in sns.boxplot
-    if 'tenant' in data_df.columns and data_df['tenant'].nunique() > 0 :
-        unique_tenants_for_legend = sorted(data_df['tenant'].unique())
-        handles = [plt.Rectangle((0,0),1,1, color=TENANT_COLORS.get(t, '#333333')) for t in unique_tenants_for_legend]
-        labels = unique_tenants_for_legend
+    if unique_tenants: # Check if unique_tenants is populated
+        handles = [Rectangle((0,0),1,1, color=TENANT_COLORS.get(str(t), '#333333')) for t in unique_tenants]
+        labels = [str(t) for t in unique_tenants]
         
-        current_legend = ax.get_legend()
-        if current_legend: # If seaborn made one despite legend=False (unlikely) or if one existed
-            current_legend.remove()
+        existing_legend = ax.get_legend()
+        if existing_legend:
+            existing_legend.remove()
 
-        ax.legend(handles, labels, title='Tenant', loc='best', 
-                  fontsize=VISUALIZATION_CONFIG.get('legend_size', 10))
-        if ax.get_legend():
-            plt.setp(ax.get_legend().get_title(), fontsize=VISUALIZATION_CONFIG.get('legend_title_size', 12))
+        new_legend = ax.legend(handles, labels, title='Tenant', loc='best', 
+                               fontsize=VISUALIZATION_CONFIG.get('legend_size', 10))
+        
+        if new_legend:
+            plt.setp(new_legend.get_title(), fontsize=VISUALIZATION_CONFIG.get('legend_title_size', 12))
 
     plt.tight_layout()
 
@@ -646,10 +628,10 @@ def plot_descriptive_stats_catplot_mean(
     metric_name: str, 
     value_column: str, # This is 'mean'
     title: str, 
-    output_dir: str, 
-    filename: str,
-    round_name: str = None,
-    phase_name: str = None,
+    output_dir: str | None = None, 
+    filename: str | None = None,
+    round_name: str | None = None,
+    phase_name: str | None = None,
     x_var: str = 'tenant', 
     hue_var: str = 'tenant'
 ):
@@ -739,11 +721,16 @@ def plot_descriptive_stats_catplot_mean(
 
     if hue_var and plot_data[hue_var].nunique() > 0 : # Show legend if there are hues
         # Create legend for hues
-        legend_handles = [plt.Rectangle((0,0),1,1, color=palette_to_use[i]) for i in range(len(unique_hues))]
-        ax.legend(legend_handles, unique_hues, title=METRIC_DISPLAY_NAMES.get(hue_var, hue_var), loc='best', 
-                  fontsize=VISUALIZATION_CONFIG.get('legend_size', 10),
-                  title_fontsize=VISUALIZATION_CONFIG.get('legend_title_size', 12))
-    
+        if palette_to_use: # Ensure palette_to_use is not None
+            legend_handles = [Rectangle((0,0),1,1, color=palette_to_use[i]) for i in range(len(unique_hues))]
+            ax.legend(legend_handles, unique_hues, title=METRIC_DISPLAY_NAMES.get(hue_var, hue_var), loc='best', 
+                      fontsize=VISUALIZATION_CONFIG.get('legend_size', 10),
+                      title_fontsize=VISUALIZATION_CONFIG.get('legend_title_size', 12))
+        else:
+            # Fallback or warning if palette_to_use is None but legend is expected
+            print(f"Warning: palette_to_use is None for catplot '{title}'. Legend may be incorrect.")
+            ax.legend(title=METRIC_DISPLAY_NAMES.get(hue_var, hue_var), loc='best') 
+
     ax.grid(True, linestyle='--', alpha=0.7)
     plt.xticks(rotation=45, ha="right")
     plt.tight_layout()
@@ -760,3 +747,541 @@ def plot_descriptive_stats_catplot_mean(
     
     plt.close(fig)
     return fig
+
+def plot_descriptive_stats_histogram(
+    data_df: pd.DataFrame, 
+    metric_name: str, 
+    value_column: str, 
+    title: str, 
+    output_dir: str | None = None, 
+    filename: str | None = None,
+    round_name: str | None = None,
+    phase_name: str | None = None,
+    bins: int = 30
+):
+    """
+    Generates a histogram of a metric for each tenant, with optional KDE overlay.
+    """
+    set_publication_style()
+    fig, ax = plt.subplots(figsize=VISUALIZATION_CONFIG.get('histogram_figsize', (10, 6)))
+
+    display_metric_name = METRIC_DISPLAY_NAMES.get(metric_name, metric_name)
+    plot_title = f"{title}"
+    if phase_name:
+        plot_title += f" - Phase: {PHASE_DISPLAY_NAMES.get(phase_name, phase_name)}"
+    if round_name:
+        plot_title += f" (Round: {round_name})"
+
+    ax.set_title(plot_title, fontsize=VISUALIZATION_CONFIG.get('title_size', 16))
+
+    time_col = 'experiment_elapsed_seconds' if 'experiment_elapsed_seconds' in data_df.columns else data_df.index.name
+
+    if 'tenant' in data_df.columns and data_df['tenant'].nunique() > 0:
+        unique_tenants = sorted(data_df['tenant'].unique())
+        for tenant in unique_tenants:
+            tenant_df = data_df[data_df['tenant'] == tenant]
+            if not tenant_df.empty:
+                sns.histplot(tenant_df, x=value_column, bins=bins, ax=ax, 
+                             label=str(tenant), color=TENANT_COLORS.get(str(tenant), '#333333'),
+                             kde=True, stat="density", common_norm=False, 
+                             element="step", linewidth=2, alpha=0.7)
+        # Position legend automatically for best location
+        ax.legend(title='Tenant', loc='best', 
+                  fontsize=VISUALIZATION_CONFIG.get('legend_size', 10)) 
+        legend = ax.get_legend()
+        if legend: # Check if legend exists
+            plt.setp(legend.get_title(), fontsize=VISUALIZATION_CONFIG.get('legend_title_size', 12))
+    else:
+        # Plot without tenant breakdown
+        sns.histplot(data_df, x=value_column, bins=bins, ax=ax, 
+                     kde=True, stat="density", common_norm=False, 
+                     element="step", linewidth=2, alpha=0.7)
+
+    ax.set_xlabel(f"{display_metric_name} ({value_column.capitalize()})", fontsize=VISUALIZATION_CONFIG.get('label_size', 12))
+    ax.set_ylabel('Density', fontsize=VISUALIZATION_CONFIG.get('label_size', 12))
+    ax.tick_params(axis='both', which='major', labelsize=VISUALIZATION_CONFIG.get('tick_size', 10))
+    ax.grid(bool(VISUALIZATION_CONFIG.get('grid_enabled', True)), # Cast to bool
+            linestyle=VISUALIZATION_CONFIG.get('grid_linestyle', '--'), 
+            alpha=VISUALIZATION_CONFIG.get('grid_alpha', 0.7))
+
+    plt.tight_layout()
+
+    if output_dir and filename:
+        save_figure(fig, output_dir, filename)
+        print(f"Descriptive stats histogram saved to {os.path.join(output_dir, filename)}")
+    plt.close(fig)
+    return fig
+
+def plot_histogram_with_kde(
+    data_series: pd.Series, 
+    title: str, 
+    xlabel: str, 
+    output_dir: str | None = None, 
+    filename: str | None = None, 
+    bins: int = 30, 
+    color: str = 'skyblue', 
+    kde_color: str = 'red',
+    round_name: str | None = None,
+    phase_name: str | None = None
+):
+    """
+    Generates a histogram with an optional KDE overlay for a given data series.
+    """
+    set_publication_style()
+    fig, ax = plt.subplots(figsize=VISUALIZATION_CONFIG.get('histogram_figsize', (10, 6)))
+
+    sns.histplot(data_series, bins=bins, ax=ax, color=color, kde=False, stat="density", 
+                 element="step", linewidth=2, alpha=0.7)
+
+    # Overlay KDE if requested
+    if VISUALIZATION_CONFIG.get('kde_enabled', True):
+        sns.kdeplot(data_series, ax=ax, color=kde_color, linewidth=2.5, alpha=0.8, label='KDE')
+
+    ax.set_title(title, fontsize=VISUALIZATION_CONFIG.get('title_size', 16))
+    ax.set_xlabel(xlabel, fontsize=VISUALIZATION_CONFIG.get('label_size', 12))
+    ax.set_ylabel('Density', fontsize=VISUALIZATION_CONFIG.get('label_size', 12))
+    ax.tick_params(axis='both', which='major', labelsize=VISUALIZATION_CONFIG.get('tick_size', 10))
+    ax.grid(bool(VISUALIZATION_CONFIG.get('grid_enabled', True)), # Cast to bool
+            linestyle=VISUALIZATION_CONFIG.get('grid_linestyle', '--'), 
+            alpha=VISUALIZATION_CONFIG.get('grid_alpha', 0.7))
+
+    plt.tight_layout()
+
+    if output_dir and filename:
+        save_figure(fig, output_dir, filename)
+        print(f"Histogram with KDE saved to {os.path.join(output_dir, filename)}")
+    plt.close(fig)
+    return fig
+
+def plot_pca_scree_plot(
+    explained_variance_ratio: np.ndarray, 
+    cumulative_variance_ratio: np.ndarray, 
+    output_dir: str | None = None, 
+    filename: str | None = None, 
+    title: str = 'Scree Plot for PCA'
+):
+    """
+    Generates a Scree Plot for PCA, showing explained variance by each component.
+
+    Args:
+        explained_variance_ratio (np.ndarray): Array of explained variance ratio for each PC.
+        cumulative_variance_ratio (np.ndarray): Array of cumulative explained variance ratio.
+        title (str): Title of the plot.
+        output_dir (str): Directory to save the plot.
+        filename (str): Filename for the saved plot.
+    """
+    set_publication_style()
+    fig, ax1 = plt.subplots(figsize=VISUALIZATION_CONFIG.get('scree_plot_figsize', (10, 7)))
+
+    num_components = len(explained_variance_ratio)
+    pc_labels = [f'PC{i+1}' for i in range(num_components)]
+
+    # Bar plot for individual explained variance
+    color_bar = VISUALIZATION_CONFIG.get('scree_bar_color', 'steelblue')
+    ax1.bar(pc_labels, explained_variance_ratio, alpha=0.7, color=color_bar, label='Individual Explained Variance')
+    ax1.set_xlabel('Principal Component', fontsize=VISUALIZATION_CONFIG.get('label_size', 14))
+    ax1.set_ylabel('Explained Variance Ratio', fontsize=VISUALIZATION_CONFIG.get('label_size', 14), color=color_bar)
+    ax1.tick_params(axis='y', labelcolor=color_bar)
+    ax1.tick_params(axis='x', rotation=45)
+
+    # Line plot for cumulative explained variance on a secondary y-axis
+    ax2 = ax1.twinx()
+    color_line = VISUALIZATION_CONFIG.get('scree_line_color', 'darkred')
+    ax2.plot(pc_labels, cumulative_variance_ratio, color=color_line, marker='o', linestyle='-', linewidth=2, label='Cumulative Explained Variance')
+    ax2.set_ylabel('Cumulative Explained Variance Ratio', fontsize=VISUALIZATION_CONFIG.get('label_size', 14), color=color_line)
+    ax2.tick_params(axis='y', labelcolor=color_line)
+    ax2.set_ylim(0, 1.05) # Ensure y-axis for cumulative goes up to just above 1.0
+
+    # Add a horizontal line at 0.9 or 0.95 for reference (common thresholds)
+    threshold_values = VISUALIZATION_CONFIG.get('scree_variance_threshold_lines', [0.9, 0.95])
+    if not isinstance(threshold_values, list):
+        threshold_values = [threshold_values] # Ensure it's a list
+
+    for thresh in threshold_values:
+        if isinstance(thresh, (int, float)) and cumulative_variance_ratio.max() >= thresh:
+            ax2.axhline(y=thresh, color='grey', linestyle=':', linewidth=1, label=f'{thresh*100:.0f}% Variance Threshold')
+
+    fig.suptitle(title, fontsize=VISUALIZATION_CONFIG.get('title_size', 16))
+    
+    # Combine legends from both axes
+    lines, labels = ax1.get_legend_handles_labels()
+    lines2, labels2 = ax2.get_legend_handles_labels()
+    ax2.legend(lines + lines2, labels + labels2, loc='center right', fontsize=VISUALIZATION_CONFIG.get('legend_size', 10))
+
+    plt.tight_layout(rect=[0, 0, 1, 0.96]) # Adjust layout to make space for suptitle
+
+    if output_dir and filename:
+        if not os.path.exists(output_dir):
+            os.makedirs(output_dir)
+        try:
+            save_figure(fig, output_dir, filename, dpi=VISUALIZATION_CONFIG.get('dpi', 300))
+            print(f"Scree plot saved to {os.path.join(output_dir, filename)}")
+        except Exception as e:
+            print(f"Error saving scree plot to {os.path.join(output_dir, filename)}: {e}")
+    
+    plt.close(fig)
+    return fig
+
+def plot_pca_loadings_heatmap(
+    loadings_df: pd.DataFrame, 
+    title: str = 'PCA Component Loadings', 
+    output_dir: str | None = None, 
+    filename: str | None = None, 
+    cmap: str = 'viridis'
+):
+    """
+    Generates a heatmap of PCA component loadings.
+
+    Args:
+        loadings_df (pd.DataFrame): DataFrame with PCA loadings. 
+                                     Expected index: principal components, columns: features.
+        title (str): The title of the heatmap.
+        output_dir (str, optional): Directory to save the plot. If None, plot is not saved.
+        filename (str, optional): Filename for the saved plot. If None, a default is generated.
+        cmap (str): Colormap for the heatmap.
+    """
+    set_publication_style()
+    
+    fig, ax = plt.subplots(figsize=VISUALIZATION_CONFIG.get('heatmap_figsize', (10, 8)))
+    sns.heatmap(loadings_df, annot=True, fmt=".2f", cmap=cmap, center=0, linewidths=.5, 
+                cbar_kws={'label': 'Loading Value'}, ax=ax)
+    ax.set_title(title, fontsize=VISUALIZATION_CONFIG.get('title_size', 16))
+    plt.xticks(rotation=45, ha='right')
+    plt.yticks(rotation=0)
+    plt.tight_layout()
+
+    if output_dir and filename:
+        if not os.path.exists(output_dir):
+            os.makedirs(output_dir)
+        try:
+            save_figure(fig, output_dir, filename, dpi=VISUALIZATION_CONFIG.get('dpi', 300))
+            print(f"PCA loadings heatmap saved to {os.path.join(output_dir, filename)}")
+        except Exception as e:
+            print(f"Error saving PCA loadings heatmap to {os.path.join(output_dir, filename)}: {e}")
+    
+    return fig
+
+def plot_pca_score_plot(
+    pca_scores: pd.DataFrame, 
+    pc_x: int = 0, 
+    pc_y: int = 1, 
+    title: str = 'PCA Score Plot', 
+    output_dir: str | None = None, 
+    filename: str | None = None,
+    hue_data: pd.Series | None = None, 
+    palette: str | dict | None = None 
+):
+    set_publication_style()
+    fig, ax = plt.subplots(figsize=VISUALIZATION_CONFIG.get('scatter_figsize', (8, 8)))
+
+    pc_x_values = pca_scores.iloc[:, pc_x].values
+    pc_y_values = pca_scores.iloc[:, pc_y].values
+
+    var_pc_x = np.var(pc_x_values, ddof=1) if len(pc_x_values) > 1 else 0.0
+    var_pc_y = np.var(pc_y_values, ddof=1) if len(pc_y_values) > 1 else 0.0
+    
+    var_pc_x = float(var_pc_x)
+    var_pc_y = float(var_pc_y)
+
+    sum_of_plot_variances = var_pc_x + var_pc_y
+
+    if sum_of_plot_variances > 1e-9:
+        percent_var_x = (var_pc_x / sum_of_plot_variances) * 100
+        percent_var_y = (var_pc_y / sum_of_plot_variances) * 100
+        ax.set_xlabel(f'PC{pc_x+1} ({percent_var_x:.1f}% of plot variance)', fontsize=VISUALIZATION_CONFIG.get('label_size', 12))
+        ax.set_ylabel(f'PC{pc_y+1} ({percent_var_y:.1f}% of plot variance)', fontsize=VISUALIZATION_CONFIG.get('label_size', 12))
+    else:
+        ax.set_xlabel(f'PC{pc_x+1}', fontsize=VISUALIZATION_CONFIG.get('label_size', 12))
+        ax.set_ylabel(f'PC{pc_y+1}', fontsize=VISUALIZATION_CONFIG.get('label_size', 12))
+
+    scatter_kwargs = {
+        's': VISUALIZATION_CONFIG.get('scatter_marker_size', 50),
+        'alpha': VISUALIZATION_CONFIG.get('scatter_marker_alpha', 0.7),
+        'edgecolor': VISUALIZATION_CONFIG.get('scatter_marker_edgecolor', 'k'),
+        'linewidth': VISUALIZATION_CONFIG.get('scatter_marker_linewidth', 0.5)
+    }
+    
+    legend_title = 'Category' # Default legend title
+    aligned_hue_data = None # Initialize aligned_hue_data
+
+    if hue_data is not None and not hue_data.empty:
+        aligned_hue_data = hue_data.reset_index(drop=True) if isinstance(hue_data, pd.Series) else hue_data
+        
+        if len(aligned_hue_data) == len(pca_scores):
+            if isinstance(hue_data, pd.Series) and hasattr(hue_data, 'name') and hue_data.name:
+                legend_title = str(hue_data.name)
+
+            if palette:
+                scatter_kwargs['hue'] = aligned_hue_data
+                scatter_kwargs['palette'] = palette
+            elif isinstance(aligned_hue_data, pd.Series) and all(item in TENANT_COLORS for item in aligned_hue_data.unique()):
+                scatter_kwargs['c'] = aligned_hue_data.map(TENANT_COLORS)
+            else: 
+                scatter_kwargs['hue'] = aligned_hue_data 
+        else:
+            print(f"Warning: hue_data length ({len(aligned_hue_data)}) does not match pca_scores length ({len(pca_scores)}). Plotting without hue.")
+            aligned_hue_data = None # Reset if not usable
+
+    sns.scatterplot(x=pca_scores.iloc[:, pc_x], y=pca_scores.iloc[:, pc_y], ax=ax, **scatter_kwargs)
+    ax.set_title(title, fontsize=VISUALIZATION_CONFIG.get('title_size', 16))
+    
+    if aligned_hue_data is not None: # Check if aligned_hue_data was successfully set
+        if 'hue' in scatter_kwargs:
+            current_legend = ax.get_legend()
+            if current_legend:
+                current_legend.set_title(legend_title)
+        elif 'c' in scatter_kwargs and isinstance(aligned_hue_data, pd.Series):
+            unique_hues = sorted(aligned_hue_data.unique())
+            handles = [Line2D([0], [0], marker='o', color='w', label=str(h),
+                              markerfacecolor=TENANT_COLORS.get(str(h), '#333333'), 
+                              markersize=VISUALIZATION_CONFIG.get('legend_marker_size', 8)) 
+                       for h in unique_hues if str(h) in TENANT_COLORS]
+            if handles:
+                 ax.legend(handles=handles, title=legend_title, 
+                           loc='best', fontsize=VISUALIZATION_CONFIG.get('legend_size', 10))
+
+    plt.tight_layout()
+
+    if output_dir and filename:
+        if not os.path.exists(output_dir):
+            os.makedirs(output_dir)
+        try:
+            save_figure(fig, output_dir, filename, dpi=VISUALIZATION_CONFIG.get('dpi', 300))
+            print(f"PCA score plot saved to {os.path.join(output_dir, filename)}")
+        except Exception as e:
+            print(f"Error saving PCA score plot to {os.path.join(output_dir, filename)}: {e}")
+    
+    plt.close(fig)
+    return fig
+
+def plot_ica_loadings_heatmap(
+    unmixing_matrix_df: pd.DataFrame, 
+    title: str = 'ICA Unmixing Matrix (Loadings)', 
+    output_dir: str | None = None, 
+    filename: str | None = None, 
+    cmap: str = 'cividis'
+):
+    """
+    Generates a heatmap of ICA unmixing matrix (loadings).
+
+    Args:
+        unmixing_matrix_df (pd.DataFrame): DataFrame with ICA unmixing matrix. 
+                                            Expected index: components, columns: features.
+        title (str): The title of the heatmap.
+        output_dir (str, optional): Directory to save the plot. If None, plot is not saved.
+        filename (str, optional): Filename for the saved plot. If None, a default is generated.
+        cmap (str): Colormap for the heatmap.
+    """
+    set_publication_style()
+    
+    fig, ax = plt.subplots(figsize=VISUALIZATION_CONFIG.get('heatmap_figsize', (10, 8)))
+    sns.heatmap(unmixing_matrix_df, annot=True, fmt=".2f", cmap=cmap, center=0, linewidths=.5, 
+                cbar_kws={'label': 'Loading Value'}, ax=ax)
+    ax.set_title(title, fontsize=VISUALIZATION_CONFIG.get('title_size', 16))
+    plt.xticks(rotation=45, ha='right')
+    plt.yticks(rotation=0)
+    plt.tight_layout()
+
+    if output_dir and filename:
+        if not os.path.exists(output_dir):
+            os.makedirs(output_dir)
+        try:
+            save_figure(fig, output_dir, filename, dpi=VISUALIZATION_CONFIG.get('dpi', 300))
+            print(f"ICA loadings heatmap saved to {os.path.join(output_dir, filename)}")
+        except Exception as e:
+            print(f"Error saving ICA loadings heatmap to {os.path.join(output_dir, filename)}: {e}")
+    
+    return fig
+
+def plot_ica_score_plot(
+    ica_scores: pd.DataFrame, 
+    ic_x: int = 0, 
+    ic_y: int = 1, 
+    title: str = 'ICA Score Plot', 
+    output_dir: str | None = None, 
+    filename: str | None = None,
+    hue_data: pd.Series | None = None, 
+    palette: str | dict | None = None
+):
+    set_publication_style()
+    fig, ax = plt.subplots(figsize=VISUALIZATION_CONFIG.get('scatter_figsize', (8, 8)))
+
+    ic_x_values = ica_scores.iloc[:, ic_x].values
+    ic_y_values = ica_scores.iloc[:, ic_y].values
+
+    var_ic_x = np.var(ic_x_values, ddof=1) if len(ic_x_values) > 1 else 0.0
+    var_ic_y = np.var(ic_y_values, ddof=1) if len(ic_y_values) > 1 else 0.0
+
+    var_ic_x = float(var_ic_x)
+    var_ic_y = float(var_ic_y)
+    
+    sum_of_plot_variances = var_ic_x + var_ic_y
+
+    if sum_of_plot_variances > 1e-9:
+        percent_var_x = (var_ic_x / sum_of_plot_variances) * 100
+        percent_var_y = (var_ic_y / sum_of_plot_variances) * 100
+        ax.set_xlabel(f'IC{ic_x+1} ({percent_var_x:.1f}% of plot variance)', fontsize=VISUALIZATION_CONFIG.get('label_size', 12))
+        ax.set_ylabel(f'IC{ic_y+1} ({percent_var_y:.1f}% of plot variance)', fontsize=VISUALIZATION_CONFIG.get('label_size', 12))
+    else:
+        ax.set_xlabel(f'IC{ic_x+1}', fontsize=VISUALIZATION_CONFIG.get('label_size', 12))
+        ax.set_ylabel(f'IC{ic_y+1}', fontsize=VISUALIZATION_CONFIG.get('label_size', 12))
+
+    scatter_kwargs = {
+        's': VISUALIZATION_CONFIG.get('scatter_marker_size', 50),
+        'alpha': VISUALIZATION_CONFIG.get('scatter_marker_alpha', 0.7),
+        'edgecolor': VISUALIZATION_CONFIG.get('scatter_marker_edgecolor', 'k'),
+        'linewidth': VISUALIZATION_CONFIG.get('scatter_marker_linewidth', 0.5)
+    }
+    
+    legend_title = 'Category' # Default legend title
+    aligned_hue_data = None # Initialize aligned_hue_data
+
+    if hue_data is not None and not hue_data.empty:
+        aligned_hue_data = hue_data.reset_index(drop=True) if isinstance(hue_data, pd.Series) else hue_data
+        if len(aligned_hue_data) == len(ica_scores):
+            if isinstance(hue_data, pd.Series) and hasattr(hue_data, 'name') and hue_data.name:
+                legend_title = str(hue_data.name)
+
+            if palette:
+                scatter_kwargs['hue'] = aligned_hue_data
+                scatter_kwargs['palette'] = palette
+            elif isinstance(aligned_hue_data, pd.Series) and all(item in TENANT_COLORS for item in aligned_hue_data.unique()):
+                scatter_kwargs['c'] = aligned_hue_data.map(TENANT_COLORS)
+            else:
+                scatter_kwargs['hue'] = aligned_hue_data
+        else:
+            print(f"Warning: hue_data length ({len(aligned_hue_data)}) does not match ica_scores length ({len(ica_scores)}). Plotting without hue.")
+            aligned_hue_data = None # Reset if not usable
+
+    sns.scatterplot(x=ica_scores.iloc[:, ic_x], y=ica_scores.iloc[:, ic_y], ax=ax, **scatter_kwargs)
+    ax.set_title(title, fontsize=VISUALIZATION_CONFIG.get('title_size', 16))
+
+    if aligned_hue_data is not None: # Check if aligned_hue_data was successfully set
+        if 'hue' in scatter_kwargs:
+            current_legend = ax.get_legend()
+            if current_legend:
+                current_legend.set_title(legend_title)
+        elif 'c' in scatter_kwargs and isinstance(aligned_hue_data, pd.Series):
+            unique_hues = sorted(aligned_hue_data.unique())
+            handles = [Line2D([0], [0], marker='o', color='w', label=str(h),
+                              markerfacecolor=TENANT_COLORS.get(str(h), '#333333'),
+                              markersize=VISUALIZATION_CONFIG.get('legend_marker_size', 8))
+                       for h in unique_hues if str(h) in TENANT_COLORS]
+            if handles:
+                ax.legend(handles=handles, title=legend_title,
+                          loc='best', fontsize=VISUALIZATION_CONFIG.get('legend_size', 10))
+
+    plt.tight_layout()
+
+    if output_dir and filename:
+        if not os.path.exists(output_dir):
+            os.makedirs(output_dir)
+        try:
+            save_figure(fig, output_dir, filename, dpi=VISUALIZATION_CONFIG.get('dpi', 300))
+            print(f"ICA score plot saved to {os.path.join(output_dir, filename)}")
+        except Exception as e:
+            print(f"Error saving ICA score plot to {os.path.join(output_dir, filename)}: {e}")
+    
+    plt.close(fig)
+    return fig
+
+def plot_correlation_scatter_matrix(df: pd.DataFrame, title: str = 'Correlation Scatter Matrix', output_dir: str | None = None, filename: str | None = None, hue_column: str | None = None):
+    set_publication_style()
+    if df.empty:
+        print(f"DataFrame is empty. Cannot generate scatter matrix for '{title}'.")
+        return None
+
+    # Select only numeric columns for the pairplot, otherwise it can fail or be very slow
+    numeric_df = df.select_dtypes(include=np.number)
+    if numeric_df.shape[1] < 2:
+        print(f"Not enough numeric columns ({numeric_df.shape[1]}) to generate a scatter matrix for '{title}'. Need at least 2.")
+        return None
+    
+    # If hue_column is specified and exists, add it back to numeric_df for coloring
+    # Ensure hue_column data is not accidentally converted/dropped if it was non-numeric
+    final_df_for_plot = numeric_df
+    if hue_column and hue_column in df.columns:
+        final_df_for_plot = pd.concat([numeric_df, df[hue_column]], axis=1)
+        # If hue_column was numeric and already in numeric_df, it might be duplicated.
+        # sns.pairplot handles duplicated column names by appending _x, _y, so it should be fine.
+        # Or, ensure it's not duplicated if it was already numeric:
+        if hue_column in numeric_df.columns and df[hue_column].dtype == numeric_df[hue_column].dtype:
+             # it was already there, no need to concat again, just use numeric_df and specify hue_column
+             final_df_for_plot = numeric_df
+        else: # it was not numeric or was dropped, so concat is needed.
+             final_df_for_plot = pd.concat([numeric_df, df[hue_column]], axis=1)
+
+    # Ensure scatter_matrix_figsize is a tuple
+    figsize_config = VISUALIZATION_CONFIG.get('scatter_matrix_figsize', (12, 12))
+    if isinstance(figsize_config, int): # If it's an int, make it a tuple (e.g. (val, val))
+        figsize_tuple: tuple[float, float] | None = (float(figsize_config), float(figsize_config))
+    elif isinstance(figsize_config, Sequence) and len(figsize_config) == 2:
+        figsize_tuple = (float(figsize_config[0]), float(figsize_config[1]))
+    else: # Default or fallback
+        figsize_tuple = (12.0, 12.0)
+
+    plt.figure(figsize=figsize_tuple) # Control figure size
+    
+    pairplot_kwargs = {
+        'diag_kind': VISUALIZATION_CONFIG.get('scatter_matrix_diag_kind', 'kde'),
+        'plot_kws': {'alpha': VISUALIZATION_CONFIG.get('scatter_matrix_plot_alpha', 0.6),
+                     's': VISUALIZATION_CONFIG.get('scatter_matrix_plot_s', 20), 
+                     'edgecolor': VISUALIZATION_CONFIG.get('scatter_matrix_plot_edgecolor', 'k')},
+        'diag_kws': {'alpha': VISUALIZATION_CONFIG.get('scatter_matrix_diag_alpha', 0.7)}
+    }
+    
+    if hue_column and hue_column in final_df_for_plot.columns:
+        unique_hues = final_df_for_plot[hue_column].nunique()
+        if unique_hues <= VISUALIZATION_CONFIG.get('scatter_matrix_max_hue_categories', 10):
+            pairplot_kwargs['hue'] = hue_column
+            # Try to use TENANT_COLORS if hue_column is 'tenant' or similar and palette is not explicitly set
+            if hue_column.lower() in ['tenant', 'tenants'] and 'palette' not in pairplot_kwargs:
+                # Create a palette mapping for the unique values in the hue column
+                custom_palette = {str(val): TENANT_COLORS.get(str(val), '#333333') for val in final_df_for_plot[hue_column].unique()}
+                pairplot_kwargs['palette'] = custom_palette
+            elif 'palette' not in pairplot_kwargs: # Default palette if not tenant and no palette specified
+                pairplot_kwargs['palette'] = VISUALIZATION_CONFIG.get('scatter_matrix_palette', 'viridis')
+        else:
+            print(f"Warning: Too many unique values in hue_column '{hue_column}' ({unique_hues}). Plotting without hue.")
+            if 'hue' in pairplot_kwargs: del pairplot_kwargs['hue'] # remove hue if too many categories
+            hue_column = None # Reset hue_column so title doesn't mention it if not used
+
+    try:
+        g = sns.pairplot(final_df_for_plot, **pairplot_kwargs)
+    except Exception as e:
+        print(f"Error during sns.pairplot for '{title}': {e}. Skipping matrix.")
+        # Potentially close any open figures if pairplot partially drew something before erroring
+        if plt.gcf().get_axes(): # Check if current figure has axes
+            plt.close(plt.gcf())
+        return None
+
+    # Using a more robust way to set titles for each subplot
+    for i, row_ax in enumerate(g.axes):
+        for j, ax in enumerate(row_ax):
+            if i == j: # Diagonal plots
+                ax.set_title(final_df_for_plot.columns[i], fontsize=VISUALIZATION_CONFIG.get('scatter_matrix_subplot_title_size', 10))
+            # You can add more customization for off-diagonal titles if needed
+            # ax.xaxis.label.set_size(VISUALIZATION_CONFIG.get('tick_size', 10))
+            # ax.yaxis.label.set_size(VISUALIZATION_CONFIG.get('tick_size', 10))
+            ax.tick_params(labelsize=VISUALIZATION_CONFIG.get('scatter_matrix_tick_size', 8))
+
+
+    main_title = title
+    if hue_column and pairplot_kwargs.get('hue'): # Check if hue was actually used
+        main_title += f" (Colored by {hue_column})"
+    g.fig.suptitle(main_title, y=1.02, fontsize=VISUALIZATION_CONFIG.get('title_size', 16))
+    
+    plt.tight_layout(rect=[0, 0, 1, 0.98]) # Adjust layout to make space for suptitle
+
+    fig = g.fig # Get the figure object from the PairGrid
+
+    if output_dir and filename:
+        if not os.path.exists(output_dir):
+            os.makedirs(output_dir)
+        try:
+            save_figure(fig, output_dir, filename, dpi=VISUALIZATION_CONFIG.get('dpi', 300))
+            print(f"Scatter matrix saved to {os.path.join(output_dir, filename)}")
+        except Exception as e:
+            print(f"Error saving scatter matrix to {os.path.join(output_dir, filename)}: {e}")
+    
+    return fig # Return the figure object

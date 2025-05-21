@@ -3,7 +3,7 @@
 import pandas as pd
 import numpy as np
 
-def calculate_descriptive_statistics(data_df: pd.DataFrame, metric_column: str = 'value', groupby_cols: list = None):
+def calculate_descriptive_statistics(data_df: pd.DataFrame, metric_column: str = 'value', groupby_cols: list[str] | None = None):
     """
     Calcula estatísticas descritivas para uma determinada métrica, opcionalmente agrupada.
 
@@ -11,7 +11,7 @@ def calculate_descriptive_statistics(data_df: pd.DataFrame, metric_column: str =
         data_df (pd.DataFrame): DataFrame contendo os dados. 
                                 Espera colunas como 'tenant', 'round', 'phase', e a metric_column.
         metric_column (str): Nome da coluna contendo os valores da métrica a ser analisada.
-        groupby_cols (list): Lista de colunas para agrupar os dados antes de calcular as estatísticas. 
+        groupby_cols (list[str] | None): Lista de colunas para agrupar os dados antes de calcular as estatísticas.
                              Ex: ['round', 'phase', 'tenant'] ou ['round', 'tenant'] etc.
                              Se None, calcula para todo o DataFrame.
 
