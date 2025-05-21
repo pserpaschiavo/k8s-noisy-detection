@@ -63,6 +63,10 @@ def parse_arguments():
     # but adding for consistency in argument structure if variations arise.
     # For now, it's a simple flag to run it or not.
 
+    # Argument for analysis scope
+    parser.add_argument('--consolidated-analysis', action='store_true',
+                        help='Run analysis consolidated across all phases (old behavior). If not set, analysis will be per-phase.')
+
     return parser.parse_args()
 
 
@@ -121,12 +125,19 @@ def main():
     print(f"Saving results to: {args.output_dir}")
 
     # 1. Load data
+    # Determine if analysis is per-phase or consolidated based on the new argument
+    run_per_phase_analysis = not args.consolidated_analysis
+    if run_per_phase_analysis:
+        print("Data loading mode: Per-Phase")
+    else:
+        print("Data loading mode: Consolidated")
+
     all_metrics_data = load_experiment_data(
         experiment_dir=experiment_data_dir, # Corrected: data_dir to experiment_dir
         metrics=args.metrics,               # Corrected: specific_metrics to metrics
         tenants=args.tenants,               # Corrected: specific_tenants to tenants
-        rounds=args.rounds                  # Corrected: specific_rounds to rounds
-        # phases argument is missing, will use default (all phases)
+        rounds=args.rounds,                  # Corrected: specific_rounds to rounds
+        group_by_phase=run_per_phase_analysis # Pass the flag to the loader
     )
 
     if not all_metrics_data:
@@ -156,72 +167,112 @@ def main():
 
         for current_method in methods_to_run:
             print(f"\n  Processing with method: {current_method.upper()}")
-            for metric_name, rounds_data in all_metrics_data.items(): # rounds_data is a dict of DataFrames keyed by round name
+            for metric_name, rounds_or_phases_data in all_metrics_data.items(): 
                 print(f"  Processing metric: {metric_name}")
-                if not isinstance(rounds_data, dict):
-                    print(f"    Skipping metric {metric_name}: Expected a dictionary of round data, got {type(rounds_data)}.")
+                if not isinstance(rounds_or_phases_data, dict):
+                    print(f"    Skipping metric {metric_name}: Expected a dictionary of round/phase data, got {type(rounds_or_phases_data)}.")
                     continue
 
-                for round_name, metric_df_original in rounds_data.items():
-                    print(f"    Processing round: {round_name} for metric: {metric_name}")
-                    if not isinstance(metric_df_original, pd.DataFrame):
-                        print(f"      Skipping round {round_name} for metric {metric_name}: Expected a DataFrame, got {type(metric_df_original)}.")
-                        continue
-
-                    if metric_df_original.empty or 'value' not in metric_df_original.columns or 'tenant' not in metric_df_original.columns:
-                        print(f"      Skipping correlation for metric {metric_name}, round {round_name} due to missing data or columns.")
-                        continue
-                
-                    metric_df = metric_df_original.copy() # Work on a copy
-
-                    print(f"      Calculating correlation ({current_method}) for metric: {metric_name}, round: {round_name}")
-                
-                    try:
-                        # Ensure 'timestamp' is datetime and present
-                        if 'timestamp' not in metric_df.columns:
-                            print(f"      Skipping {metric_name}, round {round_name}: 'timestamp' column not found.")
+                for round_name, phases_or_metric_df in rounds_or_phases_data.items():
+                    if run_per_phase_analysis: # New: Loop through phases if group_by_phase was True
+                        if not isinstance(phases_or_metric_df, dict):
+                            print(f"    Skipping round {round_name} for metric {metric_name}: Expected a dictionary of phase data, got {type(phases_or_metric_df)}.")
                             continue
-                        if not pd.api.types.is_datetime64_any_dtype(metric_df['timestamp']):
-                            metric_df['timestamp'] = pd.to_datetime(metric_df['timestamp'], format='%Y%m%d_%H%M%S')
-                        
-                        if 'experiment_elapsed_seconds' not in metric_df.columns:
-                             metric_df_sorted = metric_df.sort_values(by=['timestamp'])
-                             min_timestamp_overall = metric_df_sorted['timestamp'].min()
-                             metric_df['experiment_elapsed_seconds'] = (metric_df['timestamp'] - min_timestamp_overall).dt.total_seconds()
-
-                        correlation_matrix_df = calculate_inter_tenant_correlation_per_metric(
-                            metric_df,
-                            method=current_method,
-                            time_col='timestamp' 
-                        )
-                        
-                        if correlation_matrix_df is not None and not correlation_matrix_df.empty:
-                            display_metric_name = METRIC_DISPLAY_NAMES.get(metric_name, metric_name)
-                            plot_filename = f"{metric_name}_{round_name}_{current_method}_correlation_heatmap.png"
-                            plot_title = f"Inter-Tenant Correlation ({current_method.capitalize()}): {display_metric_name} (Round: {round_name})"
+                        for phase_name, metric_df_original in phases_or_metric_df.items():
+                            print(f"    Processing round: {round_name}, phase: {phase_name} for metric: {metric_name}")
+                            # --- Start of per-phase processing logic (extracted and reused) ---
+                            if not isinstance(metric_df_original, pd.DataFrame):
+                                print(f"      Skipping round {round_name}, phase {phase_name} for metric {metric_name}: Expected a DataFrame, got {type(metric_df_original)}.")
+                                continue
+                            if metric_df_original.empty or 'value' not in metric_df_original.columns or 'tenant' not in metric_df_original.columns:
+                                print(f"      Skipping correlation for metric {metric_name}, round {round_name}, phase {phase_name} due to missing data or columns.")
+                                continue
                             
-                            fig = plot_correlation_heatmap(
-                                correlation_matrix_df,
-                                title=plot_title,
-                                output_dir=correlation_plots_dir, 
-                                filename=plot_filename 
+                            metric_df = metric_df_original.copy()
+                            print(f"      Calculating correlation ({current_method}) for metric: {metric_name}, round: {round_name}, phase: {phase_name}")
+                            try:
+                                if 'timestamp' not in metric_df.columns:
+                                    print(f"      Skipping {metric_name}, round {round_name}, phase {phase_name}: 'timestamp' column not found.")
+                                    continue
+                                if not pd.api.types.is_datetime64_any_dtype(metric_df['timestamp']):
+                                    metric_df['timestamp'] = pd.to_datetime(metric_df['timestamp'], format='%Y%m%d_%H%M%S')
+                                if 'experiment_elapsed_seconds' not in metric_df.columns:
+                                    metric_df_sorted = metric_df.sort_values(by=['timestamp'])
+                                    min_timestamp_overall = metric_df_sorted['timestamp'].min()
+                                    metric_df['experiment_elapsed_seconds'] = (metric_df['timestamp'] - min_timestamp_overall).dt.total_seconds()
+
+                                correlation_matrix_df = calculate_inter_tenant_correlation_per_metric(
+                                    metric_df, method=current_method, time_col='timestamp'
+                                )
+                                if correlation_matrix_df is not None and not correlation_matrix_df.empty:
+                                    display_metric_name = METRIC_DISPLAY_NAMES.get(metric_name, metric_name)
+                                    plot_filename = f"{metric_name}_{round_name}_{phase_name}_{current_method}_correlation_heatmap.png"
+                                    plot_title = f"Inter-Tenant Correlation ({current_method.capitalize()}): {display_metric_name} (Round: {round_name}, Phase: {phase_name})"
+                                    fig = plot_correlation_heatmap(
+                                        correlation_matrix_df, title=plot_title, output_dir=correlation_plots_dir, filename=plot_filename
+                                    )
+                                    if fig: 
+                                        print(f"      Correlation heatmap for {metric_name}, round {round_name}, phase {phase_name} ({current_method}) generated and saved.")
+                                        plt.close(fig) 
+                                    csv_filename_name_only = f"{metric_name}_{round_name}_{phase_name}_{current_method}_correlation_matrix.csv"
+                                    full_csv_path = os.path.join(correlation_tables_dir, csv_filename_name_only)
+                                    export_to_csv(correlation_matrix_df, full_csv_path)
+                                    print(f"      Correlation matrix for {metric_name}, round {round_name}, phase {phase_name} ({current_method}) saved to {full_csv_path}")
+                                else:
+                                    print(f"      Skipping plot/save for {metric_name}, round {round_name}, phase {phase_name} ({current_method}): Correlation matrix is empty or could not be calculated.")
+                            except Exception as e:
+                                print(f"      Error during correlation analysis for metric {metric_name}, round {round_name}, phase {phase_name} ({current_method}): {e}")
+                                import traceback
+                                traceback.print_exc()
+                            # --- End of per-phase processing logic ---
+                    else: # Original consolidated processing
+                        metric_df_original = phases_or_metric_df # In consolidated mode, this is the DataFrame
+                        print(f"    Processing round: {round_name} for metric: {metric_name} (Consolidated)")
+                        # --- Start of consolidated processing logic (similar to above but without phase) ---
+                        if not isinstance(metric_df_original, pd.DataFrame):
+                            print(f"      Skipping round {round_name} for metric {metric_name}: Expected a DataFrame, got {type(metric_df_original)}.")
+                            continue
+                        if metric_df_original.empty or 'value' not in metric_df_original.columns or 'tenant' not in metric_df_original.columns:
+                            print(f"      Skipping correlation for metric {metric_name}, round {round_name} due to missing data or columns.")
+                            continue
+                        
+                        metric_df = metric_df_original.copy()
+                        print(f"      Calculating correlation ({current_method}) for metric: {metric_name}, round: {round_name}")
+                        try:
+                            if 'timestamp' not in metric_df.columns:
+                                print(f"      Skipping {metric_name}, round {round_name}: 'timestamp' column not found.")
+                                continue
+                            if not pd.api.types.is_datetime64_any_dtype(metric_df['timestamp']):
+                                metric_df['timestamp'] = pd.to_datetime(metric_df['timestamp'], format='%Y%m%d_%H%M%S')
+                            if 'experiment_elapsed_seconds' not in metric_df.columns:
+                                metric_df_sorted = metric_df.sort_values(by=['timestamp'])
+                                min_timestamp_overall = metric_df_sorted['timestamp'].min()
+                                metric_df['experiment_elapsed_seconds'] = (metric_df['timestamp'] - min_timestamp_overall).dt.total_seconds()
+
+                            correlation_matrix_df = calculate_inter_tenant_correlation_per_metric(
+                                metric_df, method=current_method, time_col='timestamp'
                             )
-                            if fig: 
-                                print(f"      Correlation heatmap for {metric_name}, round {round_name} ({current_method}) generated and saved via plot function.")
-                                plt.close(fig) 
-                            
-                            csv_filename_name_only = f"{metric_name}_{round_name}_{current_method}_correlation_matrix.csv"
-                            # Construct the full path for the CSV file
-                            full_csv_path = os.path.join(correlation_tables_dir, csv_filename_name_only)
-                            export_to_csv(correlation_matrix_df, full_csv_path) # Default float_format='.2f' will be used
-                            print(f"      Correlation matrix for {metric_name}, round {round_name} ({current_method}) saved to {full_csv_path}")
-                        else:
-                            print(f"      Skipping plot/save for {metric_name}, round {round_name} ({current_method}): Correlation matrix is empty or could not be calculated.")
-
-                    except Exception as e:
-                        print(f"      Error during correlation analysis for metric {metric_name}, round {round_name} ({current_method}): {e}")
-                        import traceback
-                        traceback.print_exc()
+                            if correlation_matrix_df is not None and not correlation_matrix_df.empty:
+                                display_metric_name = METRIC_DISPLAY_NAMES.get(metric_name, metric_name)
+                                plot_filename = f"{metric_name}_{round_name}_{current_method}_correlation_heatmap.png"
+                                plot_title = f"Inter-Tenant Correlation ({current_method.capitalize()}): {display_metric_name} (Round: {round_name})"
+                                fig = plot_correlation_heatmap(
+                                    correlation_matrix_df, title=plot_title, output_dir=correlation_plots_dir, filename=plot_filename
+                                )
+                                if fig: 
+                                    print(f"      Correlation heatmap for {metric_name}, round {round_name} ({current_method}) generated and saved.")
+                                    plt.close(fig) 
+                                csv_filename_name_only = f"{metric_name}_{round_name}_{current_method}_correlation_matrix.csv"
+                                full_csv_path = os.path.join(correlation_tables_dir, csv_filename_name_only)
+                                export_to_csv(correlation_matrix_df, full_csv_path)
+                                print(f"      Correlation matrix for {metric_name}, round {round_name} ({current_method}) saved to {full_csv_path}")
+                            else:
+                                print(f"      Skipping plot/save for {metric_name}, round {round_name} ({current_method}): Correlation matrix is empty or could not be calculated.")
+                        except Exception as e:
+                            print(f"      Error during correlation analysis for metric {metric_name}, round {round_name} ({current_method}): {e}")
+                            import traceback
+                            traceback.print_exc()
+                        # --- End of consolidated processing logic ---
 
     # --- Covariance Analysis ---
     if args.run_covariance:
@@ -231,69 +282,112 @@ def main():
         covariance_tables_dir = os.path.join(tables_dir, 'covariance')
         os.makedirs(covariance_tables_dir, exist_ok=True)
 
-        for metric_name, rounds_data in all_metrics_data.items():
+        for metric_name, rounds_or_phases_data in all_metrics_data.items(): # Adjusted variable name
             print(f"  Processing metric: {metric_name}")
-            if not isinstance(rounds_data, dict):
-                print(f"    Skipping metric {metric_name}: Expected a dictionary of round data, got {type(rounds_data)}.")
+            if not isinstance(rounds_or_phases_data, dict):
+                print(f"    Skipping metric {metric_name}: Expected a dictionary of round/phase data, got {type(rounds_or_phases_data)}.")
                 continue
 
-            for round_name, metric_df_original in rounds_data.items():
-                print(f"    Processing round: {round_name} for metric: {metric_name}")
-                if not isinstance(metric_df_original, pd.DataFrame):
-                    print(f"      Skipping round {round_name} for metric {metric_name}: Expected a DataFrame, got {type(metric_df_original)}.")
-                    continue
-                
-                if metric_df_original.empty or 'value' not in metric_df_original.columns or 'tenant' not in metric_df_original.columns:
-                    print(f"      Skipping covariance for metric {metric_name}, round {round_name} due to missing data or columns.")
-                    continue
-
-                metric_df = metric_df_original.copy()
-
-                print(f"      Calculating covariance for metric: {metric_name}, round: {round_name}")
-                try:
-                    if 'timestamp' not in metric_df.columns:
-                        print(f"      Skipping {metric_name}, round {round_name}: 'timestamp' column not found.")
+            for round_name, phases_or_metric_df in rounds_or_phases_data.items(): # Adjusted variable name
+                if run_per_phase_analysis: # New: Loop through phases
+                    if not isinstance(phases_or_metric_df, dict):
+                        print(f"    Skipping round {round_name} for metric {metric_name}: Expected a dictionary of phase data, got {type(phases_or_metric_df)}.")
                         continue
-                    if not pd.api.types.is_datetime64_any_dtype(metric_df['timestamp']):
-                        metric_df['timestamp'] = pd.to_datetime(metric_df['timestamp'], format='%Y%m%d_%H%M%S')
-                    
-                    if 'experiment_elapsed_seconds' not in metric_df.columns:
-                        metric_df_sorted = metric_df.sort_values(by=['timestamp'])
-                        min_timestamp_overall = metric_df_sorted['timestamp'].min()
-                        metric_df['experiment_elapsed_seconds'] = (metric_df['timestamp'] - min_timestamp_overall).dt.total_seconds()
-
-                    # Call the refactored covariance function
-                    covariance_matrix_df = calculate_inter_tenant_covariance_per_metric(
-                        metric_df,
-                        time_col='timestamp'
-                    )
-
-                    if covariance_matrix_df is not None and not covariance_matrix_df.empty:
-                        display_metric_name = METRIC_DISPLAY_NAMES.get(metric_name, metric_name)
+                    for phase_name, metric_df_original in phases_or_metric_df.items():
+                        print(f"    Processing round: {round_name}, phase: {phase_name} for metric: {metric_name}")
+                        # --- Start of per-phase covariance processing ---
+                        if not isinstance(metric_df_original, pd.DataFrame):
+                            print(f"      Skipping round {round_name}, phase {phase_name} for metric {metric_name}: Expected a DataFrame, got {type(metric_df_original)}.")
+                            continue
+                        if metric_df_original.empty or 'value' not in metric_df_original.columns or 'tenant' not in metric_df_original.columns:
+                            print(f"      Skipping covariance for metric {metric_name}, round {round_name}, phase {phase_name} due to missing data or columns.")
+                            continue
                         
-                        # Plotting (similar to correlation heatmap, but for covariance)
-                        plot_filename = f"{metric_name}_{round_name}_covariance_heatmap.png"
-                        plot_title = f"Inter-Tenant Covariance: {display_metric_name} (Round: {round_name})"
-                        fig = plot_covariance_heatmap( 
-                            covariance_matrix_df,
-                            title=plot_title,
-                            output_dir=covariance_plots_dir,
-                            filename=plot_filename
-                        )
-                        if fig:
-                            print(f"      Covariance heatmap for {metric_name}, round {round_name} generated and saved.")
-                            plt.close(fig)
+                        metric_df = metric_df_original.copy()
+                        print(f"      Calculating covariance for metric: {metric_name}, round: {round_name}, phase: {phase_name}")
+                        try:
+                            if 'timestamp' not in metric_df.columns:
+                                print(f"      Skipping {metric_name}, round {round_name}, phase {phase_name}: 'timestamp' column not found.")
+                                continue
+                            if not pd.api.types.is_datetime64_any_dtype(metric_df['timestamp']):
+                                metric_df['timestamp'] = pd.to_datetime(metric_df['timestamp'], format='%Y%m%d_%H%M%S')
+                            if 'experiment_elapsed_seconds' not in metric_df.columns:
+                                metric_df_sorted = metric_df.sort_values(by=['timestamp'])
+                                min_timestamp_overall = metric_df_sorted['timestamp'].min()
+                                metric_df['experiment_elapsed_seconds'] = (metric_df['timestamp'] - min_timestamp_overall).dt.total_seconds()
 
-                        csv_filename_name_only = f"{metric_name}_{round_name}_covariance_matrix.csv"
-                        full_csv_path = os.path.join(covariance_tables_dir, csv_filename_name_only)
-                        export_to_csv(covariance_matrix_df, full_csv_path)
-                        print(f"      Covariance matrix for {metric_name}, round {round_name} saved to {full_csv_path}")
-                    else:
-                        print(f"      Skipping save for {metric_name}, round {round_name}: Covariance matrix is empty or could not be calculated.")
-                except Exception as e:
-                    print(f"      Error during covariance analysis for metric {metric_name}, round {round_name}: {e}")
-                    import traceback
-                    traceback.print_exc()
+                            covariance_matrix_df = calculate_inter_tenant_covariance_per_metric(
+                                metric_df, time_col='timestamp'
+                            )
+                            if covariance_matrix_df is not None and not covariance_matrix_df.empty:
+                                display_metric_name = METRIC_DISPLAY_NAMES.get(metric_name, metric_name)
+                                plot_filename = f"{metric_name}_{round_name}_{phase_name}_covariance_heatmap.png"
+                                plot_title = f"Inter-Tenant Covariance: {display_metric_name} (Round: {round_name}, Phase: {phase_name})"
+                                fig = plot_covariance_heatmap(
+                                    covariance_matrix_df, title=plot_title, output_dir=covariance_plots_dir, filename=plot_filename
+                                )
+                                if fig:
+                                    print(f"      Covariance heatmap for {metric_name}, round {round_name}, phase {phase_name} generated and saved.")
+                                    plt.close(fig)
+                                csv_filename_name_only = f"{metric_name}_{round_name}_{phase_name}_covariance_matrix.csv"
+                                full_csv_path = os.path.join(covariance_tables_dir, csv_filename_name_only)
+                                export_to_csv(covariance_matrix_df, full_csv_path)
+                                print(f"      Covariance matrix for {metric_name}, round {round_name}, phase {phase_name} saved to {full_csv_path}")
+                            else:
+                                print(f"      Skipping save for {metric_name}, round {round_name}, phase {phase_name}: Covariance matrix is empty or could not be calculated.")
+                        except Exception as e:
+                            print(f"      Error during covariance analysis for metric {metric_name}, round {round_name}, phase {phase_name}: {e}")
+                            import traceback
+                            traceback.print_exc()
+                        # --- End of per-phase covariance processing ---
+                else: # Original consolidated processing
+                    metric_df_original = phases_or_metric_df # In consolidated mode, this is the DataFrame
+                    print(f"    Processing round: {round_name} for metric: {metric_name} (Consolidated)")
+                    # --- Start of consolidated covariance processing ---
+                    if not isinstance(metric_df_original, pd.DataFrame):
+                        print(f"      Skipping round {round_name} for metric {metric_name}: Expected a DataFrame, got {type(metric_df_original)}.")
+                        continue
+                    if metric_df_original.empty or 'value' not in metric_df_original.columns or 'tenant' not in metric_df_original.columns:
+                        print(f"      Skipping covariance for metric {metric_name}, round {round_name} due to missing data or columns.")
+                        continue
+
+                    metric_df = metric_df_original.copy()
+                    print(f"      Calculating covariance for metric: {metric_name}, round: {round_name}")
+                    try:
+                        if 'timestamp' not in metric_df.columns:
+                            print(f"      Skipping {metric_name}, round {round_name}: 'timestamp' column not found.")
+                            continue
+                        if not pd.api.types.is_datetime64_any_dtype(metric_df['timestamp']):
+                            metric_df['timestamp'] = pd.to_datetime(metric_df['timestamp'], format='%Y%m%d_%H%M%S')
+                        if 'experiment_elapsed_seconds' not in metric_df.columns:
+                            metric_df_sorted = metric_df.sort_values(by=['timestamp'])
+                            min_timestamp_overall = metric_df_sorted['timestamp'].min()
+                            metric_df['experiment_elapsed_seconds'] = (metric_df['timestamp'] - min_timestamp_overall).dt.total_seconds()
+
+                        covariance_matrix_df = calculate_inter_tenant_covariance_per_metric(
+                            metric_df, time_col='timestamp'
+                        )
+                        if covariance_matrix_df is not None and not covariance_matrix_df.empty:
+                            display_metric_name = METRIC_DISPLAY_NAMES.get(metric_name, metric_name)
+                            plot_filename = f"{metric_name}_{round_name}_covariance_heatmap.png"
+                            plot_title = f"Inter-Tenant Covariance: {display_metric_name} (Round: {round_name})"
+                            fig = plot_covariance_heatmap(
+                                covariance_matrix_df, title=plot_title, output_dir=covariance_plots_dir, filename=plot_filename
+                            )
+                            if fig:
+                                print(f"      Covariance heatmap for {metric_name}, round {round_name} generated and saved.")
+                                plt.close(fig)
+                            csv_filename_name_only = f"{metric_name}_{round_name}_covariance_matrix.csv"
+                            full_csv_path = os.path.join(covariance_tables_dir, csv_filename_name_only)
+                            export_to_csv(covariance_matrix_df, full_csv_path)
+                            print(f"      Covariance matrix for {metric_name}, round {round_name} saved to {full_csv_path}")
+                        else:
+                            print(f"      Skipping save for {metric_name}, round {round_name}: Covariance matrix is empty or could not be calculated.")
+                    except Exception as e:
+                        print(f"      Error during covariance analysis for metric {metric_name}, round {round_name}: {e}")
+                        import traceback
+                        traceback.print_exc()
+                    # --- End of consolidated covariance processing ---
 
     print("\nRefactored pipeline processing finished.")
 

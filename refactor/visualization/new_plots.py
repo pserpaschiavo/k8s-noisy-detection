@@ -73,8 +73,6 @@ def plot_covariance_heatmap(covariance_matrix, title='Covariance Heatmap', cmap=
     """
     set_publication_style()
     fig, ax = plt.subplots(figsize=VISUALIZATION_CONFIG.get('heatmap_figsize', (10, 8)))
-    # For covariance, we don't necessarily have a fixed range like -1 to 1 for correlations.
-    # We can let seaborn determine the range or set it based on data if needed.
     sns.heatmap(covariance_matrix, annot=True, fmt=".2f", cmap=cmap, center=0, linewidths=.5,
                 cbar_kws={'label': cbar_label}, ax=ax)
     ax.set_title(title, fontsize=VISUALIZATION_CONFIG.get('title_size', 16))
@@ -279,7 +277,7 @@ def plot_entropy_heatmap(entropy_results_df, metric_name, round_name, output_dir
 
     heatmap_data = entropy_results_df.pivot(index='tenant1', columns='tenant2', values='mutual_information')
     
-    all_tenants = sorted(list(set(entropy_results_df['tenant1']).union(set(entropy_results_df['tenant2'])))
+    all_tenants = sorted(list(set(entropy_results_df['tenant1']).union(set(entropy_results_df['tenant2']))))
     heatmap_data = heatmap_data.reindex(index=all_tenants, columns=all_tenants)
     
     for i in range(len(all_tenants)):
@@ -318,3 +316,61 @@ def plot_entropy_heatmap(entropy_results_df, metric_name, round_name, output_dir
             print(f"Error saving entropy heatmap to {os.path.join(output_dir, filename)}: {e}")
     
     return fig
+
+def plot_entropy_top_pairs_barplot(entropy_results_df, metric_name, round_name, output_dir=None, filename=None, top_n=10):
+    """
+    Generates a bar plot of the top N tenant pairs with the highest mutual information.
+    Adapted for the refactored structure.
+
+    Args:
+        entropy_results_df (pd.DataFrame): DataFrame with entropy results.
+                                           Expected columns: 'tenant1', 'tenant2', 'mutual_information'.
+        metric_name (str): The name of the metric for which entropy was calculated.
+        round_name (str): The name of the round/experiment.
+        output_dir (str, optional): Directory to save the plot. If None, plot is not saved.
+        filename (str, optional): Filename for the saved plot. If None, a default is generated.
+        top_n (int): Number of top pairs to display.
+    """
+    set_publication_style()
+    
+    if entropy_results_df.empty:
+        print(f"No entropy data to plot for top pairs barplot (Metric: {metric_name}, Round: {round_name}).")
+        return None # Return None if no plot generated
+
+    entropy_results_df['pair'] = entropy_results_df.apply(
+        lambda row: tuple(sorted((row['tenant1'], row['tenant2']))), axis=1
+    )
+    top_pairs = entropy_results_df.sort_values('mutual_information', ascending=False)\
+                                  .drop_duplicates(subset=['pair'])\
+                                  .head(top_n)
+    
+    if top_pairs.empty:
+        print(f"No entropy data to plot for top pairs barplot (Metric: {metric_name}, Round: {round_name}).")
+        return None # Return None if no plot generated
+
+    fig_bar, ax = plt.subplots(figsize=(VISUALIZATION_CONFIG.get('figure_width', 12), 
+                                     VISUALIZATION_CONFIG.get('figure_height', 7)))
+    
+    pair_labels = [f"{p[0]} - {p[1]}" for p in top_pairs['pair']]
+    
+    barplot = sns.barplot(x='mutual_information', y=pair_labels, data=top_pairs, palette='mako', orient='h', ax=ax)
+    
+    ax.set_xlabel('Mutual Information')
+    ax.set_ylabel('Tenant Pair')
+    ax.set_title(f'Top {top_n} Tenant Pairs by Mutual Information\nMetric: {metric_name} - Round: {round_name}')
+    
+    for index, value in enumerate(top_pairs['mutual_information']):
+        barplot.text(value, index, f'{value:.3f}', color='black', ha="left", va="center", fontsize=10)
+        
+    plt.tight_layout()
+    
+    if output_dir and filename:
+        if not os.path.exists(output_dir):
+            os.makedirs(output_dir)
+        try:
+            save_figure(fig_bar, output_dir, filename, dpi=VISUALIZATION_CONFIG.get('dpi', 300))
+            print(f"Entropy top pairs barplot saved to {os.path.join(output_dir, filename)}")
+        except Exception as e:
+            print(f"Error saving entropy top pairs barplot to {os.path.join(output_dir, filename)}: {e}")
+    
+    return fig_bar
