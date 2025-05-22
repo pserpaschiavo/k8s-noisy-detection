@@ -1,0 +1,5 @@
+value,phase_number,experiment_elapsed_seconds,experiment_elapsed_minutes
+0.10,-0.00,0.70,0.70
+0.99,0.00,-0.07,-0.07
+-0.00,0.95,0.22,-0.22
+-0.00,0.32,-0.67,0.67

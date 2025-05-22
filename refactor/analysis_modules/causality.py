@@ -157,10 +157,17 @@ def plot_sem_path_diagram(sem_results, title, output_dir, filename,
     
     # Fit stats text
     stats = sem_results['stats']
-    stats_text = (f"Model fit:\n"
-                 f"Chi-sq: {stats['chisq']:.2f} (p={stats['pvalue']:.3f})\n"
-                 f"CFI: {stats['cfi']:.3f}\n"
-                 f"RMSEA: {stats['rmsea']:.3f}")
+    stats_text = "Model fit:\n"
+    
+    # Add chi-square and p-value if available
+    if 'chisq' in stats and 'pvalue' in stats:
+        stats_text += f"Chi-sq: {stats['chisq']:.2f} (p={stats['pvalue']:.3f})\n"
+    
+    # Add CFI and RMSEA (usually available)
+    if 'cfi' in stats:
+        stats_text += f"CFI: {stats['cfi']:.3f}\n"
+    if 'rmsea' in stats:
+        stats_text += f"RMSEA: {stats['rmsea']:.3f}"
     
     plt.figtext(0.05, 0.05, stats_text, fontsize=10)
     
@@ -519,8 +526,8 @@ def calculate_pairwise_transfer_entropy(data_df, time_col=None, k=1, bins=None,
                     continue
                 
                 # Fill remaining NaNs with interpolation
-                source_series = pd.Series(source_series).interpolate().fillna(method='bfill').fillna(method='ffill').values
-                target_series = pd.Series(target_series).interpolate().fillna(method='bfill').fillna(method='ffill').values
+                source_series = pd.Series(source_series).interpolate().bfill().ffill().values
+                target_series = pd.Series(target_series).interpolate().bfill().ffill().values
                 
                 try:
                     # Calculate Transfer Entropy source -> target
@@ -537,6 +544,7 @@ def calculate_pairwise_transfer_entropy(data_df, time_col=None, k=1, bins=None,
                     }
                 except Exception as e:
                     print(f"Error calculating Transfer Entropy for {source_col} -> {target_col}: {e}")
+                    continue
     
     return te_results
 
@@ -897,6 +905,29 @@ def _create_consensus_matrix(results, variables, threshold):
                     method_count[source_idx, target_idx] += 1
                     method_count[target_idx, source_idx] += 1
     
+    # SEM contributions
+    if 'sem' in results and 'estimates' in results['sem']:
+        estimates = results['sem']['estimates']
+        # Filter for regression paths
+        reg_paths = estimates[estimates['op'] == '~']
+        if not reg_paths.empty:
+            for _, row in reg_paths.iterrows():
+                source = row['rval']  # Right-side variable (predictor)
+                target = row['lval']  # Left-side variable (dependent)
+                source_idx = var_to_idx.get(source)
+                target_idx = var_to_idx.get(target)
+                
+                if source_idx is not None and target_idx is not None:
+                    estimate = row['Estimate']
+                    p_value = row.get('p-value', 1.0)  # Default to 1.0 if p-value not available
+                    
+                    # Add to consensus if significant
+                    if p_value < 0.05 and abs(estimate) > threshold:
+                        consensus[source_idx, target_idx] += 1
+                    
+                    # Count this evaluation
+                    method_count[source_idx, target_idx] += 1
+    
     # Normalize by number of methods that evaluated each pair
     consensus_normalized = np.where(method_count > 0, consensus / method_count, 0)
     
@@ -910,13 +941,34 @@ def _plot_causal_comparison(results, output_dir):
     # Transfer Entropy
     if results['transfer_entropy']:
         # Create simplified TE matrix for visualization
-        # Implementation would depend on specific visualization needs
-        axes[0, 0].text(0.5, 0.5, "Transfer Entropy\nResults Available", 
-                       ha='center', va='center', fontsize=12)
+        all_vars = set()
+        for result in results['transfer_entropy'].values():
+            all_vars.add(result['source'])
+            all_vars.add(result['target'])
+        
+        all_vars = sorted(list(all_vars))
+        n_vars = len(all_vars)
+        var_to_idx = {var: i for i, var in enumerate(all_vars)}
+        
+        # Create TE matrix
+        te_matrix = np.zeros((n_vars, n_vars))
+        for result in results['transfer_entropy'].values():
+            source_idx = var_to_idx.get(result['source'])
+            target_idx = var_to_idx.get(result['target'])
+            if source_idx is not None and target_idx is not None:
+                te_matrix[source_idx, target_idx] = result['transfer_entropy']
+        
+        # Plot heatmap
+        sns.heatmap(te_matrix, cmap='viridis', ax=axes[0, 0], 
+                   xticklabels=all_vars, yticklabels=all_vars, 
+                   annot=True, fmt='.3f')
+        axes[0, 0].set_title("Transfer Entropy")
+        axes[0, 0].set_xlabel("Target (Effect)")
+        axes[0, 0].set_ylabel("Source (Cause)")
     else:
         axes[0, 0].text(0.5, 0.5, "Transfer Entropy\nNo Results", 
                        ha='center', va='center', fontsize=12)
-    axes[0, 0].set_title("Transfer Entropy")
+        axes[0, 0].set_title("Transfer Entropy")
     
     # Granger Causality
     if 'granger' in results and 'p_values' in results['granger']:
@@ -924,6 +976,8 @@ def _plot_causal_comparison(results, output_dir):
         sns.heatmap(-np.log10(p_values), cmap='viridis', ax=axes[0, 1], 
                    annot=True, fmt='.1f')
         axes[0, 1].set_title("Granger Causality (-log10 p-values)")
+        axes[0, 1].set_xlabel("Target (Effect)")
+        axes[0, 1].set_ylabel("Source (Cause)")
     else:
         axes[0, 1].text(0.5, 0.5, "Granger Causality\nNo Results", 
                        ha='center', va='center', fontsize=12)
@@ -931,18 +985,45 @@ def _plot_causal_comparison(results, output_dir):
     
     # CCM
     if results['ccm']:
-        axes[1, 0].text(0.5, 0.5, "CCM Results\nAvailable", 
-                       ha='center', va='center', fontsize=12)
+        # Summarize CCM results for visualization
+        all_pairs = list(results['ccm'].keys())
+        all_vars = set()
+        for source, target in all_pairs:
+            all_vars.add(source)
+            all_vars.add(target)
+        
+        all_vars = sorted(list(all_vars))
+        n_vars = len(all_vars)
+        var_to_idx = {var: i for i, var in enumerate(all_vars)}
+        
+        # Create CCM matrix (simplified - max prediction skill)
+        ccm_matrix = np.zeros((n_vars, n_vars))
+        for (source, target), ccm_df in results['ccm'].items():
+            if not ccm_df.empty:
+                source_idx = var_to_idx.get(source)
+                target_idx = var_to_idx.get(target)
+                if source_idx is not None and target_idx is not None:
+                    ccm_matrix[source_idx, target_idx] = ccm_df['prediction_skill'].max()
+        
+        # Plot heatmap
+        sns.heatmap(ccm_matrix, cmap='viridis', ax=axes[1, 0], 
+                   xticklabels=all_vars, yticklabels=all_vars, 
+                   annot=True, fmt='.3f')
+        axes[1, 0].set_title("Convergent Cross Mapping (Max Prediction Skill)")
+        axes[1, 0].set_xlabel("Target Series")
+        axes[1, 0].set_ylabel("Shadow Manifold")
     else:
         axes[1, 0].text(0.5, 0.5, "CCM\nNo Results", 
                        ha='center', va='center', fontsize=12)
-    axes[1, 0].set_title("Convergent Cross Mapping")
+        axes[1, 0].set_title("Convergent Cross Mapping")
     
     # Consensus
     if 'consensus' in results and not results['consensus'].empty:
         sns.heatmap(results['consensus'], cmap='viridis', ax=axes[1, 1], 
                    annot=True, fmt='.2f')
         axes[1, 1].set_title("Consensus Analysis")
+        axes[1, 1].set_xlabel("Target (Effect)")
+        axes[1, 1].set_ylabel("Source (Cause)")
     else:
         axes[1, 1].text(0.5, 0.5, "Consensus\nNo Results", 
                        ha='center', va='center', fontsize=12)
@@ -976,13 +1057,13 @@ def embed_time_series(time_series, E, tau):
     return embedded
 
 
-def find_nearest_neighbors(embedded_series, point_idx, k, exclude_self=True):
+def find_nearest_neighbors(embedded_series, query_point, k, exclude_self=True):
     """
     Find k nearest neighbors to a point in the embedded space.
     
     Args:
         embedded_series: array with embedded vectors
-        point_idx: index of the query point
+        query_point: the query point (either an index into embedded_series or a point vector)
         k: number of nearest neighbors to find
         exclude_self: whether to exclude the query point itself
         
@@ -994,13 +1075,19 @@ def find_nearest_neighbors(embedded_series, point_idx, k, exclude_self=True):
         k = len(embedded_series) - 1
         
     # Calculate Euclidean distances
-    point = embedded_series[point_idx]
+    if isinstance(query_point, (int, np.integer)):
+        # query_point is an index
+        point = embedded_series[query_point]
+    else:
+        # query_point is a vector
+        point = query_point
+        
     distances = np.sqrt(np.sum((embedded_series - point)**2, axis=1))
     
     # Sort distances and get indices
     sorted_indices = np.argsort(distances)
     
-    if exclude_self:
+    if exclude_self and distances[sorted_indices[0]] < 1e-10:
         # Remove self from neighbors (should be at index 0 with distance 0)
         sorted_indices = sorted_indices[1:k+1]
         sorted_distances = distances[sorted_indices]
@@ -1066,8 +1153,15 @@ def calculate_ccm(X, Y, E_range=None, tau=1, library_sizes=None, num_predictions
     if E_range is None:
         E_range = [2, 3, 4]
     
+    # Ensure E_range is compatible with data length
+    max_possible_E = (len(X) // 2) - 1
+    E_range = [E for E in E_range if E <= max_possible_E]
+    if not E_range:
+        E_range = [2]  # Default to minimum if all values are too large
+    
     if library_sizes is None:
-        max_library_size = len(X) - max(E_range)*tau
+        max_library_size = len(X) - max(E_range)*tau - 1
+        max_library_size = max(10, max_library_size)
         library_sizes = np.unique(np.round(np.linspace(10, max_library_size, 10)).astype(int))
     
     # Find best embedding dimension using simplex projection
@@ -1080,7 +1174,15 @@ def calculate_ccm(X, Y, E_range=None, tau=1, library_sizes=None, num_predictions
         
         # Create train/test split
         train_size = int(0.8 * len(embedded_X))
-        test_indices = np.random.choice(range(train_size, len(embedded_X)), min(50, len(embedded_X) - train_size), replace=False)
+        if train_size >= len(embedded_X):
+            train_size = len(embedded_X) - 1
+        
+        # Ensure we don't try to use more test points than available
+        max_test_points = min(50, len(embedded_X) - train_size)
+        if max_test_points <= 0:
+            continue
+            
+        test_indices = np.random.choice(range(train_size, len(embedded_X)), max_test_points, replace=False)
         
         # Make predictions
         predictions = []
@@ -1088,19 +1190,21 @@ def calculate_ccm(X, Y, E_range=None, tau=1, library_sizes=None, num_predictions
         
         for idx in test_indices:
             # Find nearest neighbors
-            nn_indices, nn_distances = find_nearest_neighbors(embedded_X[:train_size], idx, k=E+1)
+            nn_indices, nn_distances = find_nearest_neighbors(embedded_X[:train_size], embedded_X[idx], k=E+1)
             
-            # Predict next value
-            prediction = predict_using_neighbors(X[E*tau:], nn_indices, nn_distances)
-            predictions.append(prediction)
-            actuals.append(X[idx + E*tau])
+            # Predict next value - check index bounds
+            if idx + E*tau < len(X):
+                prediction = predict_using_neighbors(X[E*tau:], nn_indices, nn_distances)
+                predictions.append(prediction)
+                actuals.append(X[idx + E*tau])
         
         # Calculate prediction skill (correlation)
-        skill = np.corrcoef(predictions, actuals)[0, 1]
-        
-        if skill > best_skill:
-            best_skill = skill
-            best_E = E
+        if len(predictions) > 1:
+            skill = np.corrcoef(predictions, actuals)[0, 1]
+            
+            if skill > best_skill:
+                best_skill = skill
+                best_E = E
     
     results = []
     
@@ -1109,13 +1213,18 @@ def calculate_ccm(X, Y, E_range=None, tau=1, library_sizes=None, num_predictions
         # Embed Y series with best dimension
         embedded_Y = embed_time_series(Y, best_E, tau)
         
-        if lib_size > len(embedded_Y):
+        if lib_size >= len(embedded_Y):
             continue
         
+        # Ensure we don't predict beyond available data
+        predict_end = min(len(embedded_Y), lib_size + num_predictions)
+        if predict_end <= lib_size:
+            continue
+            
         # Randomly select prediction points
         predict_indices = np.random.choice(
-            range(lib_size, len(embedded_Y)), 
-            min(num_predictions, len(embedded_Y) - lib_size), 
+            range(lib_size, predict_end), 
+            min(num_predictions, predict_end - lib_size), 
             replace=False
         )
         
@@ -1125,13 +1234,18 @@ def calculate_ccm(X, Y, E_range=None, tau=1, library_sizes=None, num_predictions
         for p_idx in predict_indices:
             # Find nearest neighbors in Y manifold
             nn_indices, nn_distances = find_nearest_neighbors(
-                embedded_Y[:lib_size], p_idx, k=best_E+1
+                embedded_Y[:lib_size], embedded_Y[p_idx], k=best_E+1
             )
             
+            # Ensure we don't index outside available data
+            offset = (best_E-1)*tau
+            if p_idx + offset >= len(X):
+                continue
+                
             # Use those neighbors to predict X
-            prediction = predict_using_neighbors(X[(best_E-1)*tau:], nn_indices, nn_distances)
+            prediction = predict_using_neighbors(X[offset:], nn_indices, nn_distances)
             Y_predict_X.append(prediction)
-            X_actual.append(X[p_idx + (best_E-1)*tau])
+            X_actual.append(X[p_idx + offset])
         
         # Calculate prediction skill
         if len(Y_predict_X) > 2:  # Need at least 3 points for correlation
@@ -1147,13 +1261,18 @@ def calculate_ccm(X, Y, E_range=None, tau=1, library_sizes=None, num_predictions
         # Embed X series with best dimension
         embedded_X = embed_time_series(X, best_E, tau)
         
-        if lib_size > len(embedded_X):
+        if lib_size >= len(embedded_X):
             continue
         
+        # Ensure we don't predict beyond available data
+        predict_end = min(len(embedded_X), lib_size + num_predictions)
+        if predict_end <= lib_size:
+            continue
+            
         # Randomly select prediction points
         predict_indices = np.random.choice(
-            range(lib_size, len(embedded_X)),
-            min(num_predictions, len(embedded_X) - lib_size), 
+            range(lib_size, predict_end),
+            min(num_predictions, predict_end - lib_size), 
             replace=False
         )
         
@@ -1163,13 +1282,18 @@ def calculate_ccm(X, Y, E_range=None, tau=1, library_sizes=None, num_predictions
         for p_idx in predict_indices:
             # Find nearest neighbors in X manifold
             nn_indices, nn_distances = find_nearest_neighbors(
-                embedded_X[:lib_size], p_idx, k=best_E+1
+                embedded_X[:lib_size], embedded_X[p_idx], k=best_E+1
             )
             
+            # Ensure we don't index outside available data
+            offset = (best_E-1)*tau
+            if p_idx + offset >= len(Y):
+                continue
+                
             # Use those neighbors to predict Y
-            prediction = predict_using_neighbors(Y[(best_E-1)*tau:], nn_indices, nn_distances)
+            prediction = predict_using_neighbors(Y[offset:], nn_indices, nn_distances)
             X_predict_Y.append(prediction)
-            Y_actual.append(Y[p_idx + (best_E-1)*tau])
+            Y_actual.append(Y[p_idx + offset])
         
         # Calculate prediction skill
         if len(X_predict_Y) > 2:  # Need at least 3 points for correlation
@@ -1232,8 +1356,8 @@ def calculate_pairwise_ccm(data_df, time_col=None, E_range=None, tau=1,
                     continue
                 
                 # Fill remaining NaNs with interpolation
-                X = pd.Series(X).interpolate().fillna(method='bfill').fillna(method='ffill').values
-                Y = pd.Series(Y).interpolate().fillna(method='bfill').fillna(method='ffill').values
+                X = pd.Series(X).interpolate().bfill().ffill().values
+                Y = pd.Series(Y).interpolate().bfill().ffill().values
                 
                 try:
                     pair_results = calculate_ccm(
@@ -1404,7 +1528,7 @@ def summarize_ccm_results(ccm_results, min_library_size=30, significance_thresho
 
 def plot_ccm_causality_heatmap(causality_matrix, title, output_dir, filename,
                              metric_name=None, round_name=None, phase_name=None,
-                             figsize=(12, 10)):
+                             figsize=(12, 10), threshold=None):
     """
     Create a heatmap visualization of the causality matrix from CCM.
     
@@ -1417,6 +1541,9 @@ def plot_ccm_causality_heatmap(causality_matrix, title, output_dir, filename,
         round_name: Name of the round analyzed
         phase_name: Name of the phase analyzed
         figsize: Figure size as (width, height) tuple
+        threshold: Minimum causality strength to display (optional).
+                   If None or 0, only exact zeros are masked.
+                   If a value is given, values < threshold are also masked.
         
     Returns:
         Figure object
@@ -1430,9 +1557,11 @@ def plot_ccm_causality_heatmap(causality_matrix, title, output_dir, filename,
                 ha='center', va='center', fontsize=14)
         plt.axis('off')
     else:
-        # Mask cells with zero values
-        mask = (causality_matrix == 0)
-        
+        # Mask cells with zero values or values below threshold
+        mask = (causality_matrix == 0) 
+        if threshold is not None and threshold > 0: # Apply threshold if it's a positive value
+            mask = mask | (causality_matrix < threshold)
+            
         heatmap = sns.heatmap(causality_matrix, cmap='viridis', annot=True, 
                             fmt='.2f', linewidths=0.5, ax=ax, mask=mask)
         
@@ -1441,8 +1570,9 @@ def plot_ccm_causality_heatmap(causality_matrix, title, output_dir, filename,
         plt.xlabel('Effect', fontsize=12)
         
         # Add colorbar label
-        cbar = heatmap.collections[0].colorbar
-        cbar.set_label('Causal Strength (Prediction Skill)', rotation=270, labelpad=20)
+        if hasattr(heatmap, 'collections') and heatmap.collections: # Check if heatmap was actually drawn
+            cbar = heatmap.collections[0].colorbar
+            cbar.set_label('Causal Strength (Prediction Skill)', rotation=270, labelpad=20)
     
     # Title
     plt.title(title, fontsize=14)
@@ -1460,9 +1590,14 @@ def plot_ccm_causality_heatmap(causality_matrix, title, output_dir, filename,
         plt.figtext(0.5, 0.01, subtitle, ha='center', fontsize=12)
     
     # Add explanation
+    explanation_base = "Rows are causes, columns are effects. Values represent prediction skill from CCM.\n"
+    explanation_threshold = ""
+    if threshold is not None and threshold > 0:
+        explanation_threshold = f"Only relationships with strength >= {threshold:.2f} are shown.\n"
+    explanation_suffix = "Empty cells indicate no significant causal relationship was detected or below threshold."
+    
     plt.figtext(0.02, 0.02, 
-                "Rows are causes, columns are effects. Values represent prediction skill from CCM.\n"
-                "Empty cells indicate no significant causal relationship was detected.", 
+                explanation_base + explanation_threshold + explanation_suffix, 
                 fontsize=9)
     
     # Save figure
@@ -1515,27 +1650,67 @@ def perform_granger_causality_test(x, y, max_lag=5, criterion='aic'):
     try:
         gc_results = grangercausalitytests(data, maxlag=actual_max_lag, verbose=False)
         
-        # Extract p-values
-        p_values = {lag: result[0][criterion][1] for lag, result in gc_results.items()}
+        # Extract p-values and F-statistics, handling potential errors for specific lags
+        p_values = {}
+        f_statistics = {}
+        for lag, result_tuple in gc_results.items():
+            # result_tuple is like ({'ssr_ftest': (F, p, df_denom, df_num), ...}, [params...])
+            # We need to access the first element of the tuple, then the dictionary for the criterion
+            lag_results = result_tuple[0]
+            if criterion in lag_results:
+                # lag_results[criterion] is (statistic, p_value, critical_value)
+                # For F-test based criteria like 'ssr_ftest', 'lrtest', 'params_ftest'
+                # For information criteria like 'aic', 'bic', 'hqic', 'fpe', it's (value, None, None) or similar
+                # The p-value is the second element for test statistics.
+                # For AIC/BIC, the p-value is not directly given, we rely on the F-test p-value.
+                # Let's try to get the F-test p-value as the primary source.
+                if 'ssr_ftest' in lag_results:  # Sum of squared residuals F-test
+                    p_values[lag] = lag_results['ssr_ftest'][1]
+                    f_statistics[lag] = lag_results['ssr_ftest'][0]
+                elif criterion in lag_results and len(lag_results[criterion]) > 1 and lag_results[criterion][1] is not None:
+                    # Fallback if ssr_ftest is not present but criterion gives a p-value
+                    p_values[lag] = lag_results[criterion][1]
+                    f_statistics[lag] = lag_results[criterion][0]
+        
+        if not p_values:  # If no p-values could be extracted
+            print(f"Warning: Could not extract p-values for Granger test (x -> y) with criterion '{criterion}'. Available keys: {list(gc_results.keys()) if gc_results else 'None'}")
+            return {'error': f"No p-values found for criterion '{criterion}'", 'causal_direction': 'x -> y'}
         
         # Find smallest p-value and corresponding lag
         min_p_value = min(p_values.values())
         optimal_lag = min([lag for lag, p in p_values.items() if p == min_p_value])
         
-        # Get F-statistic
-        f_statistic = gc_results[optimal_lag][0][criterion][0]
+        # Get F-statistic for the optimal lag
+        f_statistic_val = f_statistics.get(optimal_lag, np.nan)
         
         result = {
             'p_value': min_p_value,
             'optimal_lag': optimal_lag,
-            'f_statistic': f_statistic,
+            'test_statistic': f_statistic_val, # Changed key name to 'test_statistic'
             'significant': min_p_value < 0.05,
             'causal_direction': 'x -> y',
             'p_values_by_lag': p_values
         }
+    except KeyError as e:
+        print(f"KeyError in Granger test (x -> y) processing results for criterion '{criterion}': {e}. Results structure: {gc_results if 'gc_results' in locals() else 'unavailable'}")
+        result = {
+            'error': f"KeyError: {e} for criterion '{criterion}'", 
+            'causal_direction': 'x -> y', 
+            'test_statistic': np.nan, # Ensure test_statistic is present
+            'p_value': np.nan, 
+            'optimal_lag': np.nan,
+            'significant': False
+        }
     except Exception as e:
         print(f"Error in Granger test (x -> y): {e}")
-        result = {'error': str(e), 'causal_direction': 'x -> y'}
+        result = {
+            'error': str(e), 
+            'causal_direction': 'x -> y', 
+            'test_statistic': np.nan, # Ensure test_statistic is present
+            'p_value': np.nan, 
+            'optimal_lag': np.nan,
+            'significant': False
+        }
     
     return result
 
@@ -1583,8 +1758,8 @@ def calculate_pairwise_granger_causality(data_df, time_col=None, max_lag=5, crit
                     continue
                 
                 # Fill remaining NaNs with interpolation
-                cause_series = cause_series.interpolate().fillna(method='bfill').fillna(method='ffill')
-                effect_series = effect_series.interpolate().fillna(method='bfill').fillna(method='ffill')
+                cause_series = cause_series.interpolate().bfill().ffill()
+                effect_series = effect_series.interpolate().bfill().ffill()
                 
                 try:
                     # Test cause_col -> effect_col
@@ -1597,7 +1772,7 @@ def calculate_pairwise_granger_causality(data_df, time_col=None, max_lag=5, crit
                     if 'error' not in result:
                         p_value_matrix[i, j] = result['p_value']
                         lag_matrix[i, j] = result['optimal_lag']
-                        f_stat_matrix[i, j] = result['f_statistic']
+                        f_stat_matrix[i, j] = result['test_statistic']
                 except Exception as e:
                     print(f"Error in Granger test {cause_col} -> {effect_col}: {e}")
     

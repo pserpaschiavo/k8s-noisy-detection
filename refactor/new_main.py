@@ -1616,7 +1616,7 @@ def main():
                             te_results = calculate_pairwise_transfer_entropy(
                                 numeric_df,
                                 time_col='experiment_elapsed_time' if 'experiment_elapsed_time' in numeric_df.columns else None,
-                                lag=args.te_lag
+                                k=args.te_lag,  # Corrected: Changed 'lag=args.te_lag' to 'k=args.te_lag'
                             )
                             
                             # Export results
@@ -1685,7 +1685,7 @@ def main():
                         te_results = calculate_pairwise_transfer_entropy(
                             numeric_df,
                             time_col='experiment_elapsed_time' if 'experiment_elapsed_time' in numeric_df.columns else None,
-                            lag=args.te_lag
+                            k=args.te_lag,  # Corrected: Changed 'lag=args.te_lag' to 'k=args.te_lag'
                         )
                         
                         # Export results
@@ -1919,7 +1919,7 @@ def main():
                             print(f"    Calculating Granger Causality for {metric_name}, round {round_name}, phase {phase_name}...")
                             
                             # Calculate pairwise Granger Causality
-                            granger_results = calculate_pairwise_granger_causality(
+                            granger_results_dict = calculate_pairwise_granger_causality(  # Renamed to avoid confusion
                                 numeric_df,
                                 time_col='experiment_elapsed_time' if 'experiment_elapsed_time' in numeric_df.columns else None,
                                 max_lag=args.granger_max_lag,
@@ -1928,21 +1928,33 @@ def main():
                             
                             # Export results
                             base_filename = f"{metric_name}_{round_name}_{phase_name}_granger"
-                            # Convert dictionary of results to DataFrame
-                            granger_df = pd.DataFrame({
-                                'source': [pair[0] for pair in granger_results],
-                                'target': [pair[1] for pair in granger_results],
-                                'test_statistic': [granger_results[pair]['test_statistic'] for pair in granger_results],
-                                'p_value': [granger_results[pair]['p_value'] for pair in granger_results],
-                                'optimal_lag': [granger_results[pair]['optimal_lag'] for pair in granger_results]
-                            })
+                            
+                            # Consolidate Granger results into a single DataFrame for export
+                            p_values_df = granger_results_dict['p_values']
+                            f_stats_df = granger_results_dict['f_statistics']  # This is what perform_granger_causality_test now calls test_statistic internally
+                            lags_df = granger_results_dict['optimal_lags']
+                            
+                            granger_export_list = []
+                            for cause_col in p_values_df.index:
+                                for effect_col in p_values_df.columns:
+                                    if cause_col != effect_col:  # Exclude self-causality from export list
+                                        granger_export_list.append({
+                                            'source': cause_col,
+                                            'target': effect_col,
+                                            'test_statistic': f_stats_df.loc[cause_col, effect_col],
+                                            'p_value': p_values_df.loc[cause_col, effect_col],
+                                            'optimal_lag': lags_df.loc[cause_col, effect_col],
+                                            'significant': p_values_df.loc[cause_col, effect_col] < 0.05  # Add significance flag
+                                        })
+                            
+                            granger_df = pd.DataFrame(granger_export_list)
                             export_to_csv(granger_df, os.path.join(granger_tables_dir, f"{base_filename}_results.csv"))
                             
                             # Create visualizations
                             # 1. Granger causality heatmap
                             try:
                                 plot_granger_causality_heatmap(
-                                    granger_results,
+                                    granger_results_dict,  # Pass the original dictionary
                                     title=f"Granger Causality - {metric_name}",
                                     output_dir=granger_plots_dir,
                                     filename=f"{base_filename}_heatmap.png",
@@ -1957,7 +1969,7 @@ def main():
                             # 2. Granger causality network
                             try:
                                 plot_granger_causality_network(
-                                    granger_results,
+                                    granger_results_dict,  # Pass the original dictionary
                                     title=f"Granger Causality Network - {metric_name}",
                                     output_dir=granger_plots_dir,
                                     filename=f"{base_filename}_network.png",
@@ -1994,7 +2006,7 @@ def main():
                         print(f"    Calculating Granger Causality for {metric_name}, round {round_name} (Consolidated)...")
                         
                         # Calculate pairwise Granger Causality
-                        granger_results = calculate_pairwise_granger_causality(
+                        granger_results_dict = calculate_pairwise_granger_causality(  # Renamed to avoid confusion
                             numeric_df,
                             time_col='experiment_elapsed_time' if 'experiment_elapsed_time' in numeric_df.columns else None,
                             max_lag=args.granger_max_lag,
@@ -2003,21 +2015,33 @@ def main():
                         
                         # Export results
                         base_filename = f"{metric_name}_{round_name}_consolidated_granger"
-                        # Convert dictionary of results to DataFrame
-                        granger_df = pd.DataFrame({
-                            'source': [pair[0] for pair in granger_results],
-                            'target': [pair[1] for pair in granger_results],
-                            'test_statistic': [granger_results[pair]['test_statistic'] for pair in granger_results],
-                            'p_value': [granger_results[pair]['p_value'] for pair in granger_results],
-                            'optimal_lag': [granger_results[pair]['optimal_lag'] for pair in granger_results]
-                        })
+                        
+                        # Consolidate Granger results into a single DataFrame for export
+                        p_values_df = granger_results_dict['p_values']
+                        f_stats_df = granger_results_dict['f_statistics']  # This is what perform_granger_causality_test now calls test_statistic internally
+                        lags_df = granger_results_dict['optimal_lags']
+                        
+                        granger_export_list = []
+                        for cause_col in p_values_df.index:
+                            for effect_col in p_values_df.columns:
+                                if cause_col != effect_col:  # Exclude self-causality from export list
+                                    granger_export_list.append({
+                                        'source': cause_col,
+                                        'target': effect_col,
+                                        'test_statistic': f_stats_df.loc[cause_col, effect_col],
+                                        'p_value': p_values_df.loc[cause_col, effect_col],
+                                        'optimal_lag': lags_df.loc[cause_col, effect_col],
+                                        'significant': p_values_df.loc[cause_col, effect_col] < 0.05  # Add significance flag
+                                    })
+                        
+                        granger_df = pd.DataFrame(granger_export_list)
                         export_to_csv(granger_df, os.path.join(granger_tables_dir, f"{base_filename}_results.csv"))
                         
                         # Create visualizations
                         # 1. Granger causality heatmap
                         try:
                             plot_granger_causality_heatmap(
-                                granger_results,
+                                granger_results_dict,  # Pass the original dictionary
                                 title=f"Granger Causality - {metric_name}",
                                 output_dir=granger_plots_dir,
                                 filename=f"{base_filename}_heatmap.png",
@@ -2031,7 +2055,7 @@ def main():
                         # 2. Granger causality network
                         try:
                             plot_granger_causality_network(
-                                granger_results,
+                                granger_results_dict,  # Pass the original dictionary
                                 title=f"Granger Causality Network - {metric_name}",
                                 output_dir=granger_plots_dir,
                                 filename=f"{base_filename}_network.png",
