@@ -11,6 +11,7 @@ import pandas as pd
 import matplotlib.pyplot as plt
 import numpy as np
 import itertools  # Added import
+import gc  # For garbage collection
 
 """
 New main script for the refactored experiment analysis pipeline.
@@ -31,7 +32,10 @@ from refactor.analysis_modules.multivariate_exploration import perform_pca, perf
 # Corrected import for plot_correlation_heatmap
 from refactor.visualization.new_plots import (
     plot_correlation_heatmap, plot_covariance_heatmap, plot_scatter_comparison,
-    plot_descriptive_stats_lineplot, plot_descriptive_stats_boxplot, plot_descriptive_stats_catplot_mean
+    plot_descriptive_stats_lineplot, plot_descriptive_stats_boxplot, plot_descriptive_stats_catplot_mean,
+    plot_pca_explained_variance, plot_pca_biplot, plot_pca_loadings_heatmap,  # PCA visualization imports
+    plot_ica_components_heatmap, plot_ica_time_series, plot_ica_scatter,  # ICA visualization imports
+    plot_pca_vs_ica_comparison, plot_pca_vs_ica_overlay_scatter  # PCA vs ICA comparison visualization imports
 )
 from refactor.data_handling.new_time_normalization import add_experiment_elapsed_time  # Added import
 
@@ -41,6 +45,7 @@ from refactor.new_config import (
     VISUALIZATION_CONFIG, TENANT_COLORS, PHASE_DISPLAY_NAMES  # Adicionado PHASE_DISPLAY_NAMES
 )
 # Add other necessary imports from pipeline.config or other modules as needed
+from refactor.utils.figure_management import close_all_figures
 
 
 def parse_arguments():
@@ -107,6 +112,11 @@ def setup_output_directories(output_dir):
     pca_output_dir = os.path.join(multivariate_dir, "pca")
     ica_output_dir = os.path.join(multivariate_dir, "ica")
     comparison_output_dir = os.path.join(multivariate_dir, "comparison")  # Directory for PCA vs ICA comparison
+    
+    # Create plots directories for PCA/ICA
+    pca_plots_dir = os.path.join(plots_dir, "pca")
+    ica_plots_dir = os.path.join(plots_dir, "ica")
+    comparison_plots_dir = os.path.join(plots_dir, "pca_ica_comparison")
 
     os.makedirs(plots_dir, exist_ok=True)
     os.makedirs(tables_dir, exist_ok=True)
@@ -275,6 +285,63 @@ def main():
                                     })
                                     export_to_csv(explained_variance_df, os.path.join(pca_output_dir, f"{base_filename_pca}_explained_variance.csv"))
                                     print(f"PCA results saved for {metric_name} ({phase_name if phase_name else 'consolidated'}).")
+                                    
+                                    # Generate PCA visualizations
+                                    pca_plots_dir = os.path.join(plots_dir, "pca")
+                                    os.makedirs(pca_plots_dir, exist_ok=True)
+                                    
+                                    # Create a scree plot (explained variance)
+                                    try:
+                                        plot_pca_explained_variance(
+                                            pca_explained_variance,
+                                            title="PCA Explained Variance",
+                                            output_dir=pca_plots_dir,
+                                            filename=f"{base_filename_pca}_explained_variance.png",
+                                            metric_name=metric_name,
+                                            round_name=round_name,
+                                            phase_name=phase_name
+                                        )
+                                        print(f"PCA explained variance plot created for {metric_name} ({phase_name if phase_name else 'consolidated'}).")
+                                    except Exception as e:
+                                        print(f"Error creating PCA explained variance plot: {e}")
+                                    
+                                    # Create a biplot showing components and loadings
+                                    try:
+                                        # Check if phases_or_metric_df is a DataFrame
+                                        if isinstance(phases_or_metric_df, pd.DataFrame) and 'tenant' in phases_or_metric_df.columns:
+                                            tenant_groups = phases_or_metric_df['tenant']
+                                        else:
+                                            tenant_groups = None
+                                            
+                                        plot_pca_biplot(
+                                            pca_results_df,
+                                            pca_components_df,
+                                            title="PCA Biplot",
+                                            output_dir=pca_plots_dir,
+                                            filename=f"{base_filename_pca}_biplot.png",
+                                            metric_name=metric_name,
+                                            round_name=round_name,
+                                            phase_name=phase_name,
+                                            sample_groups=tenant_groups
+                                        )
+                                        print(f"PCA biplot created for {metric_name} ({phase_name if phase_name else 'consolidated'}).")
+                                    except Exception as e:
+                                        print(f"Error creating PCA biplot: {e}")
+                                    
+                                    # Create a heatmap of loadings
+                                    try:
+                                        plot_pca_loadings_heatmap(
+                                            pca_components_df,
+                                            title="PCA Loadings Heatmap",
+                                            output_dir=pca_plots_dir,
+                                            filename=f"{base_filename_pca}_loadings_heatmap.png",
+                                            metric_name=metric_name,
+                                            round_name=round_name,
+                                            phase_name=phase_name
+                                        )
+                                        print(f"PCA loadings heatmap created for {metric_name} ({phase_name if phase_name else 'consolidated'}).")
+                                    except Exception as e:
+                                        print(f"Error creating PCA loadings heatmap: {e}")
 
                                 except ValueError as e:
                                     print(f"Error during PCA for {metric_name} ({phase_name if phase_name else 'consolidated'}): {e}")
@@ -317,6 +384,62 @@ def main():
                                             print(f"ICA results partially or fully saved for {metric_name} ({phase_name if phase_name else 'consolidated'}).")
                                         else:
                                             print(f"ICA results NOT saved due to empty dataframes for {metric_name} ({phase_name if phase_name else 'consolidated'}).")
+
+                                        # Generate ICA visualizations
+                                        ica_plots_dir = os.path.join(plots_dir, "ica")
+                                        os.makedirs(ica_plots_dir, exist_ok=True)
+                                        
+                                        # Create a heatmap of ICA components
+                                        try:
+                                            plot_ica_components_heatmap(
+                                                ica_components_df,
+                                                title="ICA Components Heatmap",
+                                                output_dir=ica_plots_dir,
+                                                filename=f"{base_filename_ica}_components_heatmap.png",
+                                                metric_name=metric_name,
+                                                round_name=round_name,
+                                                phase_name=phase_name
+                                            )
+                                            print(f"ICA components heatmap created for {metric_name} ({phase_name if phase_name else 'consolidated'}).")
+                                        except Exception as e:
+                                            print(f"Error creating ICA components heatmap: {e}")
+                                        
+                                        # Create time series plots of independent components
+                                        try:
+                                            plot_ica_time_series(
+                                                ica_results_df,
+                                                title="ICA Time Series",
+                                                output_dir=ica_plots_dir,
+                                                filename=f"{base_filename_ica}_time_series.png",
+                                                metric_name=metric_name,
+                                                round_name=round_name,
+                                                phase_name=phase_name
+                                            )
+                                            print(f"ICA time series plot created for {metric_name} ({phase_name if phase_name else 'consolidated'}).")
+                                        except Exception as e:
+                                            print(f"Error creating ICA time series plot: {e}")
+                                        
+                                        # Create scatter plot of independent components
+                                        try:
+                                            # Check if phases_or_metric_df is a DataFrame
+                                            if isinstance(phases_or_metric_df, pd.DataFrame) and 'tenant' in phases_or_metric_df.columns:
+                                                tenant_groups = phases_or_metric_df['tenant']
+                                            else:
+                                                tenant_groups = None
+                                                
+                                            plot_ica_scatter(
+                                                ica_results_df,
+                                                title="ICA Scatter Plot",
+                                                output_dir=ica_plots_dir,
+                                                filename=f"{base_filename_ica}_scatter.png",
+                                                metric_name=metric_name,
+                                                round_name=round_name,
+                                                phase_name=phase_name,
+                                                sample_groups=tenant_groups
+                                            )
+                                            print(f"ICA scatter plot created for {metric_name} ({phase_name if phase_name else 'consolidated'}).")
+                                        except Exception as e:
+                                            print(f"Error creating ICA scatter plot: {e}")
                                     
                                     except ValueError as e:
                                         print(f"VALUE ERROR during ICA for {metric_name} ({phase_name if phase_name else 'consolidated'}): {e}")
@@ -345,6 +468,49 @@ def main():
                                     base_filename_comparison = f"{metric_name}_{phase_name if phase_name else 'consolidated'}_pca_ica_top_features_comparison.csv"
                                     export_to_csv(comparison_df, os.path.join(comparison_output_dir, base_filename_comparison))
                                     print(f"PCA vs ICA top features comparison table saved for {metric_name} ({phase_name if phase_name else 'consolidated'}).")
+                                    
+                                    # Generate PCA vs ICA comparison visualizations
+                                    comparison_plots_dir = os.path.join(plots_dir, "pca_ica_comparison")
+                                    os.makedirs(comparison_plots_dir, exist_ok=True)
+                                    
+                                    # Create feature importance comparison chart
+                                    try:
+                                        plot_pca_vs_ica_comparison(
+                                            pca_components_df_for_comparison,
+                                            ica_components_df_for_comparison,
+                                            title="PCA vs ICA Feature Importance",
+                                            output_dir=comparison_plots_dir,
+                                            filename=f"{metric_name}_{phase_name if phase_name else 'consolidated'}_pca_ica_feature_comparison.png",
+                                            metric_name=metric_name,
+                                            round_name=round_name,
+                                            phase_name=phase_name
+                                        )
+                                        print(f"PCA vs ICA feature comparison plot created for {metric_name} ({phase_name if phase_name else 'consolidated'}).")
+                                    except Exception as e:
+                                        print(f"Error creating PCA vs ICA feature comparison plot: {e}")
+                                    
+                                    # Create overlay scatter plot
+                                    try:
+                                        # Check if phases_or_metric_df is a DataFrame
+                                        if isinstance(phases_or_metric_df, pd.DataFrame) and 'tenant' in phases_or_metric_df.columns:
+                                            tenant_groups = phases_or_metric_df['tenant']
+                                        else:
+                                            tenant_groups = None
+                                            
+                                        plot_pca_vs_ica_overlay_scatter(
+                                            pca_results_df,
+                                            ica_results_df,
+                                            title="PCA vs ICA Overlay Scatter",
+                                            output_dir=comparison_plots_dir,
+                                            filename=f"{metric_name}_{phase_name if phase_name else 'consolidated'}_pca_ica_scatter_overlay.png",
+                                            metric_name=metric_name,
+                                            round_name=round_name,
+                                            phase_name=phase_name,
+                                            sample_groups=tenant_groups
+                                        )
+                                        print(f"PCA vs ICA overlay scatter plot created for {metric_name} ({phase_name if phase_name else 'consolidated'}).")
+                                    except Exception as e:
+                                        print(f"Error creating PCA vs ICA overlay scatter plot: {e}")
                                 
                                 except Exception as e:
                                     import traceback
@@ -409,6 +575,60 @@ def main():
                                 })
                                 export_to_csv(explained_variance_df, os.path.join(pca_output_dir, f"{base_filename_pca}_explained_variance.csv"))
                                 print(f"PCA results saved for {metric_name} (Consolidated).")
+                                
+                                # Generate PCA visualizations for consolidated analysis
+                                pca_plots_dir = os.path.join(plots_dir, "pca")
+                                os.makedirs(pca_plots_dir, exist_ok=True)
+                                
+                                # Create a scree plot (explained variance)
+                                try:
+                                    plot_pca_explained_variance(
+                                        pca_explained_variance,
+                                        title="PCA Explained Variance",
+                                        output_dir=pca_plots_dir,
+                                        filename=f"{base_filename_pca}_explained_variance.png",
+                                        metric_name=metric_name,
+                                        round_name=round_name
+                                    )
+                                    print(f"PCA explained variance plot created for {metric_name} (Consolidated).")
+                                except Exception as e:
+                                    print(f"Error creating PCA explained variance plot: {e}")
+                                
+                                # Create a biplot showing components and loadings
+                                try:
+                                    # Check if metric_df_consolidated is a DataFrame
+                                    if isinstance(metric_df_consolidated, pd.DataFrame) and 'tenant' in metric_df_consolidated.columns:
+                                        tenant_groups = metric_df_consolidated['tenant']
+                                    else:
+                                        tenant_groups = None
+                                        
+                                    plot_pca_biplot(
+                                        pca_results_df,
+                                        pca_components_df,
+                                        title="PCA Biplot",
+                                        output_dir=pca_plots_dir,
+                                        filename=f"{base_filename_pca}_biplot.png",
+                                        metric_name=metric_name,
+                                        round_name=round_name,
+                                        sample_groups=tenant_groups
+                                    )
+                                    print(f"PCA biplot created for {metric_name} (Consolidated).")
+                                except Exception as e:
+                                    print(f"Error creating PCA biplot: {e}")
+                                
+                                # Create a heatmap of loadings
+                                try:
+                                    plot_pca_loadings_heatmap(
+                                        pca_components_df,
+                                        title="PCA Loadings Heatmap",
+                                        output_dir=pca_plots_dir,
+                                        filename=f"{base_filename_pca}_loadings_heatmap.png",
+                                        metric_name=metric_name,
+                                        round_name=round_name
+                                    )
+                                    print(f"PCA loadings heatmap created for {metric_name} (Consolidated).")
+                                except Exception as e:
+                                    print(f"Error creating PCA loadings heatmap: {e}")
 
                             except ValueError as e:
                                 print(f"Error during PCA for {metric_name} (Consolidated): {e}")
@@ -451,6 +671,59 @@ def main():
                                         print(f"ICA results partially or fully saved for {metric_name} (Consolidated).")
                                     else:
                                         print(f"ICA results NOT saved due to empty dataframes for {metric_name} (Consolidated).")
+                                        
+                                    # Generate ICA visualizations for consolidated analysis
+                                    ica_plots_dir = os.path.join(plots_dir, "ica")
+                                    os.makedirs(ica_plots_dir, exist_ok=True)
+                                    
+                                    # Create a heatmap of ICA components
+                                    try:
+                                        plot_ica_components_heatmap(
+                                            ica_components_df,
+                                            title="ICA Components Heatmap",
+                                            output_dir=ica_plots_dir,
+                                            filename=f"{base_filename_ica}_components_heatmap.png",
+                                            metric_name=metric_name,
+                                            round_name=round_name
+                                        )
+                                        print(f"ICA components heatmap created for {metric_name} (Consolidated).")
+                                    except Exception as e:
+                                        print(f"Error creating ICA components heatmap: {e}")
+                                    
+                                    # Create time series plots of independent components
+                                    try:
+                                        plot_ica_time_series(
+                                            ica_results_df,
+                                            title="ICA Time Series",
+                                            output_dir=ica_plots_dir,
+                                            filename=f"{base_filename_ica}_time_series.png",
+                                            metric_name=metric_name,
+                                            round_name=round_name
+                                        )
+                                        print(f"ICA time series plot created for {metric_name} (Consolidated).")
+                                    except Exception as e:
+                                        print(f"Error creating ICA time series plot: {e}")
+                                    
+                                    # Create scatter plot of independent components
+                                    try:
+                                        # Check if metric_df_consolidated is a DataFrame
+                                        if isinstance(metric_df_consolidated, pd.DataFrame) and 'tenant' in metric_df_consolidated.columns:
+                                            tenant_groups = metric_df_consolidated['tenant']
+                                        else:
+                                            tenant_groups = None
+                                            
+                                        plot_ica_scatter(
+                                            ica_results_df,
+                                            title="ICA Scatter Plot",
+                                            output_dir=ica_plots_dir,
+                                            filename=f"{base_filename_ica}_scatter.png",
+                                            metric_name=metric_name,
+                                            round_name=round_name,
+                                            sample_groups=tenant_groups
+                                        )
+                                        print(f"ICA scatter plot created for {metric_name} (Consolidated).")
+                                    except Exception as e:
+                                        print(f"Error creating ICA scatter plot: {e}")
                                 
                                 except ValueError as e:
                                     print(f"VALUE ERROR during ICA for {metric_name} (Consolidated): {e}")
@@ -479,6 +752,47 @@ def main():
                                 base_filename_comparison = f"{metric_name}_consolidated_pca_ica_top_features_comparison.csv"
                                 export_to_csv(comparison_df, os.path.join(comparison_output_dir, base_filename_comparison))
                                 print(f"PCA vs ICA top features comparison table saved for {metric_name} (Consolidated).")
+                                
+                                # Generate PCA vs ICA comparison visualizations for consolidated analysis
+                                comparison_plots_dir = os.path.join(plots_dir, "pca_ica_comparison")
+                                os.makedirs(comparison_plots_dir, exist_ok=True)
+                                
+                                # Create feature importance comparison chart
+                                try:
+                                    plot_pca_vs_ica_comparison(
+                                        pca_components_df_for_comparison,
+                                        ica_components_df_for_comparison,
+                                        title="PCA vs ICA Feature Importance",
+                                        output_dir=comparison_plots_dir,
+                                        filename=f"{metric_name}_consolidated_pca_ica_feature_comparison.png",
+                                        metric_name=metric_name,
+                                        round_name=round_name
+                                    )
+                                    print(f"PCA vs ICA feature comparison plot created for {metric_name} (Consolidated).")
+                                except Exception as e:
+                                    print(f"Error creating PCA vs ICA feature comparison plot: {e}")
+                                
+                                # Create overlay scatter plot
+                                try:
+                                    # Check if metric_df_consolidated is a DataFrame
+                                    if isinstance(metric_df_consolidated, pd.DataFrame) and 'tenant' in metric_df_consolidated.columns:
+                                        tenant_groups = metric_df_consolidated['tenant']
+                                    else:
+                                        tenant_groups = None
+                                        
+                                    plot_pca_vs_ica_overlay_scatter(
+                                        pca_results_df,
+                                        ica_results_df,
+                                        title="PCA vs ICA Overlay Scatter",
+                                        output_dir=comparison_plots_dir,
+                                        filename=f"{metric_name}_consolidated_pca_ica_scatter_overlay.png",
+                                        metric_name=metric_name,
+                                        round_name=round_name,
+                                        sample_groups=tenant_groups
+                                    )
+                                    print(f"PCA vs ICA overlay scatter plot created for {metric_name} (Consolidated).")
+                                except Exception as e:
+                                    print(f"Error creating PCA vs ICA overlay scatter plot: {e}")
                             
                             except Exception as e:
                                 import traceback
