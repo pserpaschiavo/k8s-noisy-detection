@@ -74,11 +74,6 @@ def parse_arguments():
     # Argument for Descriptive Statistics Analysis
     parser.add_argument('--run-descriptive-stats', action='store_true', help='Run descriptive statistics analysis.')  # Added argument
 
-    # Arguments for other analysis types from pipeline/analysis/
-    parser.add_argument('--run-anomaly-detection', action='store_true', help='Run anomaly detection analysis.')
-    parser.add_argument('--run-tenant-analysis', action='store_true', help='Run tenant-specific analysis.')
-    parser.add_argument('--run-advanced-analysis', action='store_true', help='Run advanced analysis modules.')
-
     # Arguments for PCA
     parser.add_argument('--run-pca', action='store_true', help="Run Principal Component Analysis.")
     parser.add_argument('--pca-n-components', type=str, default=None, help="Number of PCA components (int) or variance explained (float, e.g., 0.95).")
@@ -953,57 +948,6 @@ def main():
                         )
                     else:
                         print(f"      Skipping catplot for consolidated {metric_name}, round {round_name} due to missing/empty descriptive stats.")
-
-    # --- Anomaly Detection Analysis ---
-    if args.run_anomaly_detection:
-        print("\nRunning Anomaly Detection Analysis...")
-        anomaly_output_dir = os.path.join(args.output_dir, 'anomaly_detection')
-        os.makedirs(anomaly_output_dir, exist_ok=True)
-        for metric_name, rounds_or_phases_data in all_metrics_data.items():
-            for round_name, phases_or_metric_df in rounds_or_phases_data.items():
-                if run_per_phase_analysis:
-                    for phase_name, data_df in phases_or_metric_df.items():
-                        print(f"Running anomaly detection (placeholder) for {metric_name} ({phase_name})...")
-                        run_anomaly_detection_placeholder(data_df, args.output_dir, metric_name, phase_name)
-                else:
-                    data_df = phases_or_metric_df
-                    print(f"Running anomaly detection (placeholder) for {metric_name} (consolidated)...")
-                    run_anomaly_detection_placeholder(data_df, args.output_dir, metric_name, None)
-
-    # --- Tenant-Specific Analysis ---
-    if args.run_tenant_analysis:
-        print("\nRunning Tenant-Specific Analysis...")
-        tenant_output_dir = os.path.join(args.output_dir, 'tenant_analysis')
-        os.makedirs(tenant_output_dir, exist_ok=True)
-        for metric_name, rounds_or_phases_data in all_metrics_data.items():
-            for round_name, phases_or_metric_df in rounds_or_phases_data.items():
-                if run_per_phase_analysis:
-                    for phase_name, data_df in phases_or_metric_df.items():
-                        print(f"Running tenant analysis (placeholder) for {metric_name} ({phase_name})...")
-                        run_tenant_analysis_placeholder(data_df, args.output_dir, metric_name, phase_name)
-                else:
-                    data_df = phases_or_metric_df
-                    print(f"Running tenant analysis (placeholder) for {metric_name} (consolidated)...")
-                    run_tenant_analysis_placeholder(data_df, args.output_dir, metric_name, None)
-
-    # --- Advanced Analysis ---
-    if args.run_advanced_analysis:
-        print("\nRunning Advanced Analysis...")
-        advanced_output_dir = os.path.join(args.output_dir, 'advanced_analysis')
-        os.makedirs(advanced_output_dir, exist_ok=True)
-        for metric_name, rounds_or_phases_data in all_metrics_data.items():
-            for round_name, phases_or_metric_df in rounds_or_phases_data.items():
-                if run_per_phase_analysis:
-                    for phase_name, data_df in phases_or_metric_df.items():
-                        print(f"Running advanced analysis (placeholder) for {metric_name} ({phase_name})...")
-                        run_advanced_analysis_placeholder(data_df, args.output_dir, metric_name, phase_name)
-                else:
-                    data_df = phases_or_metric_df
-                    print(f"Running advanced analysis (placeholder) for {metric_name} (consolidated)...")
-                    run_advanced_analysis_placeholder(data_df, args.output_dir, metric_name, None)
-
-    print("\nRefactored pipeline processing finished.")
-
 
 if __name__ == '__main__':
     main()
