@@ -26,9 +26,6 @@ from refactor.analysis_modules.correlation_covariance import (
 )
 from refactor.analysis_modules.descritive_statistics import calculate_descriptive_statistics  # Added import
 # Corrected placeholder import names
-from refactor.analysis_modules.anomaly_detection import run_anomaly_detection_placeholder
-from refactor.analysis_modules.tenant_analysis import run_tenant_analysis_placeholder
-from refactor.analysis_modules.advanced_analysis import run_advanced_analysis_placeholder
 from refactor.analysis_modules.multivariate_exploration import perform_pca, perform_ica, get_top_features_per_component  # Added PCA, ICA, and top features comparison
 # Corrected import for plot_correlation_heatmap
 from refactor.visualization.new_plots import (
