@@ -29,6 +29,16 @@ from refactor.analysis_modules.correlation_covariance import (
 from refactor.analysis_modules.descritive_statistics import calculate_descriptive_statistics  # Added import
 # Corrected placeholder import names
 from refactor.analysis_modules.multivariate_exploration import perform_pca, perform_ica, get_top_features_per_component  # Added PCA, ICA, and top features comparison
+# Added import for causal analysis modules
+from refactor.analysis_modules.causality import (
+    perform_sem_analysis, create_sem_model_from_correlation, 
+    plot_sem_path_diagram, plot_sem_fit_indices, plot_sem_coefficient_heatmap,
+    calculate_transfer_entropy, calculate_pairwise_transfer_entropy,
+    plot_transfer_entropy_heatmap, plot_transfer_entropy_network,
+    calculate_pairwise_ccm, plot_ccm_convergence, summarize_ccm_results,
+    plot_ccm_causality_heatmap, calculate_pairwise_granger_causality,
+    plot_granger_causality_heatmap, plot_granger_causality_network
+)
 # Corrected import for plot_correlation_heatmap
 from refactor.visualization.new_plots import (
     plot_correlation_heatmap, plot_covariance_heatmap, plot_scatter_comparison,
@@ -90,6 +100,39 @@ def parse_arguments():
     # Argument for PCA vs ICA comparison
     parser.add_argument('--compare-pca-ica', action='store_true', help="Generate a comparison table of top features for PCA and ICA.")
     parser.add_argument('--n-top-features-comparison', type=int, default=5, help="Number of top features to show in PCA/ICA comparison.")
+    
+    # Arguments for Causal Analysis
+    parser.add_argument('--run-sem', action='store_true', help="Run Structural Equation Modeling for causal analysis.")
+    parser.add_argument('--sem-correlation-threshold', type=float, default=0.3, 
+                       help="Minimum absolute correlation to include in the SEM model (e.g., 0.3 means include relationships with |r| >= 0.3).")
+    parser.add_argument('--sem-standardize', action='store_true', default=True,
+                       help="Standardize variables before SEM analysis.")
+                       
+    # Transfer Entropy arguments
+    parser.add_argument('--run-transfer-entropy', action='store_true', 
+                       help="Run Transfer Entropy analysis for information-theoretic causal analysis.")
+    parser.add_argument('--te-lag', type=int, default=1, 
+                       help="Lag parameter for Transfer Entropy calculation.")
+    parser.add_argument('--te-threshold', type=float, default=0.05, 
+                       help="Threshold for Transfer Entropy visualization.")
+    
+    # Convergent Cross Mapping arguments
+    parser.add_argument('--run-ccm', action='store_true', 
+                       help="Run Convergent Cross Mapping for nonlinear causal analysis.")
+    parser.add_argument('--ccm-embed-dimensions', type=int, nargs='+', default=[2, 3, 4], 
+                       help="Embedding dimensions to try for CCM.")
+    parser.add_argument('--ccm-tau', type=int, default=1, 
+                       help="Time delay parameter for CCM embedding.")
+    parser.add_argument('--ccm-threshold', type=float, default=0.3, 
+                       help="Significance threshold for CCM results.")
+    
+    # Granger Causality arguments
+    parser.add_argument('--run-granger', action='store_true', 
+                       help="Run Granger Causality tests for time series causal analysis.")
+    parser.add_argument('--granger-max-lag', type=int, default=5, 
+                       help="Maximum lag for Granger Causality test.")
+    parser.add_argument('--granger-criterion', type=str, default='aic', choices=['aic', 'bic', 'fpe'], 
+                       help="Information criterion for Granger model selection (aic, bic, or fpe).")
 
     # Argument for analysis scope
     parser.add_argument('--consolidated-analysis', action='store_true',
@@ -113,10 +156,29 @@ def setup_output_directories(output_dir):
     ica_output_dir = os.path.join(multivariate_dir, "ica")
     comparison_output_dir = os.path.join(multivariate_dir, "comparison")  # Directory for PCA vs ICA comparison
     
-    # Create plots directories for PCA/ICA
-    pca_plots_dir = os.path.join(plots_dir, "pca")
-    ica_plots_dir = os.path.join(plots_dir, "ica")
-    comparison_plots_dir = os.path.join(plots_dir, "pca_ica_comparison")
+    # Directories for causal analysis
+    causality_dir = os.path.join(tables_dir, "causality")
+    sem_output_dir = os.path.join(causality_dir, "sem")
+    
+    # Create plots directories for multivariate analysis (PCA/ICA)
+    multivariate_plots_dir = os.path.join(plots_dir, "multivariate")
+    pca_plots_dir = os.path.join(multivariate_plots_dir, "pca")
+    ica_plots_dir = os.path.join(multivariate_plots_dir, "ica")
+    comparison_plots_dir = os.path.join(multivariate_plots_dir, "comparison")
+    
+    # Create plots directory for causality analysis
+    causality_plots_dir = os.path.join(plots_dir, "causality")
+    sem_plots_dir = os.path.join(causality_plots_dir, "sem")
+    
+    # New directories for additional causal analysis techniques
+    te_output_dir = os.path.join(causality_dir, "transfer_entropy")
+    te_plots_dir = os.path.join(causality_plots_dir, "transfer_entropy")
+    
+    ccm_output_dir = os.path.join(causality_dir, "ccm")
+    ccm_plots_dir = os.path.join(causality_plots_dir, "ccm")
+    
+    granger_output_dir = os.path.join(causality_dir, "granger")
+    granger_plots_dir = os.path.join(causality_plots_dir, "granger")
 
     os.makedirs(plots_dir, exist_ok=True)
     os.makedirs(tables_dir, exist_ok=True)
@@ -130,8 +192,20 @@ def setup_output_directories(output_dir):
     os.makedirs(pca_output_dir, exist_ok=True)  # Create PCA output directory
     os.makedirs(ica_output_dir, exist_ok=True)  # Create ICA output directory
     os.makedirs(comparison_output_dir, exist_ok=True)  # Create comparison directory
+    os.makedirs(causality_dir, exist_ok=True)  # Create causality directory
+    os.makedirs(sem_output_dir, exist_ok=True)  # Create SEM output directory
+    os.makedirs(causality_plots_dir, exist_ok=True)  # Create causality plots directory
+    os.makedirs(sem_plots_dir, exist_ok=True)  # Create SEM plots directory
+    
+    # Create directories for new causal analysis techniques
+    os.makedirs(te_output_dir, exist_ok=True)  # Create Transfer Entropy output directory
+    os.makedirs(te_plots_dir, exist_ok=True)  # Create Transfer Entropy plots directory
+    os.makedirs(ccm_output_dir, exist_ok=True)  # Create CCM output directory
+    os.makedirs(ccm_plots_dir, exist_ok=True)  # Create CCM plots directory
+    os.makedirs(granger_output_dir, exist_ok=True)  # Create Granger Causality output directory
+    os.makedirs(granger_plots_dir, exist_ok=True)  # Create Granger Causality plots directory
 
-    return plots_dir, tables_dir, pca_output_dir, ica_output_dir, comparison_output_dir
+    return plots_dir, tables_dir, pca_output_dir, ica_output_dir, comparison_output_dir, sem_output_dir, sem_plots_dir, te_output_dir, te_plots_dir, ccm_output_dir, ccm_plots_dir, granger_output_dir, granger_plots_dir
 
 
 def main():
@@ -142,7 +216,7 @@ def main():
     if not os.path.exists(args.output_dir):
         os.makedirs(args.output_dir)
 
-    plots_dir, tables_dir, pca_output_dir, ica_output_dir, comparison_output_dir = setup_output_directories(args.output_dir)
+    plots_dir, tables_dir, pca_output_dir, ica_output_dir, comparison_output_dir, sem_output_dir, sem_plots_dir, te_output_dir, te_plots_dir, ccm_output_dir, ccm_plots_dir, granger_output_dir, granger_plots_dir = setup_output_directories(args.output_dir)
 
     # Resolve data directory path
     experiment_data_dir_input = args.data_dir
@@ -287,7 +361,9 @@ def main():
                                     print(f"PCA results saved for {metric_name} ({phase_name if phase_name else 'consolidated'}).")
                                     
                                     # Generate PCA visualizations
-                                    pca_plots_dir = os.path.join(plots_dir, "pca")
+                                    multivariate_plots_dir = os.path.join(plots_dir, "multivariate")
+                                    os.makedirs(multivariate_plots_dir, exist_ok=True)
+                                    pca_plots_dir = os.path.join(multivariate_plots_dir, "pca")
                                     os.makedirs(pca_plots_dir, exist_ok=True)
                                     
                                     # Create a scree plot (explained variance)
@@ -386,7 +462,9 @@ def main():
                                             print(f"ICA results NOT saved due to empty dataframes for {metric_name} ({phase_name if phase_name else 'consolidated'}).")
 
                                         # Generate ICA visualizations
-                                        ica_plots_dir = os.path.join(plots_dir, "ica")
+                                        multivariate_plots_dir = os.path.join(plots_dir, "multivariate")
+                                        os.makedirs(multivariate_plots_dir, exist_ok=True)
+                                        ica_plots_dir = os.path.join(multivariate_plots_dir, "ica")
                                         os.makedirs(ica_plots_dir, exist_ok=True)
                                         
                                         # Create a heatmap of ICA components
@@ -470,7 +548,9 @@ def main():
                                     print(f"PCA vs ICA top features comparison table saved for {metric_name} ({phase_name if phase_name else 'consolidated'}).")
                                     
                                     # Generate PCA vs ICA comparison visualizations
-                                    comparison_plots_dir = os.path.join(plots_dir, "pca_ica_comparison")
+                                    multivariate_plots_dir = os.path.join(plots_dir, "multivariate")
+                                    os.makedirs(multivariate_plots_dir, exist_ok=True)
+                                    comparison_plots_dir = os.path.join(multivariate_plots_dir, "comparison")
                                     os.makedirs(comparison_plots_dir, exist_ok=True)
                                     
                                     # Create feature importance comparison chart
@@ -577,7 +657,9 @@ def main():
                                 print(f"PCA results saved for {metric_name} (Consolidated).")
                                 
                                 # Generate PCA visualizations for consolidated analysis
-                                pca_plots_dir = os.path.join(plots_dir, "pca")
+                                multivariate_plots_dir = os.path.join(plots_dir, "multivariate")
+                                os.makedirs(multivariate_plots_dir, exist_ok=True)
+                                pca_plots_dir = os.path.join(multivariate_plots_dir, "pca")
                                 os.makedirs(pca_plots_dir, exist_ok=True)
                                 
                                 # Create a scree plot (explained variance)
@@ -673,7 +755,9 @@ def main():
                                         print(f"ICA results NOT saved due to empty dataframes for {metric_name} (Consolidated).")
                                         
                                     # Generate ICA visualizations for consolidated analysis
-                                    ica_plots_dir = os.path.join(plots_dir, "ica")
+                                    multivariate_plots_dir = os.path.join(plots_dir, "multivariate")
+                                    os.makedirs(multivariate_plots_dir, exist_ok=True)
+                                    ica_plots_dir = os.path.join(multivariate_plots_dir, "ica")
                                     os.makedirs(ica_plots_dir, exist_ok=True)
                                     
                                     # Create a heatmap of ICA components
@@ -754,7 +838,9 @@ def main():
                                 print(f"PCA vs ICA top features comparison table saved for {metric_name} (Consolidated).")
                                 
                                 # Generate PCA vs ICA comparison visualizations for consolidated analysis
-                                comparison_plots_dir = os.path.join(plots_dir, "pca_ica_comparison")
+                                multivariate_plots_dir = os.path.join(plots_dir, "multivariate")
+                                os.makedirs(multivariate_plots_dir, exist_ok=True)
+                                comparison_plots_dir = os.path.join(multivariate_plots_dir, "comparison")
                                 os.makedirs(comparison_plots_dir, exist_ok=True)
                                 
                                 # Create feature importance comparison chart
@@ -1277,6 +1363,689 @@ def main():
                         )
                     else:
                         print(f"      Skipping catplot for consolidated {metric_name}, round {round_name} due to missing/empty descriptive stats.")
+
+    # --- Causal Analysis with SEM ---
+    if args.run_sem:
+        print("\nRunning Structural Equation Modeling (SEM) Causal Analysis...")
+        correlation_calculation_done = {}
+        
+        for metric_name, rounds_or_phases_data in all_metrics_data.items():
+            print(f"Processing metric: {metric_name}")
+            if not isinstance(rounds_or_phases_data, dict):
+                print(f"  Skipping metric {metric_name}: Expected a dictionary of round/phase data, got {type(rounds_or_phases_data)}.")
+                continue
+
+            for round_name, phases_or_metric_df in rounds_or_phases_data.items():
+                if run_per_phase_analysis:
+                    if not isinstance(phases_or_metric_df, dict):
+                        print(f"  Skipping round {round_name} for metric {metric_name}: Expected a dictionary of phase data, got {type(phases_or_metric_df)}.")
+                        continue
+                    for phase_name, phase_df in phases_or_metric_df.items():
+                        print(f"  Processing round: {round_name}, phase: {phase_name} for metric: {metric_name}")
+                        if not isinstance(phase_df, pd.DataFrame):
+                            print(f"    Skipping round {round_name}, phase {phase_name} for metric {metric_name}: Expected a DataFrame, got {type(phase_df)}.")
+                            continue
+                        if phase_df.empty:
+                            print(f"    Skipping SEM for metric {metric_name}, round {round_name}, phase {phase_name} due to empty DataFrame.")
+                            continue
+
+                        # Select numeric columns for SEM analysis
+                        numeric_df = phase_df.select_dtypes(include=np.number).dropna()
+                        
+                        if numeric_df.empty or numeric_df.shape[0] < 2 or numeric_df.shape[1] < 3:  # Need at least 3 variables for a meaningful SEM
+                            print(f"Skipping SEM for {metric_name} - {phase_name} due to insufficient data (Shape: {numeric_df.shape}). Need at least 3 numeric columns.")
+                            continue
+                            
+                        try:
+                            # Calculate correlation matrix if not already done
+                            corr_key = f"{metric_name}_{round_name}_{phase_name}"
+                            if corr_key not in correlation_calculation_done:
+                                print(f"    Calculating correlation matrix for {metric_name}, round {round_name}, phase {phase_name}...")
+                                correlation_matrix = numeric_df.corr(method='pearson')
+                                correlation_calculation_done[corr_key] = correlation_matrix
+                            else:
+                                correlation_matrix = correlation_calculation_done[corr_key]
+                                
+                            # Create SEM model specification from correlation matrix
+                            model_spec = create_sem_model_from_correlation(
+                                correlation_matrix, 
+                                threshold=args.sem_correlation_threshold
+                            )
+                            
+                            if not model_spec.strip():
+                                print(f"    No relationships found above threshold {args.sem_correlation_threshold} for {metric_name}, round {round_name}, phase {phase_name}.")
+                                continue
+                                
+                            print(f"    Generated SEM model specification for {metric_name}, round {round_name}, phase {phase_name}:")
+                            print(f"    {model_spec}")
+                            
+                            # Perform SEM analysis
+                            sem_results = perform_sem_analysis(
+                                numeric_df, 
+                                model_spec, 
+                                standardize=args.sem_standardize
+                            )
+                            
+                            # Export results
+                            base_filename = f"{metric_name}_{round_name}_{phase_name}_sem"
+                            export_to_csv(sem_results['estimates'], os.path.join(sem_output_dir, f"{base_filename}_estimates.csv"))
+                            
+                            # Create plots
+                            # 1. Path diagram
+                            try:
+                                plot_sem_path_diagram(
+                                    sem_results, 
+                                    title=f"SEM Path Diagram - {metric_name}",
+                                    output_dir=sem_plots_dir,
+                                    filename=f"{base_filename}_path_diagram.png",
+                                    metric_name=metric_name,
+                                    round_name=round_name,
+                                    phase_name=phase_name
+                                )
+                                print(f"    SEM path diagram created for {metric_name}, round {round_name}, phase {phase_name}.")
+                            except Exception as e:
+                                print(f"    Error creating SEM path diagram: {e}")
+                                
+                            # 2. Fit indices
+                            try:
+                                plot_sem_fit_indices(
+                                    sem_results, 
+                                    title=f"SEM Model Fit Indices - {metric_name}",
+                                    output_dir=sem_plots_dir,
+                                    filename=f"{base_filename}_fit_indices.png",
+                                    metric_name=metric_name,
+                                    round_name=round_name,
+                                    phase_name=phase_name
+                                )
+                                print(f"    SEM fit indices plot created for {metric_name}, round {round_name}, phase {phase_name}.")
+                            except Exception as e:
+                                print(f"    Error creating SEM fit indices plot: {e}")
+                                
+                            # 3. Coefficient heatmap
+                            try:
+                                plot_sem_coefficient_heatmap(
+                                    sem_results, 
+                                    title=f"SEM Path Coefficients - {metric_name}",
+                                    output_dir=sem_plots_dir,
+                                    filename=f"{base_filename}_coefficients.png",
+                                    metric_name=metric_name,
+                                    round_name=round_name,
+                                    phase_name=phase_name
+                                )
+                                print(f"    SEM coefficient heatmap created for {metric_name}, round {round_name}, phase {phase_name}.")
+                            except Exception as e:
+                                print(f"    Error creating SEM coefficient heatmap: {e}")
+                                
+                        except Exception as e:
+                            print(f"    Error during SEM analysis for {metric_name}, round {round_name}, phase {phase_name}: {e}")
+                            import traceback
+                            traceback.print_exc()
+                else:
+                    # Consolidated analysis
+                    metric_df = phases_or_metric_df
+                    print(f"  Processing round: {round_name} for metric: {metric_name} (Consolidated)")
+                    if not isinstance(metric_df, pd.DataFrame):
+                        print(f"    Skipping round {round_name} for metric {metric_name} (Consolidated): Expected a DataFrame, got {type(metric_df)}.")
+                        continue
+                    if metric_df.empty:
+                        print(f"    Skipping SEM for metric {metric_name}, round {round_name} (Consolidated) due to empty DataFrame.")
+                        continue
+
+                    # Select numeric columns for SEM analysis
+                    numeric_df = metric_df.select_dtypes(include=np.number).dropna()
+                    
+                    if numeric_df.empty or numeric_df.shape[0] < 2 or numeric_df.shape[1] < 3:  # Need at least 3 variables for a meaningful SEM
+                        print(f"Skipping SEM for {metric_name} - consolidated due to insufficient data (Shape: {numeric_df.shape}). Need at least 3 numeric columns.")
+                        continue
+                        
+                    try:
+                        # Calculate correlation matrix if not already done
+                        corr_key = f"{metric_name}_{round_name}_consolidated"
+                        if corr_key not in correlation_calculation_done:
+                            print(f"    Calculating correlation matrix for {metric_name}, round {round_name} (Consolidated)...")
+                            correlation_matrix = numeric_df.corr(method='pearson')
+                            correlation_calculation_done[corr_key] = correlation_matrix
+                        else:
+                            correlation_matrix = correlation_calculation_done[corr_key]
+                            
+                        # Create SEM model specification from correlation matrix
+                        model_spec = create_sem_model_from_correlation(
+                            correlation_matrix, 
+                            threshold=args.sem_correlation_threshold
+                        )
+                        
+                        if not model_spec.strip():
+                            print(f"    No relationships found above threshold {args.sem_correlation_threshold} for {metric_name}, round {round_name} (Consolidated).")
+                            continue
+                            
+                        print(f"    Generated SEM model specification for {metric_name}, round {round_name} (Consolidated):")
+                        print(f"    {model_spec}")
+                        
+                        # Perform SEM analysis
+                        sem_results = perform_sem_analysis(
+                            numeric_df, 
+                            model_spec, 
+                            standardize=args.sem_standardize
+                        )
+                        
+                        # Export results
+                        base_filename = f"{metric_name}_{round_name}_consolidated_sem"
+                        export_to_csv(sem_results['estimates'], os.path.join(sem_output_dir, f"{base_filename}_estimates.csv"))
+                        
+                        # Create plots
+                        # 1. Path diagram
+                        try:
+                            plot_sem_path_diagram(
+                                sem_results, 
+                                title=f"SEM Path Diagram - {metric_name}",
+                                output_dir=sem_plots_dir,
+                                filename=f"{base_filename}_path_diagram.png",
+                                metric_name=metric_name,
+                                round_name=round_name
+                            )
+                            print(f"    SEM path diagram created for {metric_name}, round {round_name} (Consolidated).")
+                        except Exception as e:
+                            print(f"    Error creating SEM path diagram: {e}")
+                            
+                        # 2. Fit indices
+                        try:
+                            plot_sem_fit_indices(
+                                sem_results, 
+                                title=f"SEM Model Fit Indices - {metric_name}",
+                                output_dir=sem_plots_dir,
+                                filename=f"{base_filename}_fit_indices.png",
+                                metric_name=metric_name,
+                                round_name=round_name
+                            )
+                            print(f"    SEM fit indices plot created for {metric_name}, round {round_name} (Consolidated).")
+                        except Exception as e:
+                            print(f"    Error creating SEM fit indices plot: {e}")
+                            
+                        # 3. Coefficient heatmap
+                        try:
+                            plot_sem_coefficient_heatmap(
+                                sem_results, 
+                                title=f"SEM Path Coefficients - {metric_name}",
+                                output_dir=sem_plots_dir,
+                                filename=f"{base_filename}_coefficients.png",
+                                metric_name=metric_name,
+                                round_name=round_name
+                            )
+                            print(f"    SEM coefficient heatmap created for {metric_name}, round {round_name} (Consolidated).")
+                        except Exception as e:
+                            print(f"    Error creating SEM coefficient heatmap: {e}")
+                            
+                    except Exception as e:
+                        print(f"    Error during SEM analysis for {metric_name}, round {round_name} (Consolidated): {e}")
+                        import traceback
+                        traceback.print_exc()
+                        
+    # --- Transfer Entropy Analysis (Information-theoretic causality) ---
+    if args.run_transfer_entropy:
+        print("\nRunning Transfer Entropy Analysis...")
+        # Setup directories for saving results
+        te_tables_dir = os.path.join(tables_dir, "causality", "transfer_entropy")
+        te_plots_dir = os.path.join(plots_dir, "causality", "transfer_entropy")
+        os.makedirs(te_tables_dir, exist_ok=True)
+        os.makedirs(te_plots_dir, exist_ok=True)
+        
+        for metric_name, rounds_or_phases_data in all_metrics_data.items():
+            print(f"Processing metric: {metric_name}")
+            
+            for round_name, phases_or_metric_df in rounds_or_phases_data.items():
+                if run_per_phase_analysis:
+                    # Per-phase analysis
+                    for phase_name, phase_df in phases_or_metric_df.items():
+                        print(f"  Processing round: {round_name}, phase: {phase_name} for metric: {metric_name}")
+                        
+                        if not isinstance(phase_df, pd.DataFrame) or phase_df.empty:
+                            print(f"    Skipping Transfer Entropy for metric {metric_name}, round {round_name}, phase {phase_name} due to empty DataFrame.")
+                            continue
+                            
+                        # Select numeric columns for analysis
+                        numeric_df = phase_df.select_dtypes(include=np.number).dropna()
+                        
+                        if numeric_df.empty or numeric_df.shape[0] < 10:  # Transfer Entropy needs sufficient time points
+                            print(f"    Skipping Transfer Entropy for {metric_name} - {phase_name} due to insufficient data (Shape: {numeric_df.shape}). Need more time points.")
+                            continue
+                        
+                        try:
+                            print(f"    Calculating Transfer Entropy for {metric_name}, round {round_name}, phase {phase_name}...")
+                            
+                            # Calculate pairwise transfer entropy
+                            te_results = calculate_pairwise_transfer_entropy(
+                                numeric_df,
+                                time_col='experiment_elapsed_time' if 'experiment_elapsed_time' in numeric_df.columns else None,
+                                lag=args.te_lag
+                            )
+                            
+                            # Export results
+                            base_filename = f"{metric_name}_{round_name}_{phase_name}_transfer_entropy"
+                            te_df = pd.DataFrame(te_results)
+                            export_to_csv(te_df, os.path.join(te_tables_dir, f"{base_filename}_matrix.csv"))
+                            
+                            # Create visualizations
+                            # 1. Heatmap visualization
+                            try:
+                                plot_transfer_entropy_heatmap(
+                                    te_results,
+                                    title=f"Transfer Entropy - {metric_name}",
+                                    output_dir=te_plots_dir,
+                                    filename=f"{base_filename}_heatmap.png",
+                                    metric_name=metric_name,
+                                    round_name=round_name,
+                                    phase_name=phase_name,
+                                    threshold=args.te_threshold
+                                )
+                                print(f"    Transfer Entropy heatmap created for {metric_name}, round {round_name}, phase {phase_name}.")
+                            except Exception as e:
+                                print(f"    Error creating Transfer Entropy heatmap: {e}")
+                                
+                            # 2. Network visualization
+                            try:
+                                plot_transfer_entropy_network(
+                                    te_results,
+                                    title=f"Transfer Entropy Network - {metric_name}",
+                                    output_dir=te_plots_dir,
+                                    filename=f"{base_filename}_network.png",
+                                    metric_name=metric_name,
+                                    round_name=round_name,
+                                    phase_name=phase_name,
+                                    threshold=args.te_threshold
+                                )
+                                print(f"    Transfer Entropy network created for {metric_name}, round {round_name}, phase {phase_name}.")
+                            except Exception as e:
+                                print(f"    Error creating Transfer Entropy network: {e}")
+                                
+                        except Exception as e:
+                            print(f"    Error during Transfer Entropy analysis for {metric_name}, round {round_name}, phase {phase_name}: {e}")
+                            import traceback
+                            traceback.print_exc()
+                
+                else:
+                    # Consolidated analysis
+                    metric_df = phases_or_metric_df
+                    print(f"  Processing round: {round_name} for metric: {metric_name} (Consolidated)")
+                    
+                    if not isinstance(metric_df, pd.DataFrame) or metric_df.empty:
+                        print(f"    Skipping Transfer Entropy for metric {metric_name}, round {round_name} (Consolidated) due to empty DataFrame.")
+                        continue
+                        
+                    # Select numeric columns for analysis
+                    numeric_df = metric_df.select_dtypes(include=np.number).dropna()
+                    
+                    if numeric_df.empty or numeric_df.shape[0] < 10:  # Transfer Entropy needs sufficient time points
+                        print(f"    Skipping Transfer Entropy for {metric_name} (Consolidated) due to insufficient data (Shape: {numeric_df.shape}). Need more time points.")
+                        continue
+                    
+                    try:
+                        print(f"    Calculating Transfer Entropy for {metric_name}, round {round_name} (Consolidated)...")
+                        
+                        # Calculate pairwise transfer entropy
+                        te_results = calculate_pairwise_transfer_entropy(
+                            numeric_df,
+                            time_col='experiment_elapsed_time' if 'experiment_elapsed_time' in numeric_df.columns else None,
+                            lag=args.te_lag
+                        )
+                        
+                        # Export results
+                        base_filename = f"{metric_name}_{round_name}_consolidated_transfer_entropy"
+                        te_df = pd.DataFrame(te_results)
+                        export_to_csv(te_df, os.path.join(te_tables_dir, f"{base_filename}_matrix.csv"))
+                        
+                        # Create visualizations
+                        # 1. Heatmap visualization
+                        try:
+                            plot_transfer_entropy_heatmap(
+                                te_results,
+                                title=f"Transfer Entropy - {metric_name}",
+                                output_dir=te_plots_dir,
+                                filename=f"{base_filename}_heatmap.png",
+                                metric_name=metric_name,
+                                round_name=round_name,
+                                threshold=args.te_threshold
+                            )
+                            print(f"    Transfer Entropy heatmap created for {metric_name}, round {round_name} (Consolidated).")
+                        except Exception as e:
+                            print(f"    Error creating Transfer Entropy heatmap: {e}")
+                            
+                        # 2. Network visualization
+                        try:
+                            plot_transfer_entropy_network(
+                                te_results,
+                                title=f"Transfer Entropy Network - {metric_name}",
+                                output_dir=te_plots_dir,
+                                filename=f"{base_filename}_network.png",
+                                metric_name=metric_name,
+                                round_name=round_name,
+                                threshold=args.te_threshold
+                            )
+                            print(f"    Transfer Entropy network created for {metric_name}, round {round_name} (Consolidated).")
+                        except Exception as e:
+                            print(f"    Error creating Transfer Entropy network: {e}")
+                            
+                    except Exception as e:
+                        print(f"    Error during Transfer Entropy analysis for {metric_name}, round {round_name} (Consolidated): {e}")
+                        import traceback
+                        traceback.print_exc()
+                        
+    # --- Convergent Cross Mapping (CCM) Analysis (Nonlinear causality) ---
+    if args.run_ccm:
+        print("\nRunning Convergent Cross Mapping (CCM) Analysis...")
+        # Setup directories for saving results
+        ccm_tables_dir = os.path.join(tables_dir, "causality", "ccm")
+        ccm_plots_dir = os.path.join(plots_dir, "causality", "ccm")
+        os.makedirs(ccm_tables_dir, exist_ok=True)
+        os.makedirs(ccm_plots_dir, exist_ok=True)
+        
+        for metric_name, rounds_or_phases_data in all_metrics_data.items():
+            print(f"Processing metric: {metric_name}")
+            
+            for round_name, phases_or_metric_df in rounds_or_phases_data.items():
+                if run_per_phase_analysis:
+                    # Per-phase analysis
+                    for phase_name, phase_df in phases_or_metric_df.items():
+                        print(f"  Processing round: {round_name}, phase: {phase_name} for metric: {metric_name}")
+                        
+                        if not isinstance(phase_df, pd.DataFrame) or phase_df.empty:
+                            print(f"    Skipping CCM for metric {metric_name}, round {round_name}, phase {phase_name} due to empty DataFrame.")
+                            continue
+                            
+                        # Select numeric columns for analysis
+                        numeric_df = phase_df.select_dtypes(include=np.number).dropna()
+                        
+                        if numeric_df.empty or numeric_df.shape[0] < 30:  # CCM needs many time points (typically >30)
+                            print(f"    Skipping CCM for {metric_name} - {phase_name} due to insufficient data (Shape: {numeric_df.shape}). Need more time points.")
+                            continue
+                        
+                        try:
+                            print(f"    Calculating CCM for {metric_name}, round {round_name}, phase {phase_name}...")
+                            
+                            # Calculate pairwise CCM
+                            ccm_results = calculate_pairwise_ccm(
+                                numeric_df,
+                                time_col='experiment_elapsed_time' if 'experiment_elapsed_time' in numeric_df.columns else None,
+                                E_range=args.ccm_embed_dimensions,
+                                tau=args.ccm_tau
+                            )
+                            
+                            # Export results
+                            base_filename = f"{metric_name}_{round_name}_{phase_name}_ccm"
+                            # Export the summary table
+                            ccm_summary = summarize_ccm_results(
+                                ccm_results, 
+                                significance_threshold=args.ccm_threshold
+                            )
+                            export_to_csv(pd.DataFrame(ccm_summary), os.path.join(ccm_tables_dir, f"{base_filename}_summary.csv"))
+                            
+                            # Create visualizations
+                            # 1. CCM convergence plots
+                            try:
+                                plot_ccm_convergence(
+                                    ccm_results,
+                                    title=f"CCM Convergence - {metric_name}",
+                                    output_dir=ccm_plots_dir,
+                                    filename=f"{base_filename}_convergence.png",
+                                    metric_name=metric_name,
+                                    round_name=round_name,
+                                    phase_name=phase_name
+                                )
+                                print(f"    CCM convergence plot created for {metric_name}, round {round_name}, phase {phase_name}.")
+                            except Exception as e:
+                                print(f"    Error creating CCM convergence plot: {e}")
+                                
+                            # 2. CCM causality heatmap
+                            try:
+                                plot_ccm_causality_heatmap(
+                                    ccm_summary,
+                                    title=f"CCM Causality - {metric_name}",
+                                    output_dir=ccm_plots_dir,
+                                    filename=f"{base_filename}_causality.png",
+                                    metric_name=metric_name,
+                                    round_name=round_name,
+                                    phase_name=phase_name,
+                                    threshold=args.ccm_threshold
+                                )
+                                print(f"    CCM causality heatmap created for {metric_name}, round {round_name}, phase {phase_name}.")
+                            except Exception as e:
+                                print(f"    Error creating CCM causality heatmap: {e}")
+                                
+                        except Exception as e:
+                            print(f"    Error during CCM analysis for {metric_name}, round {round_name}, phase {phase_name}: {e}")
+                            import traceback
+                            traceback.print_exc()
+                
+                else:
+                    # Consolidated analysis
+                    metric_df = phases_or_metric_df
+                    print(f"  Processing round: {round_name} for metric: {metric_name} (Consolidated)")
+                    
+                    if not isinstance(metric_df, pd.DataFrame) or metric_df.empty:
+                        print(f"    Skipping CCM for metric {metric_name}, round {round_name} (Consolidated) due to empty DataFrame.")
+                        continue
+                        
+                    # Select numeric columns for analysis
+                    numeric_df = metric_df.select_dtypes(include=np.number).dropna()
+                    
+                    if numeric_df.empty or numeric_df.shape[0] < 30:  # CCM needs many time points (typically >30)
+                        print(f"    Skipping CCM for {metric_name} (Consolidated) due to insufficient data (Shape: {numeric_df.shape}). Need more time points.")
+                        continue
+                    
+                    try:
+                        print(f"    Calculating CCM for {metric_name}, round {round_name} (Consolidated)...")
+                        
+                        # Calculate pairwise CCM
+                        ccm_results = calculate_pairwise_ccm(
+                            numeric_df,
+                            time_col='experiment_elapsed_time' if 'experiment_elapsed_time' in numeric_df.columns else None,
+                            E_range=args.ccm_embed_dimensions,
+                            tau=args.ccm_tau
+                        )
+                        
+                        # Export results
+                        base_filename = f"{metric_name}_{round_name}_consolidated_ccm"
+                        # Export the summary table
+                        ccm_summary = summarize_ccm_results(
+                            ccm_results, 
+                            significance_threshold=args.ccm_threshold
+                        )
+                        export_to_csv(pd.DataFrame(ccm_summary), os.path.join(ccm_tables_dir, f"{base_filename}_summary.csv"))
+                        
+                        # Create visualizations
+                        # 1. CCM convergence plots
+                        try:
+                            plot_ccm_convergence(
+                                ccm_results,
+                                title=f"CCM Convergence - {metric_name}",
+                                output_dir=ccm_plots_dir,
+                                filename=f"{base_filename}_convergence.png",
+                                metric_name=metric_name,
+                                round_name=round_name
+                            )
+                            print(f"    CCM convergence plot created for {metric_name}, round {round_name} (Consolidated).")
+                        except Exception as e:
+                            print(f"    Error creating CCM convergence plot: {e}")
+                            
+                        # 2. CCM causality heatmap
+                        try:
+                            plot_ccm_causality_heatmap(
+                                ccm_summary,
+                                title=f"CCM Causality - {metric_name}",
+                                output_dir=ccm_plots_dir,
+                                filename=f"{base_filename}_causality.png",
+                                metric_name=metric_name,
+                                round_name=round_name,
+                                threshold=args.ccm_threshold
+                            )
+                            print(f"    CCM causality heatmap created for {metric_name}, round {round_name} (Consolidated).")
+                        except Exception as e:
+                            print(f"    Error creating CCM causality heatmap: {e}")
+                            
+                    except Exception as e:
+                        print(f"    Error during CCM analysis for {metric_name}, round {round_name} (Consolidated): {e}")
+                        import traceback
+                        traceback.print_exc()
+                        
+    # --- Granger Causality Analysis (Linear time series causality) ---
+    if args.run_granger:
+        print("\nRunning Granger Causality Analysis...")
+        # Setup directories for saving results
+        granger_tables_dir = os.path.join(tables_dir, "causality", "granger")
+        granger_plots_dir = os.path.join(plots_dir, "causality", "granger")
+        os.makedirs(granger_tables_dir, exist_ok=True)
+        os.makedirs(granger_plots_dir, exist_ok=True)
+        
+        for metric_name, rounds_or_phases_data in all_metrics_data.items():
+            print(f"Processing metric: {metric_name}")
+            
+            for round_name, phases_or_metric_df in rounds_or_phases_data.items():
+                if run_per_phase_analysis:
+                    # Per-phase analysis
+                    for phase_name, phase_df in phases_or_metric_df.items():
+                        print(f"  Processing round: {round_name}, phase: {phase_name} for metric: {metric_name}")
+                        
+                        if not isinstance(phase_df, pd.DataFrame) or phase_df.empty:
+                            print(f"    Skipping Granger Causality for metric {metric_name}, round {round_name}, phase {phase_name} due to empty DataFrame.")
+                            continue
+                            
+                        # Select numeric columns for analysis
+                        numeric_df = phase_df.select_dtypes(include=np.number).dropna()
+                        
+                        if numeric_df.empty or numeric_df.shape[0] <= args.granger_max_lag + 2:  # Need more data points than max_lag
+                            print(f"    Skipping Granger Causality for {metric_name} - {phase_name} due to insufficient data (Shape: {numeric_df.shape}). Need more time points than max_lag.")
+                            continue
+                        
+                        try:
+                            print(f"    Calculating Granger Causality for {metric_name}, round {round_name}, phase {phase_name}...")
+                            
+                            # Calculate pairwise Granger Causality
+                            granger_results = calculate_pairwise_granger_causality(
+                                numeric_df,
+                                time_col='experiment_elapsed_time' if 'experiment_elapsed_time' in numeric_df.columns else None,
+                                max_lag=args.granger_max_lag,
+                                criterion=args.granger_criterion
+                            )
+                            
+                            # Export results
+                            base_filename = f"{metric_name}_{round_name}_{phase_name}_granger"
+                            # Convert dictionary of results to DataFrame
+                            granger_df = pd.DataFrame({
+                                'source': [pair[0] for pair in granger_results],
+                                'target': [pair[1] for pair in granger_results],
+                                'test_statistic': [granger_results[pair]['test_statistic'] for pair in granger_results],
+                                'p_value': [granger_results[pair]['p_value'] for pair in granger_results],
+                                'optimal_lag': [granger_results[pair]['optimal_lag'] for pair in granger_results]
+                            })
+                            export_to_csv(granger_df, os.path.join(granger_tables_dir, f"{base_filename}_results.csv"))
+                            
+                            # Create visualizations
+                            # 1. Granger causality heatmap
+                            try:
+                                plot_granger_causality_heatmap(
+                                    granger_results,
+                                    title=f"Granger Causality - {metric_name}",
+                                    output_dir=granger_plots_dir,
+                                    filename=f"{base_filename}_heatmap.png",
+                                    metric_name=metric_name,
+                                    round_name=round_name,
+                                    phase_name=phase_name
+                                )
+                                print(f"    Granger Causality heatmap created for {metric_name}, round {round_name}, phase {phase_name}.")
+                            except Exception as e:
+                                print(f"    Error creating Granger Causality heatmap: {e}")
+                                
+                            # 2. Granger causality network
+                            try:
+                                plot_granger_causality_network(
+                                    granger_results,
+                                    title=f"Granger Causality Network - {metric_name}",
+                                    output_dir=granger_plots_dir,
+                                    filename=f"{base_filename}_network.png",
+                                    metric_name=metric_name,
+                                    round_name=round_name,
+                                    phase_name=phase_name
+                                )
+                                print(f"    Granger Causality network created for {metric_name}, round {round_name}, phase {phase_name}.")
+                            except Exception as e:
+                                print(f"    Error creating Granger Causality network: {e}")
+                                
+                        except Exception as e:
+                            print(f"    Error during Granger Causality analysis for {metric_name}, round {round_name}, phase {phase_name}: {e}")
+                            import traceback
+                            traceback.print_exc()
+                
+                else:
+                    # Consolidated analysis
+                    metric_df = phases_or_metric_df
+                    print(f"  Processing round: {round_name} for metric: {metric_name} (Consolidated)")
+                    
+                    if not isinstance(metric_df, pd.DataFrame) or metric_df.empty:
+                        print(f"    Skipping Granger Causality for metric {metric_name}, round {round_name} (Consolidated) due to empty DataFrame.")
+                        continue
+                        
+                    # Select numeric columns for analysis
+                    numeric_df = metric_df.select_dtypes(include=np.number).dropna()
+                    
+                    if numeric_df.empty or numeric_df.shape[0] <= args.granger_max_lag + 2:  # Need more data points than max_lag
+                        print(f"    Skipping Granger Causality for {metric_name} (Consolidated) due to insufficient data (Shape: {numeric_df.shape}). Need more time points than max_lag.")
+                        continue
+                    
+                    try:
+                        print(f"    Calculating Granger Causality for {metric_name}, round {round_name} (Consolidated)...")
+                        
+                        # Calculate pairwise Granger Causality
+                        granger_results = calculate_pairwise_granger_causality(
+                            numeric_df,
+                            time_col='experiment_elapsed_time' if 'experiment_elapsed_time' in numeric_df.columns else None,
+                            max_lag=args.granger_max_lag,
+                            criterion=args.granger_criterion
+                        )
+                        
+                        # Export results
+                        base_filename = f"{metric_name}_{round_name}_consolidated_granger"
+                        # Convert dictionary of results to DataFrame
+                        granger_df = pd.DataFrame({
+                            'source': [pair[0] for pair in granger_results],
+                            'target': [pair[1] for pair in granger_results],
+                            'test_statistic': [granger_results[pair]['test_statistic'] for pair in granger_results],
+                            'p_value': [granger_results[pair]['p_value'] for pair in granger_results],
+                            'optimal_lag': [granger_results[pair]['optimal_lag'] for pair in granger_results]
+                        })
+                        export_to_csv(granger_df, os.path.join(granger_tables_dir, f"{base_filename}_results.csv"))
+                        
+                        # Create visualizations
+                        # 1. Granger causality heatmap
+                        try:
+                            plot_granger_causality_heatmap(
+                                granger_results,
+                                title=f"Granger Causality - {metric_name}",
+                                output_dir=granger_plots_dir,
+                                filename=f"{base_filename}_heatmap.png",
+                                metric_name=metric_name,
+                                round_name=round_name
+                            )
+                            print(f"    Granger Causality heatmap created for {metric_name}, round {round_name} (Consolidated).")
+                        except Exception as e:
+                            print(f"    Error creating Granger Causality heatmap: {e}")
+                            
+                        # 2. Granger causality network
+                        try:
+                            plot_granger_causality_network(
+                                granger_results,
+                                title=f"Granger Causality Network - {metric_name}",
+                                output_dir=granger_plots_dir,
+                                filename=f"{base_filename}_network.png",
+                                metric_name=metric_name,
+                                round_name=round_name
+                            )
+                            print(f"    Granger Causality network created for {metric_name}, round {round_name} (Consolidated).")
+                        except Exception as e:
+                            print(f"    Error creating Granger Causality network: {e}")
+                            
+                    except Exception as e:
+                        print(f"    Error during Granger Causality analysis for {metric_name}, round {round_name} (Consolidated): {e}")
+                        import traceback
+                        traceback.print_exc()
 
 if __name__ == '__main__':
     main()

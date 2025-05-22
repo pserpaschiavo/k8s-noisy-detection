@@ -33,12 +33,6 @@ def perform_pca(df: pd.DataFrame, n_components: int | float | None = None, varia
     # Standardize the data
     scaler = StandardScaler()
     scaled_data = scaler.fit_transform(df)
-    
-    # Check for problematic values that could cause numerical issues
-    if np.isnan(scaled_data).any() or np.isinf(scaled_data).any():
-        print("Warning: Data contains NaN or Inf after standardization. Applying cleaning.")
-        # Replace NaN and Inf with zeros
-        scaled_data = np.nan_to_num(scaled_data, nan=0.0, posinf=0.0, neginf=0.0)
 
     if variance_threshold is not None and 0 < variance_threshold < 1:
         pca_temp = PCA()
@@ -98,16 +92,6 @@ def perform_ica(df: pd.DataFrame, n_components: int | None = None, random_state:
     # Standardize the data (ICA often benefits from this, similar to PCA)
     scaler = StandardScaler()
     scaled_data = scaler.fit_transform(df)
-    
-    # Check for problematic values that could cause numerical issues
-    if np.isnan(scaled_data).any() or np.isinf(scaled_data).any():
-        print("Warning: Data contains NaN or Inf after standardization. Applying cleaning.")
-        # Replace NaN and Inf with zeros
-        scaled_data = np.nan_to_num(scaled_data, nan=0.0, posinf=0.0, neginf=0.0)
-    
-    # Add a small value to ensure numerical stability
-    epsilon = 1e-10
-    scaled_data = np.where(np.abs(scaled_data) < epsilon, epsilon, scaled_data)
 
     if n_components is None:
         n_components = scaled_data.shape[1]
@@ -115,24 +99,8 @@ def perform_ica(df: pd.DataFrame, n_components: int | None = None, random_state:
         print(f"Warning: n_components ({n_components}) for ICA is greater than the number of features ({scaled_data.shape[1]}). Setting n_components to {scaled_data.shape[1]}.")
         n_components = scaled_data.shape[1]
 
-    # Improved FastICA parameters for better convergence
-    ica = FastICA(
-        n_components=n_components, 
-        random_state=random_state, 
-        whiten='unit-variance',  # Use unit-variance whitening (more stable)
-        max_iter=2000,           # Increase max iterations (default is 200)
-        tol=1e-5                 # Adjust tolerance for convergence
-    )
-    
-    # Wrap the fit_transform in try-except to provide more informative errors
-    try:
-        independent_components = ica.fit_transform(scaled_data)
-    except Exception as e:
-        print(f"ICA fitting error: {str(e)}")
-        # Return empty dataframes if ICA fails
-        empty_df = pd.DataFrame(index=df.index)
-        empty_components = pd.DataFrame(columns=df.columns)
-        return empty_df, empty_components
+    ica = FastICA(n_components=n_components, random_state=random_state, whiten='unit-variance', max_iter=500) # Added whiten and max_iter
+    independent_components = ica.fit_transform(scaled_data) # Use fit_transform
     
     ica_df = pd.DataFrame(data=independent_components, 
                           columns=[f'IC{i+1}' for i in range(independent_components.shape[1])],
@@ -142,9 +110,9 @@ def perform_ica(df: pd.DataFrame, n_components: int | None = None, random_state:
     # If you want the mixing matrix, it's ica.mixing_
     components_df = pd.DataFrame(ica.components_, 
                                  columns=df.columns, 
-                                 index=[f'IC{i+1}' for i in range(ica.n_components)])
+                                 index=[f'IC{i+1}' for i in range(ica.n_components)]) # Changed ica.n_components_ to ica.n_components
     
-    print(f"ICA: Estimated {ica.n_components} independent components.")
+    print(f"ICA: Estimated {ica.n_components} independent components.") # Changed ica.n_components_ to ica.n_components
 
     return ica_df, components_df
 
@@ -202,43 +170,43 @@ if __name__ == '__main__':
     try:
         # Test with n_components as int
         pca_results_int, pca_components_int, pca_variance_int = perform_pca(sample_df_numeric.copy(), n_components=2)
-        print("\nPCA Results (n_components=2):")
+        print("\\nPCA Results (n_components=2):")
         print(pca_results_int.head())
-        print("\nPCA Components (n_components=2):")
+        print("\\nPCA Components (n_components=2):")
         print(pca_components_int)
-        print("\nPCA Explained Variance (n_components=2):")
+        print("\\nPCA Explained Variance (n_components=2):")
         print(pca_variance_int)
 
         # Test with n_components as float (variance explained)
         pca_results_float, pca_components_float, pca_variance_float = perform_pca(sample_df_numeric.copy(), n_components=0.90)
-        print("\nPCA Results (n_components for 90% variance):")
+        print("\\nPCA Results (n_components for 90% variance):")
         print(pca_results_float.head())
         
         # Test with variance_threshold
         pca_results_thresh, pca_components_thresh, pca_variance_thresh = perform_pca(sample_df_numeric.copy(), variance_threshold=0.80)
-        print("\nPCA Results (variance_threshold=0.80):")
+        print("\\nPCA Results (variance_threshold=0.80):")
         print(pca_results_thresh.head())
 
         # Test with all components
         pca_results_all, _, _ = perform_pca(sample_df_numeric.copy())
-        print(f"\nPCA Results (all components - {pca_results_all.shape[1]}):")
+        print(f"\\nPCA Results (all components - {pca_results_all.shape[1]}):")
         print(pca_results_all.head())
 
     except ValueError as e:
         print(f"PCA Error: {e}")
 
-    print("\n" + "="*30 + "\n")
+    print("\\n" + "="*30 + "\\n")
 
     print("Running ICA example...")
     try:
         ica_results, ica_components = perform_ica(sample_df_numeric.copy(), n_components=3, random_state=42)
-        print("\nICA Results (n_components=3):")
+        print("\\nICA Results (n_components=3):")
         print(ica_results.head())
-        print("\nICA Components (n_components=3):")
+        print("\\nICA Components (n_components=3):")
         print(ica_components)
 
         ica_results_all, _ = perform_ica(sample_df_numeric.copy(), random_state=42) # All components
-        print(f"\nICA Results (all components - {ica_results_all.shape[1]}):")
+        print(f"\\nICA Results (all components - {ica_results_all.shape[1]}):")
         print(ica_results_all.head())
 
     except ValueError as e:
@@ -248,7 +216,7 @@ if __name__ == '__main__':
     # sample_df_full_cleaned = sample_df_full.select_dtypes(include=np.number).dropna()
     # if not sample_df_full_cleaned.empty:
     #     pca_results_cleaned, _, _ = perform_pca(sample_df_full_cleaned)
-    #     print("\nPCA Results (cleaned data):")
+    #     print("\\nPCA Results (cleaned data):")
     #     print(pca_results_cleaned.head())
     # else:
-    #     print("\nCleaned DataFrame is empty, skipping PCA on cleaned data.")
+    #     print("\\nCleaned DataFrame is empty, skipping PCA on cleaned data.")
