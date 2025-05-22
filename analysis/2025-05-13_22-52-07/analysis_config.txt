@@ -1,7 +1,0 @@
-Experiment: 2025-05-11/16-58-00/default-experiment-1
-Round: round-1
-Phases: 1 - Baseline, 2 - Attack, 3 - Recovery
-Components analyzed: tenant-a, tenant-b, tenant-c, tenant-d, ingress-nginx
-Metrics of interest: cpu_usage, memory_usage, network_total_bandwidth, disk_io_total
-Advanced analyses: False
-Analysis date: 2025-05-13 22:53:14
