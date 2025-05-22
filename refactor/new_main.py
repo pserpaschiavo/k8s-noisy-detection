@@ -13,7 +13,7 @@ import numpy as np
 import itertools  # Added import
 
 """
-New main script for the refactored noisy neighbor experiment analysis pipeline.
+New main script for the refactored experiment analysis pipeline.
 """
 
 # Refactored modules
@@ -22,6 +22,7 @@ from refactor.data_handling.save_results import export_to_csv, save_figure  # Co
 from refactor.analysis_modules.correlation_covariance import (
     calculate_correlation_matrix,  # Corrected import name
     calculate_covariance_matrix,  # Not used in this basic setup yet
+    calculate_inter_tenant_correlation_per_metric,  # Used for correlation analysis
     calculate_inter_tenant_covariance_per_metric  # Not used in this basic setup yet
 )
 from refactor.analysis_modules.descritive_statistics import calculate_descriptive_statistics  # Added import
@@ -37,14 +38,14 @@ from refactor.data_handling.new_time_normalization import add_experiment_elapsed
 # Existing pipeline modules (will be gradually replaced or integrated)
 from refactor.new_config import (
     DEFAULT_DATA_DIR, DEFAULT_METRICS, METRIC_DISPLAY_NAMES,
-    VISUALIZATION_CONFIG, TENANT_COLORS, DEFAULT_NOISY_TENANT  # TENANT_COLORS, VISUALIZATION_CONFIG might be needed by plots
+    VISUALIZATION_CONFIG, TENANT_COLORS, PHASE_DISPLAY_NAMES  # Adicionado PHASE_DISPLAY_NAMES
 )
 # Add other necessary imports from pipeline.config or other modules as needed
 
 
 def parse_arguments():
     """Parse command line arguments."""
-    parser = argparse.ArgumentParser(description='Refactored pipeline for noisy neighbor experiment analysis.')
+    parser = argparse.ArgumentParser(description='Refactored pipeline for experiment analysis.')
     parser.add_argument('--data-dir', type=str, default=DEFAULT_DATA_DIR,
                         help='Directory with the experiment data')
     parser.add_argument('--output-dir', type=str, default='output_refactored',
@@ -55,8 +56,6 @@ def parse_arguments():
                         help='Specific metric(s) to analyze')
     parser.add_argument('--rounds', type=str, nargs='+',
                         help='Specific round(s) to analyze')
-    parser.add_argument('--noisy-tenant', type=str, default=DEFAULT_NOISY_TENANT,
-                        help='Tenant considered to be the noisy one.')
     # Add more arguments as functionality is integrated
     parser.add_argument('--run-correlation', action='store_true', help='Run correlation analysis')
     parser.add_argument('--correlation-methods', type=str, nargs='+', default=['pearson'],
@@ -104,10 +103,10 @@ def setup_output_directories(output_dir):
     correlation_tables_dir = os.path.join(tables_dir, "correlation")
     covariance_plots_dir = os.path.join(plots_dir, "covariance")
     covariance_tables_dir = os.path.join(tables_dir, "covariance")
-    multivariate_dir = os.path.join(output_dir, "multivariate")  # New directory for PCA/ICA
+    multivariate_dir = os.path.join(tables_dir, "multivariate")  # Directory within tables for PCA/ICA
     pca_output_dir = os.path.join(multivariate_dir, "pca")
     ica_output_dir = os.path.join(multivariate_dir, "ica")
-    comparison_output_dir = os.path.join(multivariate_dir, "comparison")  # New directory for PCA vs ICA comparison
+    comparison_output_dir = os.path.join(multivariate_dir, "comparison")  # Directory for PCA vs ICA comparison
 
     os.makedirs(plots_dir, exist_ok=True)
     os.makedirs(tables_dir, exist_ok=True)
@@ -542,14 +541,18 @@ def main():
                                         print(f"      Skipping {metric_name}, round {round_name}, phase {phase_name} ({current_method_inner_loop}): 'timestamp' column not found.")
                                         continue
 
-                                    correlation_matrix_df = calculate_correlation_matrix(
+                                    correlation_matrix_df = calculate_inter_tenant_correlation_per_metric(
                                         metric_df, method=current_method_inner_loop, time_col='timestamp'
                                     )
                                     if correlation_matrix_df is not None and not correlation_matrix_df.empty:
                                         method_correlation_dfs_for_current_scope_phase[current_method_inner_loop] = correlation_matrix_df
                                         display_metric_name = METRIC_DISPLAY_NAMES.get(metric_name, metric_name)
                                         plot_filename = f"{metric_name}_{round_name}_{phase_name}_{current_method_inner_loop}_correlation_heatmap.png"
-                                        plot_title = f"Inter-Tenant Correlation ({current_method_inner_loop.capitalize()}): {display_metric_name} (Round: {round_name}, Phase: {phase_name})"
+                                        # Formatando o round_name para "Round X" (extraindo o número após "round-")
+                                        round_number = round_name.split('-')[-1]
+                                        # Usando PHASE_DISPLAY_NAMES para obter apenas o nome da fase sem o número
+                                        phase_display = PHASE_DISPLAY_NAMES.get(phase_name, phase_name)
+                                        plot_title = f"Inter Tenant Correlation by {display_metric_name}: Round {round_number} - {phase_display}"
                                         fig = plot_correlation_heatmap(
                                             correlation_matrix_df, title=plot_title, output_dir=correlation_plots_dir, filename=plot_filename
                                         )
@@ -593,7 +596,11 @@ def main():
                                         scatter_data_dict = {f'{method1_name.capitalize()} vs {method2_name.capitalize()}': (values1, values2)}
                                         display_metric_name = METRIC_DISPLAY_NAMES.get(metric_name, metric_name)
                                         scatter_plot_filename = f"scatter_{metric_name}_{round_name}_{phase_name}_{method1_name}_vs_{method2_name}.png"
-                                        scatter_plot_title = f"Comparison: {method1_name.capitalize()} vs {method2_name.capitalize()} Corr.\n{display_metric_name} (Round: {round_name}, Phase: {phase_name})"
+                                        # Formatando o round_name para "Round X" (extraindo o número após "round-")
+                                        round_number = round_name.split('-')[-1]
+                                        # Usando PHASE_DISPLAY_NAMES para obter apenas o nome da fase sem o número
+                                        phase_display = PHASE_DISPLAY_NAMES.get(phase_name, phase_name)
+                                        scatter_plot_title = f"Comparison: {method1_name.capitalize()} vs {method2_name.capitalize()} Correlation\n{display_metric_name}: Round {round_number} - {phase_display}"
 
                                         fig_scatter = plot_scatter_comparison(
                                             data_dict=scatter_data_dict,
@@ -629,14 +636,16 @@ def main():
                                     print(f"      Skipping {metric_name}, round {round_name} ({current_method_inner_loop}): 'timestamp' column not found.")
                                     continue
 
-                                correlation_matrix_df = calculate_correlation_matrix(
+                                correlation_matrix_df = calculate_inter_tenant_correlation_per_metric(
                                     metric_df, method=current_method_inner_loop, time_col='timestamp'
                                 )
                                 if correlation_matrix_df is not None and not correlation_matrix_df.empty:
                                     method_correlation_dfs_for_current_scope_consolidated[current_method_inner_loop] = correlation_matrix_df
                                     display_metric_name = METRIC_DISPLAY_NAMES.get(metric_name, metric_name)
                                     plot_filename = f"{metric_name}_{round_name}_{current_method_inner_loop}_correlation_heatmap.png"
-                                    plot_title = f"Inter-Tenant Correlation ({current_method_inner_loop.capitalize()}): {display_metric_name} (Round: {round_name})"
+                                    # Formatando o round_name para "Round X" (extraindo o número após "round-")
+                                    round_number = round_name.split('-')[-1]
+                                    plot_title = f"Inter Tenant Correlation by {display_metric_name}: Round {round_number}"
                                     fig = plot_correlation_heatmap(
                                         correlation_matrix_df, title=plot_title, output_dir=correlation_plots_dir, filename=plot_filename
                                     )
@@ -680,7 +689,7 @@ def main():
                                     scatter_data_dict = {f'{method1_name.capitalize()} vs {method2_name.capitalize()}': (values1, values2)}
                                     display_metric_name = METRIC_DISPLAY_NAMES.get(metric_name, metric_name)
                                     scatter_plot_filename = f"scatter_{metric_name}_{round_name}_consolidated_{method1_name}_vs_{method2_name}.png"
-                                    scatter_plot_title = f"Comparison: {method1_name.capitalize()} vs {method2_name.capitalize()} Corr.\n{display_metric_name} (Round: {round_name}, Consolidated)"
+                                    scatter_plot_title = f"Comparison: {method1_name.capitalize()} vs {method2_name.capitalize()} Correlation\n{display_metric_name}: {round_name}"
 
                                     fig_scatter = plot_scatter_comparison(
                                         data_dict=scatter_data_dict,
@@ -739,7 +748,11 @@ def main():
                             if covariance_matrix_df is not None and not covariance_matrix_df.empty:
                                 display_metric_name = METRIC_DISPLAY_NAMES.get(metric_name, metric_name)
                                 plot_filename = f"{metric_name}_{round_name}_{phase_name}_covariance_heatmap.png"
-                                plot_title = f"Inter-Tenant Covariance: {display_metric_name} (Round: {round_name}, Phase: {phase_name})"
+                                # Formatando o round_name para "Round X" (extraindo o número após "round-")
+                                round_number = round_name.split('-')[-1]
+                                # Usando PHASE_DISPLAY_NAMES para obter apenas o nome da fase sem o número
+                                phase_display = PHASE_DISPLAY_NAMES.get(phase_name, phase_name)
+                                plot_title = f"Inter Tenant Covariance by {display_metric_name}: Round {round_number} - {phase_display}"
                                 fig = plot_covariance_heatmap(
                                     covariance_matrix_df, title=plot_title, output_dir=covariance_plots_dir, filename=plot_filename
                                 )
@@ -779,7 +792,9 @@ def main():
                         if covariance_matrix_df is not None and not covariance_matrix_df.empty:
                             display_metric_name = METRIC_DISPLAY_NAMES.get(metric_name, metric_name)
                             plot_filename = f"{metric_name}_{round_name}_covariance_heatmap.png"
-                            plot_title = f"Inter-Tenant Covariance: {display_metric_name} (Round: {round_name})"
+                            # Formatando o round_name para "Round X" (extraindo o número após "round-")
+                            round_number = round_name.split('-')[-1]
+                            plot_title = f"Inter Tenant Covariance by {display_metric_name}: Round {round_number}"
                             fig = plot_covariance_heatmap(
                                 covariance_matrix_df, title=plot_title, output_dir=covariance_plots_dir, filename=plot_filename
                             )
@@ -848,7 +863,7 @@ def main():
                             data_df=phase_df,
                             metric_name=metric_name,
                             value_column='value',
-                            title=f"Metric Over Time by Tenant",
+                            title=f"{display_metric_name} Over Time",
                             output_dir=output_plots_descriptive_stats_dir,
                             filename=filename_lineplot,
                             round_name=round_name,
@@ -861,7 +876,7 @@ def main():
                             data_df=phase_df,
                             metric_name=metric_name,
                             value_column='value',
-                            title=f"Metric Distribution by Tenant",
+                            title=f"{display_metric_name} Distribution",
                             output_dir=output_plots_descriptive_stats_dir,
                             filename=filename_boxplot,
                             round_name=round_name,
@@ -875,7 +890,7 @@ def main():
                                 stats_df=descriptive_stats_df,  # CORRECTED: Using descriptive stats
                                 metric_name=metric_name,
                                 value_column='mean',  # CORRECTED: Catplot should plot the 'mean'
-                                title=f"Mean Metric Value by Tenant",
+                                title=f"{display_metric_name} Mean Values",
                                 output_dir=output_plots_descriptive_stats_dir,
                                 filename=filename_catplot,
                                 round_name=round_name,
@@ -916,7 +931,7 @@ def main():
                         data_df=metric_df_consolidated,
                         metric_name=metric_name,
                         value_column='value',
-                        title=f"Metric Over Time by Tenant (Consolidated)",
+                        title=f"{display_metric_name} Over Time (Consolidated)",
                         output_dir=output_plots_descriptive_stats_dir,
                         filename=filename_lineplot,
                         round_name=round_name
@@ -928,7 +943,7 @@ def main():
                         data_df=metric_df_consolidated,
                         metric_name=metric_name,
                         value_column='value',
-                        title=f"Metric Distribution by Tenant (Consolidated)",
+                        title=f"{display_metric_name} Distribution (Consolidated)",
                         output_dir=output_plots_descriptive_stats_dir,
                         filename=filename_boxplot,
                         round_name=round_name
@@ -941,7 +956,7 @@ def main():
                             stats_df=descriptive_stats_df,  # CORRECTED: Using descriptive stats
                             metric_name=metric_name,
                             value_column='mean',  # CORRECTED: Catplot should plot the 'mean'
-                            title=f"Mean Metric Value by Tenant (Consolidated)",
+                            title=f"{display_metric_name} Mean Values (Consolidated)",
                             output_dir=output_plots_descriptive_stats_dir,
                             filename=filename_catplot,
                             round_name=round_name

@@ -2,7 +2,7 @@ import pandas as pd
 import numpy as np
 
 # Moved from pipeline.analysis.tenant_analysis
-def calculate_correlation_matrix(metrics_dict, tenants=None, round_name='round-1', noisy_tenant=None, method='pearson'):
+def calculate_correlation_matrix(metrics_dict, tenants=None, round_name='round-1', method='pearson'):
     """
     Calcula uma matriz de correlação entre métricas de diferentes tenants.
     
@@ -10,7 +10,6 @@ def calculate_correlation_matrix(metrics_dict, tenants=None, round_name='round-1
         metrics_dict (dict): Dicionário com DataFrames para cada métrica
         tenants (list): Lista de tenants a incluir (None = todos)
         round_name (str): Round a ser analisado
-        noisy_tenant (str): Tenant específico que gera ruído (por padrão: DEFAULT_NOISY_TENANT da configuração)
         method (str): Método de correlação a ser usado ('pearson', 'spearman', 'kendall'). Padrão: 'pearson'.
         
     Returns:
@@ -20,11 +19,6 @@ def calculate_correlation_matrix(metrics_dict, tenants=None, round_name='round-1
     # The new approach focuses on per-metric, inter-tenant correlation using
     # calculate_inter_tenant_correlation_per_metric, which takes a pre-filtered
     # DataFrame for a single metric and round.
-    # If a global noisy_tenant is still needed, it should be passed from new_config.py
-    # via the main script.
-    
-    # Determinar qual é o tenant gerador de ruído
-    # noisy_tenant = noisy_tenant if noisy_tenant else DEFAULT_NOISY_TENANT # Example if using a passed config
     
     # Preparar dados para correlação
     correlation_data = {}
@@ -36,9 +30,6 @@ def calculate_correlation_matrix(metrics_dict, tenants=None, round_name='round-1
         if tenants:
             round_df = round_df[round_df['tenant'].isin(tenants)]
         
-        # Verificar se o tenant gerador de ruído está presente
-        has_noisy_tenant = noisy_tenant in round_df['tenant'].unique()
-        
         # Pivotar para ter uma coluna para cada tenant
         pivot = round_df.pivot_table(
             index='datetime',
@@ -48,10 +39,6 @@ def calculate_correlation_matrix(metrics_dict, tenants=None, round_name='round-1
         
         # Preencher valores NaN com 0
         pivot.fillna(0, inplace=True)
-        
-        # Garantir que tenant gerador de ruído esteja presente para consistência nas análises
-        if not has_noisy_tenant and noisy_tenant not in pivot.columns:
-            pivot[noisy_tenant] = 0  # Adicionar tenant gerador de ruído com valores zero
         
         # Adicionar ao dicionário com prefixo da métrica
         for tenant in pivot.columns:

@@ -1,5 +1,5 @@
 """
-Módulo de normalização temporal para o experimento de noisy neighbors.
+Módulo de normalização temporal para o experimento.
 
 Este módulo fornece funções para normalizar timestamps e adicionar
 campos de tempo decorrido aos DataFrames do experimento.

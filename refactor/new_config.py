@@ -1,12 +1,12 @@
 # filepath: /home/phil/Projects/k8s-noisy-detection/pipeline/config.py
 """
-Arquivo de configuração para o pipeline de análise de dados do experimento de noisy neighbors.
+Arquivo de configuração para o pipeline de análise de dados do experimento.
 """
 import os  # Adicionado para os.path
 
 # Configurações gerais
 PROJECT_ROOT = os.path.abspath(os.path.join(os.path.dirname(__file__), '..'))
-DEFAULT_DATA_DIR = os.path.join(PROJECT_ROOT, "demo-data", "demo-experiment-3-rounds")
+DEFAULT_DATA_DIR = os.path.join(PROJECT_ROOT, "demo-data", "demo-experiment-1-round")
 DEFAULT_OUTPUT_DIR = os.path.join(PROJECT_ROOT, "output")
 
 # Configurações de métricas
@@ -45,14 +45,11 @@ TENANT_COLORS = {
     # '#b15928'   # Brown
 }
 
-# Tenant configurado como gerador de ruído (noisy neighbor)
-DEFAULT_NOISY_TENANT = 'tenant-b'
-
 # Formatted names for metrics (for graph titles and tables)
 METRIC_DISPLAY_NAMES = {
-    "cpu_usage": "CPU Usage",
+    "cpu_usage": "CPU Usage (Cores)",
     "cpu_usage_variability": "CPU Usage Variability",
-    "memory_usage": "Memory Usage",
+    "memory_usage": "Memory Usage (MB)",
     "disk_io_total": "Disk I/O Operations (ops/s)",
     "disk_throughput_total": "Disk Throughput (MB/s)",
     "network_receive": "Network Receive Traffic (MB/s)",
@@ -119,7 +116,7 @@ IMPACT_CALCULATION_DEFAULTS = {
     "baseline_phase_name": "Baseline",  # Match actual column name from pivot_df
     "attack_phase_name": "Attack",      # Match actual column name from pivot_df
     "recovery_phase_name": "Recovery",  # Match actual column name from pivot_df
-    "metrics_for_impact_score": ["cpu_usage", "memory_usage", "network_total_bandwidth"]
+    "metrics_for_impact_score": ["cpu_usage", "memory_usage", "network_total_bandwidth", "disk_throughput_total"]
 }
 
 # Defines attributes for metrics, e.g., whether higher values are better.
@@ -131,33 +128,4 @@ METRICS_CONFIG = {
     "network_total_bandwidth": {"higher_is_better": True},
     # Ensure all metrics listed in IMPACT_CALCULATION_DEFAULTS["metrics_for_impact_score"]
     # and any other metrics potentially used for impact scores are defined here.
-}
-
-# Weights for metrics in the Impact Score.
-# This is imported and used directly by advanced_analysis.py.
-IMPACT_SCORE_WEIGHTS = {
-    "cpu_usage": 0.4,
-    "memory_usage": 0.3,
-    "network_total_bandwidth": 0.3
-    # Ensure these correspond to metrics that might be included in the score.
-}
-
-# Configuration for Inter-Tenant Causality Analysis
-DEFAULT_CAUSALITY_MAX_LAG = 5
-DEFAULT_CAUSALITY_THRESHOLD_P_VALUE = 0.05
-DEFAULT_METRICS_FOR_CAUSALITY = [
-    "cpu_usage",
-    "memory_usage",
-    "network_total_bandwidth"
-]
-
-# Colors for metrics in causality graph (can be expanded)
-# Usando cores mais formais para publicações acadêmicas
-CAUSALITY_METRIC_COLORS = {
-    "cpu_usage": "#4472C4",      # Azul formal
-    "memory_usage": "#ED7D31",   # Laranja formal
-    "network_total_bandwidth": "#70AD47", # Verde formal
-    "disk_throughput_total": "#5B9BD5",  # Azul claro formal
-    "pod_restarts": "#7030A0",  # Roxo formal
-    "oom_kills": "#C00000"      # Vermelho formal
 }
