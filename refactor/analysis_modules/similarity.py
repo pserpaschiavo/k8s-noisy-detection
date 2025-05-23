@@ -7,7 +7,7 @@ import os
 from itertools import combinations
 from tslearn.metrics import dtw  # Import tslearn.metrics.dtw for Dynamic Time Warping
 from sklearn.feature_selection import mutual_info_regression  # Import for Mutual Information calculation
-from ..data_handling.save_results import save_figure # Import save_figure
+from data_handling.save_results import save_figure, export_to_csv  # Use absolute imports for save_results
 
 def calculate_pairwise_distance_correlation(data_df: pd.DataFrame, time_col: str, metric_col: str, group_col: str, min_observations: int = 10):
     """
@@ -130,7 +130,6 @@ def plot_distance_correlation_heatmap(dcor_matrix: pd.DataFrame, title: str, out
             os.makedirs(tables_dir, exist_ok=True)
             
             # Export the matrix to CSV
-            from ..data_handling.save_results import export_to_csv
             export_to_csv(dcor_matrix, csv_filename, float_format='.4f')
             print(f"Distance correlation matrix exported to {csv_filename}")
     except Exception as e:
@@ -283,7 +282,6 @@ def plot_cosine_similarity_heatmap(cosine_matrix: pd.DataFrame, title: str, outp
             os.makedirs(tables_dir, exist_ok=True)
             
             # Export the matrix to CSV
-            from ..data_handling.save_results import export_to_csv
             export_to_csv(cosine_matrix, csv_filename, float_format='.4f')
             print(f"Cosine similarity matrix exported to {csv_filename}")
         
@@ -476,7 +474,6 @@ def plot_dtw_distance_heatmap(dtw_matrix: pd.DataFrame, title: str, output_dir: 
             os.makedirs(tables_dir, exist_ok=True)
             
             # Export the matrix to CSV
-            from ..data_handling.save_results import export_to_csv
             export_to_csv(dtw_matrix, csv_filename, float_format='.4f')
             print(f"DTW distance matrix exported to {csv_filename}")
         
@@ -669,7 +666,6 @@ def plot_mutual_information_heatmap(mi_matrix: pd.DataFrame, title: str, output_
             os.makedirs(tables_dir, exist_ok=True)
             
             # Export the matrix to CSV
-            from ..data_handling.save_results import export_to_csv
             export_to_csv(mi_matrix, csv_filename, float_format='.4f')
             print(f"Mutual information matrix exported to {csv_filename}")
         

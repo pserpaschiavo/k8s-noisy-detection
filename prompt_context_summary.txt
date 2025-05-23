@@ -1,0 +1,41 @@
+TASK DESCRIPTION:
+Build and clean up a unified data-analysis pipeline in refactor/new_main.py that supports multi-tenant Kubernetes noisy-neighbour detection via:
+ • Descriptive statistics (grouped and overall) with CSV export and box/line plots
+ • Inter-tenant correlation & covariance (per round/phase) with CSV export and heatmaps
+ • Multivariate analysis (PCA/ICA) with component extraction, CSV export, scree plots, biplots, loadings heatmaps, and PCA⇄ICA comparisons
+ • Causal analysis (SEM) with configurable model spec, CSV export of estimates & stats, path and fit diagrams
+ • Similarity analysis (distance correlation, cosine similarity, mutual information) with CSV export and heatmaps
+Provide CLI flags to run each module, create test scripts to validate each step, and ensure correct imports, function calls, and directory setups.
+
+COMPLETED:
+ • Refactored import signatures in new_main.py for PCA/ICA
+ • Created/refined test_fixes.py: sys.path hack, tests for PCA/ICA and new_plots functions
+ • Added Descriptive Statistics block in new_main.py, integrated calculate_descriptive_statistics, CSV export, boxplot/lineplot
+ • Wrote test_descriptive_stats.py, validated stats CSV export and plots
+ • Added Correlation/Covariance block in new_main.py using calculate_inter_tenant_correlation_per_metric & calculate_inter_tenant_covariance_per_metric, CSV export & heatmaps
+ • Wrote test_correlation_covariance.py, validated outputs and plots
+ • Sketched CLI flags and blocks for causality (--run-causality) and similarity (--run-similarity) analysis
+ • Replaced prints with logging in setup and data-load phases
+
+PENDING:
+ • Parameterize and fully implement SEM block: add --sem-model-spec, --sem-exog-vars, call perform_sem_analysis, write test_causality.py
+ • Flesh out similarity block: pass time_col, metric_col, group_col to calculate_pairwise_*, write test_similarity.py
+ • Integrate non-linear multivariate techniques (KernelPCA, t-SNE, UMAP, transfer entropy, MI heatmaps) with CLI flags and tests
+ • Refactor new_main.py to remove commented code, unify logging, extract helper functions, improve error handling
+ • Update documentation (README.md, docs/*.md) with usage examples
+ • Configure CI pipeline to run tests and capture artifacts
+
+CODE STATE & STRUCTURE:
+Folders:
+ • refactor/: new_main.py, new_config.py, tests (test_fixes.py, test_descriptive_stats.py, test_correlation_covariance.py), analysis_modules/, data_handling/, visualization/
+ • demo-data/: sample experiment data for rounds and phases
+ • docs/: similarity_analysis_guide.md, visualization_guide.md
+ • Root: README.md, requirements.txt, LICENSE
+
+Key Modules:
+ • new_main.py: CLI args, setup dirs, load/preprocess, modules for each analysis, helper perform_multivariate_analysis_on_df
+ • analysis_modules/: descritive_statistics.py, correlation_covariance.py, multivariate_exploration.py, causality.py, similarity.py
+ • data_handling/: loader.py, save_results.py
+ • visualization/new_plots.py
+
+Use this summary for future prompts and reference.

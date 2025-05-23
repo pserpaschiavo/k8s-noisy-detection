@@ -55,6 +55,10 @@ def parse_arguments():
     parser.add_argument("--compare-pca-ica", action="store_true", help="Compare top features from PCA and ICA.")
     parser.add_argument("--n-top-features-comparison", type=int, default=5, help="Number of top features to compare between PCA and ICA.")
     parser.add_argument("--verbose", action="store_true", help="Enable verbose debug output.")
+    parser.add_argument("--sem-model-spec", type=str,
+                        help="SEM model specification string in semopy syntax (e.g., 'Y ~ X1 + X2; X1 ~~ X2')")
+    parser.add_argument("--sem-exog-vars", nargs='*',
+                        help="List of exogenous variable names for SEM")
 
     return parser.parse_args()
 
@@ -298,37 +302,72 @@ def main():
 
     # Causality Analysis
     if args.run_causality:
-        print("DEBUG: Running causal analysis module...")
-        for metric_name, rounds_data in all_metrics_data.items():
-            # Iterate through rounds
-            for round_key, rd in rounds_data.items():
-                # Determine dataframes based on per-phase flag
-                phase_dicts = {}
-                if run_per_phase_analysis and isinstance(rd, dict):
-                    phase_dicts = rd
-                elif not run_per_phase_analysis and isinstance(rd, pd.DataFrame):
-                    phase_dicts = {None: rd}
-                else:
-                    continue
-                for phase_key, df_metric in phase_dicts.items():
-                    if df_metric.empty:
+        logging.info("Running causal analysis module...")
+        # Setup SEM-specific directories
+        sem_plots_dir = os.path.join(plots_dir, 'causality')
+        sem_tables_dir = os.path.join(tables_dir, 'causality')
+        os.makedirs(sem_plots_dir, exist_ok=True)
+        os.makedirs(sem_tables_dir, exist_ok=True)
+
+        if not args.sem_model_spec:
+            logging.error("SEM model spec (--sem-model-spec) is required to run causal analysis. Skipping SEM block.")
+        else:
+            for metric_name, rounds_data in all_metrics_data.items():
+                for round_key, rd in rounds_data.items():
+                    phase_dicts = {}
+                    if run_per_phase_analysis and isinstance(rd, dict):
+                        phase_dicts = rd
+                    elif not run_per_phase_analysis and isinstance(rd, pd.DataFrame):
+                        phase_dicts = {None: rd}
+                    else:
                         continue
-                    # Perform SEM analysis
-                    sem_results = perform_sem_analysis(df_metric, dependent_var='AttackSuccess', independent_vars=['Metric1', 'Metric2'], time_col='datetime')
-                    # Export SEM results
-                    sem_results_csv = os.path.join(tables_dir, f"{metric_name}_{round_key}_{phase_key}_sem_results.csv")
-                    export_to_csv(sem_results, sem_results_csv)
-                    # Plot SEM path diagram and fit indices
-                    plot_sem_path_diagram(sem_results, 
-                                          title=f"SEM Path Diagram for {metric_name} {round_key} {phase_key}",
-                                          output_dir=plots_dir,
-                                          filename=f"{metric_name}_{round_key}_{phase_key}_sem_path_diagram.png")
-                    plot_sem_fit_indices(sem_results, 
-                                        title=f"SEM Fit Indices for {metric_name} {round_key} {phase_key}",
-                                        output_dir=plots_dir,
-                                        filename=f"{metric_name}_{round_key}_{phase_key}_sem_fit_indices.png")
-        print("DEBUG: Causal analysis completed.")
-        sys.stdout.flush()
+                    for phase_key, df_metric in phase_dicts.items():
+                        if df_metric.empty:
+                            continue
+                        # Prepare data for SEM: select numeric columns including exogenous/endogenous
+                        sem_data = df_metric.select_dtypes(include=[np.number]).dropna()
+                        try:
+                            sem_results = perform_sem_analysis(
+                                sem_data,
+                                args.sem_model_spec,
+                                exog_vars=args.sem_exog_vars
+                            )
+                        except Exception as e:
+                            logging.error(f"Error during SEM fit for {metric_name} {round_key} {phase_key}: {e}")
+                            continue
+                        # Export estimates and stats
+                        estimates_df = sem_results.get('estimates')
+                        stats_dict = sem_results.get('stats')
+                        stats_df = pd.DataFrame([stats_dict]) if stats_dict else pd.DataFrame()
+
+                        est_csv = os.path.join(sem_tables_dir, f"{metric_name}_{round_key}_{phase_key}_sem_estimates.csv")
+                        stats_csv = os.path.join(sem_tables_dir, f"{metric_name}_{round_key}_{phase_key}_sem_stats.csv")
+                        export_to_csv(estimates_df, est_csv)
+                        export_to_csv(stats_df, stats_csv)
+
+                        # Plot path diagram and fit indices
+                        path_file = f"{metric_name}_{round_key}_{phase_key}_sem_path.png"
+                        fit_file = f"{metric_name}_{round_key}_{phase_key}_sem_fit.png"
+                        plot_sem_path_diagram(
+                            sem_results,
+                            title=f"SEM Path Diagram for {metric_name} {round_key} {phase_key}",
+                            output_dir=sem_plots_dir,
+                            filename=path_file,
+                            metric_name=metric_name,
+                            round_name=round_key,
+                            phase_name=phase_key
+                        )
+                        plot_sem_fit_indices(
+                            sem_results,
+                            title=f"SEM Fit Indices for {metric_name} {round_key} {phase_key}",
+                            output_dir=sem_plots_dir,
+                            filename=fit_file,
+                            metric_name=metric_name,
+                            round_name=round_key,
+                            phase_name=phase_key
+                        )
+            logging.info("Causal analysis completed.")
+            sys.stdout.flush()
 
     # Similarity Analysis
     if args.run_similarity:
@@ -348,8 +387,10 @@ def main():
                     if df_metric.empty:
                         continue
                     # Calculate pairwise distance correlation and cosine similarity
-                    distance_corr_df = calculate_pairwise_distance_correlation(df_metric, time_col='datetime')
-                    cosine_sim_df = calculate_pairwise_cosine_similarity(df_metric, time_col='datetime')
+                    distance_corr_df = calculate_pairwise_distance_correlation(
+                        df_metric, time_col='datetime', metric_col='value', group_col='tenant')
+                    cosine_sim_df = calculate_pairwise_cosine_similarity(
+                        df_metric, time_col='datetime', metric_col='value', group_col='tenant')
                     # Export distance correlation and cosine similarity results
                     distance_corr_csv = os.path.join(tables_dir, f"{metric_name}_{round_key}_{phase_key}_pairwise_distance_correlation.csv")
                     cosine_sim_csv = os.path.join(tables_dir, f"{metric_name}_{round_key}_{phase_key}_pairwise_cosine_similarity.csv")

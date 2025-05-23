@@ -68,3 +68,26 @@ Para implementar estas visualizações de forma eficiente, sugiro criar funçõe
    - Implementar gráficos side-by-side para facilitar a comparação visual
 
 Você gostaria que eu implemente alguma dessas visualizações específicas? Podemos começar com as mais importantes para seu caso de uso.
+
+---
+Aqui está o inventário detalhado dos módulos de análise atualmente na pasta analysis_modules/, seu estado de implementação e testes, e como estão integrados em new_main.py:
+
+multivariate_exploration.py
+• Funções: perform_pca, perform_ica, get_top_features_per_component
+• Estado: completo, testado via test_fixes.py, integrado em new_main.py.
+
+descritive_statistics.py
+• Funções de estatística descritiva (média, mediana, boxplot, histograma)
+• Estado: implementado, sem testes automatizados, chamadas no new_main.py estão comentadas.
+
+correlation_covariance.py
+• Funções de correlação (Pearson, Spearman, Kendall) e covariância
+• Estado: implementado, sem testes automatizados, chamadas no new_main.py estão comentadas.
+
+causality.py
+• Funções para análise de causalidade (Granger, etc.)
+• Estado: implementado, sem testes, não referenciado em new_main.py.
+
+similarity.py
+• Métricas de similaridade (correlação de distância, DTW, MI) e geração de heatmaps
+• Estado: implementado, sem testes, não referenciado em new_main.py.
