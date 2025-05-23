@@ -1,0 +1,48 @@
+Project: k8s-noisy-detection
+
+Objective:
+  Multi-tenant Kubernetes noisy-neighbor detection pipeline with modules for:
+    • Descriptive statistics
+    • Inter-tenant correlation & covariance
+    • Multivariate PCA/ICA
+    • Causal analysis (SEM)
+    • Similarity analysis
+
+Completed:
+  • Refactored and cleaned up refactor/new_main.py; unified imports, CLI flags, directory setup, logging, error handling.
+  • Integrated Descriptive Statistics module with CSV export, boxplots, line plots; tests in refactor/test_descriptive_stats.py.
+  • Integrated Correlation & Covariance module with CSV export, heatmaps; tests in refactor/test_correlation_covariance.py.
+  • Refactored PCA & ICA calls and plots in new_main.py; tests in refactor/test_fixes.py.
+  • Wrote visualization utilities in visualization/new_plots.py and analysis logic in analysis_modules/*.
+  • Generated prompt_context_summary.txt (this consolidated summary).
+
+Pending:
+  • SEM block: parameterize (--sem-model-spec, --sem-exog-vars), call perform_sem_analysis, export estimates & stats, plot path/fit diagrams; write refactor/test_causality.py.
+  • Similarity block: pass time_col/metric_col/group_col to calculate_pairwise_*, export CSV, heatmaps; write refactor/test_similarity.py.
+  • Integrate non-linear multivariate techniques: KernelPCA, t-SNE, UMAP, mutual information/transfer entropy; add CLI flags & tests.
+  • Refactor new_main.py: remove commented code, extract helper functions, unify logging usage & error handling.
+  • Update documentation (README.md, docs/*.md) with usage examples.
+  • Configure CI (GitHub Actions) to install dependencies, run tests, publish artifacts.
+
+Workspace Structure (key files/folders):
+  /demo-data/              sample experiment data
+  /refactor/new_main.py    main CLI script
+  /refactor/new_config.py  metrics configuration
+  /refactor/analysis_modules/ (causality.py, correlation_covariance.py, descritive_statistics.py, multivariate_exploration.py, similarity.py)
+  /refactor/data_handling/loader.py, save_results.py
+  /visualization/new_plots.py
+  /requirements.txt, README.md, docs/
+
+CLI Flags:
+  --run-descriptive-stats, --run-correlation-covariance, --run-causality, --run-similarity,
+  --run-pca, --run-ica, --compare-pca-ica, --pca-n-components, --ica-n-components, --n-top-features-comparison,
+  --selected-metrics, --start-time, --end-time, --normalization-scope, --time-normalization-target,
+  --feature-scaling-method, --run-per-phase, --verbose
+
+Next Actions:
+  1. Implement SEM & similarity modules and tests.
+  2. Add non-linear analysis methods.
+  3. Refine code structure and docs.
+  4. Set up CI pipeline.
+
+(End of consolidated context summary.)

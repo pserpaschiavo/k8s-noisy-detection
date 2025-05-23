@@ -1,2344 +1,627 @@
+import argparse
+import logging
 import os
 import sys
-
-# Add project root to sys.path to allow direct execution
-project_root = os.path.abspath(os.path.join(os.path.dirname(__file__), '..'))
-if project_root not in sys.path:
-    sys.path.insert(0, project_root)
-
-import argparse
+import traceback
 import pandas as pd
-import matplotlib.pyplot as plt
 import numpy as np
-import itertools  # Added import
-import gc  # For garbage collection
-import traceback  # Added import for error handling
 
-"""
-New main script for the refactored experiment analysis pipeline.
-"""
+# Ensure traceback is imported at the top
+# Added for itertools.combinations
+# Added for plt.close
 
-# Refactored modules
-from refactor.data_handling.loader import load_experiment_data
-from refactor.data_handling.save_results import export_to_csv, save_figure  # Corrected import
-from refactor.analysis_modules.correlation_covariance import (
-    calculate_correlation_matrix,  # Corrected import name
-    calculate_covariance_matrix,  # Not used in this basic setup yet
-    calculate_inter_tenant_correlation_per_metric,  # Used for correlation analysis
-    calculate_inter_tenant_covariance_per_metric  # Not used in this basic setup yet
+from new_config import TENANT_COLORS, METRICS_CONFIG
+# from data_handling.loader import load_data_from_all_rounds_and_phases, load_data_from_specific_round_consolidated # Corrected import names
+from data_handling.loader import load_experiment_data # Changed to import load_experiment_data
+from data_handling.save_results import export_to_csv
+from analysis_modules.multivariate_exploration import perform_pca, perform_ica, get_top_features_per_component
+from analysis_modules.descritive_statistics import calculate_descriptive_statistics
+from analysis_modules.correlation_covariance import calculate_inter_tenant_correlation_per_metric, calculate_inter_tenant_covariance_per_metric
+from analysis_modules.causality import perform_sem_analysis, plot_sem_path_diagram, plot_sem_fit_indices
+from analysis_modules.similarity import calculate_pairwise_distance_correlation, calculate_pairwise_cosine_similarity, plot_distance_correlation_heatmap, plot_distance_correlation_heatmap as plot_distance_correlation_heatmap_sim, plot_distance_correlation_heatmap as plot_cosine_similarity_heatmap
+from visualization.new_plots import (
+    plot_correlation_heatmap, plot_covariance_heatmap, plot_scatter_comparison,
+    plot_pca_explained_variance, plot_pca_biplot, plot_pca_loadings_heatmap,
+    plot_ica_components_heatmap, plot_ica_scatter,
+    plot_descriptive_stats_boxplot, plot_descriptive_stats_lineplot
 )
-from refactor.analysis_modules.descritive_statistics import calculate_descriptive_statistics
-from refactor.analysis_modules.multivariate_exploration import (
-    perform_pca, perform_ica, get_top_features_per_component
-)
-from refactor.analysis_modules.similarity import (
-    calculate_pairwise_distance_correlation,
-    plot_distance_correlation_heatmap,
-    calculate_pairwise_cosine_similarity,
-    plot_cosine_similarity_heatmap,
-    calculate_pairwise_dtw_distance,
-    plot_dtw_distance_heatmap,
-    calculate_pairwise_mutual_information,
-    plot_mutual_information_heatmap
-)
-# Added import for causal analysis modules
-from refactor.analysis_modules.causality import (
-    perform_sem_analysis, create_sem_model_from_correlation, 
-    plot_sem_path_diagram, plot_sem_fit_indices, plot_sem_coefficient_heatmap,
-    calculate_transfer_entropy, calculate_pairwise_transfer_entropy,
-    plot_transfer_entropy_heatmap, plot_transfer_entropy_network,
-    calculate_pairwise_ccm, plot_ccm_convergence, summarize_ccm_results,
-    plot_ccm_causality_heatmap, calculate_pairwise_granger_causality,
-    plot_granger_causality_heatmap, plot_granger_causality_network
-)
-# Corrected import for plot_correlation_heatmap
-from refactor.visualization.new_plots import (
-    plot_correlation_heatmap, plot_covariance_heatmap,
-    plot_descriptive_stats_lineplot, plot_descriptive_stats_boxplot, plot_descriptive_stats_catplot_mean,
-    # PCA plots
-    plot_pca_explained_variance,
-    plot_pca_biplot,
-    plot_pca_loadings_heatmap,
-    # ICA plots
-    plot_ica_components_heatmap,
-    plot_ica_time_series,
-    plot_ica_scatter
-)
-from refactor.data_handling.new_time_normalization import add_experiment_elapsed_time  # Added import
 
-# Existing pipeline modules (will be gradually replaced or integrated)
-from refactor.new_config import (
-    DEFAULT_DATA_DIR, DEFAULT_METRICS, METRIC_DISPLAY_NAMES,
-    VISUALIZATION_CONFIG, TENANT_COLORS, PHASE_DISPLAY_NAMES  # Adicionado PHASE_DISPLAY_NAMES
-)
-# Add other necessary imports from pipeline.config or other modules as needed
-from refactor.utils.figure_management import close_all_figures
-
+# Function definitions (parse_arguments, setup_output_directories, load_and_preprocess_data, etc.)
+# are assumed to be defined in this file or correctly imported if they were meant to be elsewhere.
 
 def parse_arguments():
-    """Parse command line arguments."""
-    parser = argparse.ArgumentParser(description='Refactored pipeline for experiment analysis.')
-    parser.add_argument('--data-dir', type=str, default=DEFAULT_DATA_DIR,
-                        help='Directory with the experiment data')
-    parser.add_argument('--output-dir', type=str, default='output_refactored',
-                        help='Directory to save the results')
-    parser.add_argument('--tenants', type=str, nargs='+',
-                        help='Specific tenant(s) to analyze')
-    parser.add_argument('--metrics', type=str, nargs='+', default=DEFAULT_METRICS,
-                        help='Specific metric(s) to analyze')
-    parser.add_argument('--rounds', type=str, nargs='+',
-                        help='Specific round(s) to analyze')
-    # Add more arguments as functionality is integrated
-    parser.add_argument('--run-correlation', action='store_true', help='Run correlation analysis')
-    parser.add_argument('--correlation-methods', type=str, nargs='+', default=['pearson'],
-                        choices=['pearson', 'spearman', 'kendall'],
-                        help='One or more correlation methods to run. E.g., pearson spearman. Defaults to [\'pearson\'] if --run-correlation is set and this is not provided. Overridden by --run-all-correlation-methods.')
-    parser.add_argument('--run-all-correlation-methods', action='store_true',
-                        help='Run correlation analysis for all methods (pearson, spearman, kendall). Overrides --correlation-methods.')
-
-    # Arguments for Covariance Analysis
-    parser.add_argument('--run-covariance', action='store_true', help='Run covariance analysis')
-    # Covariance typically doesn't have multiple "methods" like correlation,
-    # but adding for consistency in argument structure if variations arise.
-    # For now, it's a simple flag to run it or not.
-
-    # Argument for Descriptive Statistics Analysis
-    parser.add_argument('--run-descriptive-stats', action='store_true', help='Run descriptive statistics analysis.')  # Added argument
-
-    # Arguments for PCA
-    parser.add_argument('--run-pca', action='store_true', help="Run Principal Component Analysis.")
-    parser.add_argument('--pca-n-components', type=str, default=None, help="Number of PCA components (int) or variance explained (float, e.g., 0.95).")
-    parser.add_argument('--pca-variance-threshold', type=float, default=None, help="PCA variance threshold to select number of components (e.g., 0.95 for 95%%).")
-
-    # Arguments for ICA
-    parser.add_argument('--run-ica', action='store_true', help="Run Independent Component Analysis.")
-    parser.add_argument('--ica-n-components', type=int, default=None, help="Number of ICA components.")
-    parser.add_argument('--ica-max-iter', type=int, default=200, help="Maximum number of iterations for ICA.")
-
-    # Argument for PCA vs ICA comparison
-    parser.add_argument('--compare-pca-ica', action='store_true', help="Generate a comparison table of top features for PCA and ICA.")
-    parser.add_argument('--n-top-features-comparison', type=int, default=5, help="Number of top features to show in PCA/ICA comparison.")
+    parser = argparse.ArgumentParser(description="Run data analysis pipeline for k8s noisy detection.")
+    parser.add_argument("--data-dir", required=True, help="Root directory containing the experimental data.")
+    parser.add_argument("--output-dir", required=True, help="Directory to save results and plots.")
+    parser.add_argument("--metrics-config", default="refactor/new_config.py", help="Path to the metrics configuration file.")
+    parser.add_argument("--selected-metrics", nargs='*', help="List of specific metrics to process (e.g., cpu_usage memory_usage). Processes all if not specified.")
+    parser.add_argument("--start-time", help="Global start time for analysis (YYYY-MM-DDTHH:MM:SS or relative like -60s, -10m, -1h from first event).")
+    parser.add_argument("--end-time", help="Global end time for analysis (YYYY-MM-DDTHH:MM:SS or relative like +60s, +10m, +1h from last event).")
+    parser.add_argument("--normalization-scope", choices=['phase', 'round', 'experiment'], default='phase', help="Scope for time normalization.")
+    parser.add_argument("--time-normalization-target", nargs='*', default=['AttackStart', 'AttackEnd'], help="Event names to normalize time against.")
+    parser.add_argument("--feature-scaling-method", choices=['minmax', 'standard', 'none'], default='minmax', help="Method for feature scaling.")
+    parser.add_argument("--run-per-phase", action='store_true', help="Run analysis per phase instead of consolidated per round.")
     
-    # Arguments for Similarity Analysis
-    parser.add_argument('--dcor', action='store_true', help="Perform Distance Correlation analysis.")
-    parser.add_argument('--min-obs-dcor', type=int, default=10, help="Minimum number of observations for dCor calculation.")
-    parser.add_argument('--cosine-sim', action='store_true', help="Perform Cosine Similarity analysis.")
-    parser.add_argument('--min-obs-cosine', type=int, default=10, help="Minimum number of observations for Cosine Similarity calculation.")
-    parser.add_argument('--dtw', action='store_true', help="Perform Dynamic Time Warping (DTW) analysis.")
-    parser.add_argument('--min-obs-dtw', type=int, default=10, help="Minimum number of observations for DTW calculation.")
-    parser.add_argument('--normalize-dtw', action='store_true', help="Normalize DTW distance by path length.", default=True)
-    parser.add_argument('--mutual-info', action='store_true', help="Perform Mutual Information analysis.")
-    parser.add_argument('--min-obs-mi', type=int, default=10, help="Minimum number of observations for Mutual Information calculation.")
-    parser.add_argument('--mi-n-neighbors', type=int, default=3, help="Number of neighbors for MI estimation.")
-    parser.add_argument('--normalize-mi', action='store_true', help="Normalize MI values to range [0,1].", default=True)
-
-    # Arguments for Causal Analysis
-    parser.add_argument('--run-sem', action='store_true', help="Run Structural Equation Modeling for causal analysis.")
-    parser.add_argument('--sem-correlation-threshold', type=float, default=0.3, 
-                       help="Minimum absolute correlation to include in the SEM model (e.g., 0.3 means include relationships with |r| >= 0.3).")
-    parser.add_argument('--sem-standardize', action='store_true', default=True,
-                       help="Standardize variables before SEM analysis.")
-                       
-    # Transfer Entropy arguments
-    parser.add_argument('--run-transfer-entropy', action='store_true', 
-                       help="Run Transfer Entropy analysis for information-theoretic causal analysis.")
-    parser.add_argument('--te-lag', type=int, default=1, 
-                       help="Lag parameter for Transfer Entropy calculation.")
-    parser.add_argument('--te-threshold', type=float, default=0.05, 
-                       help="Threshold for Transfer Entropy visualization.")
-    
-    # Convergent Cross Mapping arguments
-    parser.add_argument('--run-ccm', action='store_true', 
-                       help="Run Convergent Cross Mapping for nonlinear causal analysis.")
-    parser.add_argument('--ccm-embed-dimensions', type=int, nargs='+', default=[2, 3, 4], 
-                       help="Embedding dimensions to try for CCM.")
-    parser.add_argument('--ccm-tau', type=int, default=1, 
-                       help="Time delay parameter for CCM embedding.")
-    parser.add_argument('--ccm-threshold', type=float, default=0.3, 
-                       help="Significance threshold for CCM results.")
-    
-    # Granger Causality arguments
-    parser.add_argument('--run-granger', action='store_true', 
-                       help="Run Granger Causality tests for time series causal analysis.")
-    parser.add_argument('--granger-max-lag', type=int, default=5, 
-                       help="Maximum lag for Granger Causality test.")
-    parser.add_argument('--granger-criterion', type=str, default='aic', choices=['aic', 'bic', 'fpe'], 
-                       help="Information criterion for Granger model selection (aic, bic, or fpe).")
-    parser.add_argument('--granger-alpha', type=float, default=0.05, 
-                       help="Significance level for Granger causality tests.")
-    parser.add_argument('--granger-fstat-threshold', type=float, default=0.0, 
-                       help="Threshold for F-statistics in Granger causality network visualization.")
-
-    # Argument for analysis scope
-    parser.add_argument('--consolidated-analysis', action='store_true',
-                        help='Run analysis consolidated across all phases (old behavior). If not set, analysis will be per-phase.')
+    parser.add_argument("--run-descriptive-stats", action="store_true", help="Run descriptive statistics module.")
+    parser.add_argument("--run-correlation-covariance", action="store_true", help="Run correlation and covariance analysis module.")
+    parser.add_argument("--run-causality", action="store_true", help="Run causal analysis module.")
+    parser.add_argument("--run-similarity", action="store_true", help="Run similarity analysis module.")
+    parser.add_argument("--correlation-methods", nargs='*', default=['pearson', 'spearman'], help="Methods for correlation (pearson, kendall, spearman).")
+    parser.add_argument("--run-pca", action="store_true", help="Run PCA module.")
+    parser.add_argument("--pca-n-components", default=None, help="Number of principal components (int) or variance threshold (float, e.g., 0.95).")
+    parser.add_argument("--pca-variance-threshold", type=float, default=0.95, help="Variance threshold for PCA if n_components is not an int.")
+    parser.add_argument("--run-ica", action="store_true", help="Run ICA module.")
+    parser.add_argument("--ica-n-components", type=int, default=None, help="Number of independent components.")
+    parser.add_argument("--compare-pca-ica", action="store_true", help="Compare top features from PCA and ICA.")
+    parser.add_argument("--n-top-features-comparison", type=int, default=5, help="Number of top features to compare between PCA and ICA.")
+    parser.add_argument("--verbose", action="store_true", help="Enable verbose debug output.")
+    parser.add_argument("--sem-model-spec", type=str,
+                        help="SEM model specification string in semopy syntax (e.g., 'Y ~ X1 + X2; X1 ~~ X2')")
+    parser.add_argument("--sem-exog-vars", nargs='*',
+                        help="List of exogenous variable names for SEM")
 
     return parser.parse_args()
 
+def setup_output_directories(output_dir_base):
+    plots_dir = os.path.join(output_dir_base, 'plots')
+    tables_dir = os.path.join(output_dir_base, 'tables')
 
-def setup_output_directories(output_dir):
-    """Configures output directories."""
-    plots_dir = os.path.join(output_dir, 'plots')
-    tables_dir = os.path.join(output_dir, 'tables')
+    desc_stats_plots_dir = os.path.join(plots_dir, "descriptive_stats")
+    desc_stats_tables_dir = os.path.join(tables_dir, "descriptive_stats")
 
-    # Descriptive Statistics
-    descriptive_stats_plots_dir = os.path.join(plots_dir, "descriptive_stats")
-    descriptive_stats_tables_dir = os.path.join(tables_dir, "descriptive_stats")
-    os.makedirs(descriptive_stats_plots_dir, exist_ok=True)
-    os.makedirs(descriptive_stats_tables_dir, exist_ok=True)
-
-    # Correlation
     correlation_plots_dir = os.path.join(plots_dir, "correlation")
     correlation_tables_dir = os.path.join(tables_dir, "correlation")
-    os.makedirs(correlation_plots_dir, exist_ok=True)
-    os.makedirs(correlation_tables_dir, exist_ok=True)
 
-    # Covariance
     covariance_plots_dir = os.path.join(plots_dir, "covariance")
     covariance_tables_dir = os.path.join(tables_dir, "covariance")
-    os.makedirs(covariance_plots_dir, exist_ok=True)
-    os.makedirs(covariance_tables_dir, exist_ok=True)
 
-    # Multivariate (PCA, ICA, Comparison)
     multivariate_plots_dir = os.path.join(plots_dir, "multivariate")
+    pca_plots_output_dir = os.path.join(multivariate_plots_dir, "pca")
+    ica_plots_output_dir = os.path.join(multivariate_plots_dir, "ica")
+
     multivariate_tables_dir = os.path.join(tables_dir, "multivariate")
-    os.makedirs(multivariate_plots_dir, exist_ok=True)
-    os.makedirs(multivariate_tables_dir, exist_ok=True)
+    pca_tables_output_dir = os.path.join(multivariate_tables_dir, "pca")
+    ica_tables_output_dir = os.path.join(multivariate_tables_dir, "ica")
+    comparison_tables_output_dir = os.path.join(multivariate_tables_dir, "comparison")
 
-    pca_plots_dir = os.path.join(multivariate_plots_dir, "pca")
-    pca_tables_dir = os.path.join(multivariate_tables_dir, "pca")
-    os.makedirs(pca_plots_dir, exist_ok=True)
-    os.makedirs(pca_tables_dir, exist_ok=True)
+    # Create all directories
+    for path in [plots_dir, tables_dir, desc_stats_plots_dir, desc_stats_tables_dir,
+                 correlation_plots_dir, correlation_tables_dir, covariance_plots_dir, covariance_tables_dir,
+                 multivariate_plots_dir, pca_plots_output_dir, ica_plots_output_dir,
+                 multivariate_tables_dir, pca_tables_output_dir, ica_tables_output_dir, comparison_tables_output_dir]:
+        os.makedirs(path, exist_ok=True)
 
-    ica_plots_dir = os.path.join(multivariate_plots_dir, "ica")
-    ica_tables_dir = os.path.join(multivariate_tables_dir, "ica")
-    os.makedirs(ica_plots_dir, exist_ok=True)
-    os.makedirs(ica_tables_dir, exist_ok=True)
+    # Return the 7 specific paths expected by the previous version of main's unpacking
+    # Plus the general plots and tables dirs for other modules if they need them directly
+    return (plots_dir, tables_dir, 
+            pca_tables_output_dir, ica_tables_output_dir, comparison_tables_output_dir,
+            pca_plots_output_dir, ica_plots_output_dir,
+            desc_stats_plots_dir, desc_stats_tables_dir, # Added for descriptive stats
+            correlation_plots_dir, correlation_tables_dir, # Added for correlation
+            covariance_plots_dir, covariance_tables_dir # Added for covariance
+           ) 
 
-    comparison_plots_dir = os.path.join(multivariate_plots_dir, "comparison")
-    comparison_tables_dir = os.path.join(multivariate_tables_dir, "comparison")
-    os.makedirs(comparison_plots_dir, exist_ok=True)
-    os.makedirs(comparison_tables_dir, exist_ok=True)
-    
-    # Causality (SEM, TE, CCM, Granger)
-    causality_plots_dir = os.path.join(plots_dir, "causality")
-    causality_tables_dir = os.path.join(tables_dir, "causality")
-    os.makedirs(causality_plots_dir, exist_ok=True)
-    os.makedirs(causality_tables_dir, exist_ok=True)
+def load_and_preprocess_data(data_dir, metrics_config_path, selected_metrics_list, 
+                               start_time_str, end_time_str, normalization_scope, 
+                               time_normalization_target_list, feature_scaling_method_name, 
+                               run_per_phase_flag):
+    logging.debug("Starting load_and_preprocess_data.")
 
-    sem_plots_dir = os.path.join(causality_plots_dir, "sem")
-    sem_tables_dir = os.path.join(causality_tables_dir, "sem")
-    os.makedirs(sem_plots_dir, exist_ok=True)
-    os.makedirs(sem_tables_dir, exist_ok=True)
-    
-    te_plots_dir = os.path.join(causality_plots_dir, "transfer_entropy")
-    te_tables_dir = os.path.join(causality_tables_dir, "transfer_entropy")
-    os.makedirs(te_plots_dir, exist_ok=True)
-    os.makedirs(te_tables_dir, exist_ok=True)
-    
-    ccm_plots_dir = os.path.join(causality_plots_dir, "ccm")
-    ccm_tables_dir = os.path.join(causality_tables_dir, "ccm")
-    os.makedirs(ccm_plots_dir, exist_ok=True)
-    os.makedirs(ccm_tables_dir, exist_ok=True)
-    
-    granger_plots_dir = os.path.join(causality_plots_dir, "granger")
-    granger_tables_dir = os.path.join(causality_tables_dir, "granger")
-    os.makedirs(granger_plots_dir, exist_ok=True)
-    os.makedirs(granger_tables_dir, exist_ok=True)
-    
-    # Similarity (dCor, Cosine, DTW, MI) - Already well-defined
-    similarity_plots_dir = os.path.join(plots_dir, "similarity")
-    similarity_tables_dir = os.path.join(tables_dir, "similarity")
-    os.makedirs(similarity_plots_dir, exist_ok=True)
-    os.makedirs(similarity_tables_dir, exist_ok=True)
-    
-    dcor_plots_dir = os.path.join(similarity_plots_dir, "distance_correlation")
-    dcor_tables_dir = os.path.join(similarity_tables_dir, "distance_correlation")
-    os.makedirs(dcor_plots_dir, exist_ok=True)
-    os.makedirs(dcor_tables_dir, exist_ok=True)
-    
-    cosine_plots_dir = os.path.join(similarity_plots_dir, "cosine_similarity")
-    cosine_tables_dir = os.path.join(similarity_tables_dir, "cosine_similarity")
-    os.makedirs(cosine_plots_dir, exist_ok=True)
-    os.makedirs(cosine_tables_dir, exist_ok=True)
-    
-    dtw_plots_dir = os.path.join(similarity_plots_dir, "dtw")
-    dtw_tables_dir = os.path.join(similarity_tables_dir, "dtw")
-    os.makedirs(dtw_plots_dir, exist_ok=True)
-    os.makedirs(dtw_tables_dir, exist_ok=True)
-    
-    mi_plots_dir = os.path.join(similarity_plots_dir, "mutual_information")
-    mi_tables_dir = os.path.join(similarity_tables_dir, "mutual_information")
-    os.makedirs(mi_plots_dir, exist_ok=True)
-    os.makedirs(mi_tables_dir, exist_ok=True)
+    metrics_processing_config = METRICS_CONFIG 
+    logging.debug(f"Metrics config loaded. {len(metrics_processing_config)} metrics defined.")
 
-    # General directories (already created by specific ones, but good for completeness)
-    os.makedirs(plots_dir, exist_ok=True)
-    os.makedirs(tables_dir, exist_ok=True)
+    if not selected_metrics_list: # If None or empty, process all configured metrics
+        selected_metrics_list = list(metrics_processing_config.keys())
+    logging.debug(f"Selected metrics for processing: {selected_metrics_list}")
 
-    return (
-        plots_dir, tables_dir,
-        descriptive_stats_plots_dir, descriptive_stats_tables_dir,
-        correlation_plots_dir, correlation_tables_dir,
-        covariance_plots_dir, covariance_tables_dir,
-        pca_plots_dir, pca_tables_dir,
-        ica_plots_dir, ica_tables_dir,
-        comparison_plots_dir, comparison_tables_dir,
-        sem_plots_dir, sem_tables_dir,
-        te_plots_dir, te_tables_dir,
-        ccm_plots_dir, ccm_tables_dir,
-        granger_plots_dir, granger_tables_dir,
-        dcor_plots_dir, dcor_tables_dir,
-        cosine_plots_dir, cosine_tables_dir,
-        dtw_plots_dir, dtw_tables_dir,
-        mi_plots_dir, mi_tables_dir
+    all_metrics_data_dict = {}
+    logging.debug(f"Loading data. Data directory: {data_dir}, Per phase: {run_per_phase_flag}, Metrics: {selected_metrics_list}")
+    
+    # Call load_experiment_data with the correct arguments
+    # tenants, phases, and rounds arguments are omitted to use their defaults (load all).
+    all_metrics_data_dict = load_experiment_data(
+        experiment_dir=data_dir,
+        metrics=selected_metrics_list,
+        group_by_phase=run_per_phase_flag
     )
+    
+    logging.debug(f"Raw data loaded for {len(all_metrics_data_dict)} metrics.")
+
+    # Time Normalization
+    logging.debug(f"Starting time normalization. Scope: {normalization_scope}, Target: {time_normalization_target_list}")
+    sys.stdout.flush()
+    # all_metrics_data_dict = normalize_time_across_phases_and_rounds(
+    #     all_metrics_data_dict, 
+    #     target_events=time_normalization_target_list,
+    #     scope=normalization_scope,
+    #     start_time_str=start_time_str, 
+    #     end_time_str=end_time_str
+    # )
+    # print(f"DEBUG: Time normalization complete.")
+    # sys.stdout.flush()
+
+    # Feature Scaling
+    # if feature_scaling_method_name != 'none':
+    #     print(f"DEBUG: Starting feature scaling. Method: {feature_scaling_method_name}")
+    #     sys.stdout.flush()
+    #     all_metrics_data_dict = scale_features_across_phases_and_rounds(
+    #         all_metrics_data_dict, 
+    #         method=feature_scaling_method_name,
+    #         scope=normalization_scope # Assuming scaling scope is same as normalization scope for now
+    #     )
+    #     print(f"DEBUG: Feature scaling complete.")
+    #     sys.stdout.flush()
+    # else:
+    #     print(f"DEBUG: Feature scaling skipped (method is 'none').")
+    #     sys.stdout.flush()
+
+    logging.debug("load_and_preprocess_data finished.")
+    return all_metrics_data_dict, selected_metrics_list, run_per_phase_flag
 
 
 def main():
-    """Main function to run the refactored analysis pipeline."""
+    logging.debug("Script new_main.py starting...")
     args = parse_arguments()
+    # Configure logging
+    log_level = logging.DEBUG if args.verbose else logging.INFO
+    logging.basicConfig(level=log_level, format="%(asctime)s - %(levelname)s - %(message)s")
+    logging.debug(f"Parsed arguments: {args}")
 
-    # Ensure output directory exists
-    if not os.path.exists(args.output_dir):
-        os.makedirs(args.output_dir)
+    try:
+        # Unpack all 13 values returned by the corrected setup_output_directories
+        plots_dir, tables_dir, \
+        pca_tables_output_dir, ica_tables_output_dir, comparison_tables_output_dir, \
+        pca_plots_output_dir, ica_plots_output_dir, \
+        desc_stats_plots_dir, desc_stats_tables_dir, \
+        correlation_plots_dir, correlation_tables_dir, \
+        covariance_plots_dir, covariance_tables_dir = setup_output_directories(args.output_dir)
 
-    (
-        plots_dir, tables_dir,
-        descriptive_stats_plots_dir, descriptive_stats_tables_dir,
-        correlation_plots_dir, correlation_tables_dir,
-        covariance_plots_dir, covariance_tables_dir,
-        pca_plots_dir, pca_tables_dir,
-        ica_plots_dir, ica_tables_dir,
-        comparison_plots_dir, comparison_tables_dir,
-        sem_plots_dir, sem_tables_dir,
-        te_plots_dir, te_tables_dir,
-        ccm_plots_dir, ccm_tables_dir,
-        granger_plots_dir, granger_tables_dir,
-        dcor_plots_dir, dcor_tables_dir,
-        cosine_plots_dir, cosine_tables_dir,
-        dtw_plots_dir, dtw_tables_dir,
-        mi_plots_dir, mi_tables_dir
-    ) = setup_output_directories(args.output_dir)
+        logging.info("Output directories setup complete.")
+        logging.debug(f"General plots_dir: {plots_dir}")
+        logging.debug(f"General tables_dir: {tables_dir}")
+        logging.debug(f"PCA plots dir: {pca_plots_output_dir}, PCA tables dir: {pca_tables_output_dir}")
+        logging.debug(f"ICA plots dir: {ica_plots_output_dir}, ICA tables dir: {ica_tables_output_dir}")
+        logging.debug(f"Comparison tables dir: {comparison_tables_output_dir}")
+        logging.debug(f"Descriptive Stats plots dir: {desc_stats_plots_dir}, tables dir: {desc_stats_tables_dir}")
+        logging.debug(f"Correlation plots dir: {correlation_plots_dir}, tables dir: {correlation_tables_dir}")
+        logging.debug(f"Covariance plots dir: {covariance_plots_dir}, tables dir: {covariance_tables_dir}")
+        sys.stdout.flush()
+    except Exception as e:
+        print(f"CRITICAL ERROR during setup_output_directories: {e}", file=sys.stderr)
+        print(f"Full traceback:\\n{traceback.format_exc()}", file=sys.stderr)
+        sys.stderr.flush()
+        return 
 
-    # Resolve data directory path
-    experiment_data_dir_input = args.data_dir
-    experiment_data_dir = ""
+    all_metrics_data = None
+    run_per_phase_analysis = False 
+    selected_metrics = []
 
-    if os.path.isabs(experiment_data_dir_input):
-        experiment_data_dir = experiment_data_dir_input
-    else:
-        cwd = os.getcwd()
-        path_from_cwd = os.path.join(cwd, experiment_data_dir_input)
-        path_from_project_root_perspective = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), experiment_data_dir_input)
+    try:
+        all_metrics_data, selected_metrics, run_per_phase_analysis = load_and_preprocess_data(
+            args.data_dir,
+            args.metrics_config,
+            args.selected_metrics,
+            args.start_time,
+            args.end_time,
+            args.normalization_scope,
+            args.time_normalization_target,
+            args.feature_scaling_method,
+            args.run_per_phase
+        )
+        print(f"DEBUG: Data loading and preprocessing complete. run_per_phase_analysis: {run_per_phase_analysis}")
+        sys.stdout.flush()
+    except Exception as e:
+        print(f"CRITICAL ERROR during load_and_preprocess_data: {e}", file=sys.stderr)
+        print(f"Full traceback:\\n{traceback.format_exc()}", file=sys.stderr)
+        sys.stderr.flush()
+        return 
 
-        if os.path.isdir(path_from_cwd):
-            experiment_data_dir = path_from_cwd
-        elif os.path.isdir(path_from_project_root_perspective) and not os.path.isdir(path_from_cwd):
-            experiment_data_dir = os.path.normpath(path_from_project_root_perspective)
-        else:
-            experiment_data_dir = path_from_cwd
-
-    experiment_data_dir = os.path.normpath(experiment_data_dir)
-
-    if not os.path.isdir(experiment_data_dir):
-        print(f"Error: Data directory not found: {experiment_data_dir}")
-        print(f"  Input --data-dir: '{args.data_dir}'")
-        print(f"  Resolved absolute path: '{os.path.abspath(experiment_data_dir)}'")
-        return
-
-    print(f"Using data directory: {experiment_data_dir}")
-    print(f"Saving results to: {args.output_dir}")
-
-    # 1. Load data
-    run_per_phase_analysis = not args.consolidated_analysis
-    if run_per_phase_analysis:
-        print("Data loading mode: Per-Phase")
-    else:
-        print("Data loading mode: Consolidated")
-
-    all_metrics_data = load_experiment_data(
-        experiment_dir=experiment_data_dir,
-        metrics=args.metrics,
-        tenants=args.tenants,
-        rounds=args.rounds,
-        group_by_phase=run_per_phase_analysis
-    )
-
-    if not all_metrics_data:
-        print("No data loaded. Exiting.")
-        return
-
-    print(f"Loaded metrics: {list(all_metrics_data.keys())}")
-
-    # --- Apply Time Normalization ---
-    print("\nApplying Time Normalization...")
-    for metric_name, rounds_or_phases_data in all_metrics_data.items():
-        print(f"Processing time normalization for metric: {metric_name}")
-        if run_per_phase_analysis:
-            for round_name, phases_data in rounds_or_phases_data.items():
-                for phase_name, metric_df in phases_data.items():
-                    print(f"  Processing {metric_name}, {round_name}, {phase_name}")
-                    if isinstance(metric_df, pd.DataFrame):
-                        print(f"    DataFrame shape: {metric_df.shape}")
-                        print(f"    DataFrame columns before: {metric_df.columns.tolist()}")
-                        if 'datetime' in metric_df.columns:
-                            print(f"    'datetime' column found, calling add_experiment_elapsed_time...")
-                            # Group by round for experiment_elapsed_time context, even in per-phase
-                            result_df = add_experiment_elapsed_time(
-                                metric_df, group_by=['round']
-                            )
-                            all_metrics_data[metric_name][round_name][phase_name] = result_df
-                            print(f"    DataFrame columns after: {result_df.columns.tolist()}")
-                            if 'experiment_elapsed_time' in result_df.columns:
-                                print(f"    ✓ experiment_elapsed_time column successfully added")
-                            else:
-                                print(f"    ✗ experiment_elapsed_time column NOT added")
-                        else:
-                            print(f"    'datetime' column missing from columns: {metric_df.columns.tolist()}")
-                    else:
-                        print(f"    Skipping time normalization for {metric_name}, {round_name}, {phase_name}: DataFrame not found, got {type(metric_df)}.")
-        else:  # Consolidated analysis
-            for round_name, metric_df in rounds_or_phases_data.items():
-                print(f"  Processing {metric_name}, {round_name} (Consolidated)")
-                if isinstance(metric_df, pd.DataFrame):
-                    print(f"    DataFrame shape: {metric_df.shape}")
-                    print(f"    DataFrame columns before: {metric_df.columns.tolist()}")
-                    if 'datetime' in metric_df.columns:
-                        print(f"    'datetime' column found, calling add_experiment_elapsed_time...")
-                        result_df = add_experiment_elapsed_time(
-                            metric_df, group_by=['round']
-                        )
-                        all_metrics_data[metric_name][round_name] = result_df
-                        print(f"    DataFrame columns after: {result_df.columns.tolist()}")
-                        if 'experiment_elapsed_time' in result_df.columns:
-                            print(f"    ✓ experiment_elapsed_time column successfully added")
-                        else:
-                            print(f"    ✗ experiment_elapsed_time column NOT added")
-                    else:
-                        print(f"    'datetime' column missing from columns: {metric_df.columns.tolist()}")
-                else:
-                    print(f"    Skipping time normalization for {metric_name}, {round_name} (Consolidated): DataFrame not found, got {type(metric_df)}.")
-
-    # --- Distance Correlation Analysis ---
-    if args.dcor:
-        print("\nRunning Distance Correlation Analysis...")
-        for metric_name, rounds_or_phases_data in all_metrics_data.items():
-            print(f"Processing metric: {metric_name}")
-            if not isinstance(rounds_or_phases_data, dict):
-                print(f"  Skipping metric {metric_name}: Expected a dictionary of round/phase data, got {type(rounds_or_phases_data)}.")
-                continue
-
-            for round_name, phases_or_metric_df in rounds_or_phases_data.items():
-                if run_per_phase_analysis:
-                    if not isinstance(phases_or_metric_df, dict):
-                        print(f"  Skipping round {round_name} for metric {metric_name}: Expected a dictionary of phase data, got {type(phases_or_metric_df)}.")
-                        continue
-                    for phase_name, original_phase_df in phases_or_metric_df.items():
-                        print(f"  Processing round: {round_name}, phase: {phase_name} for metric: {metric_name}")
-                        if not isinstance(original_phase_df, pd.DataFrame):
-                            print(f"    Skipping round {round_name}, phase {phase_name} for metric {metric_name}: Expected a DataFrame, got {type(original_phase_df)}.")
-                            continue
-                        if original_phase_df.empty:
-                            print(f"    Skipping Distance Correlation for metric {metric_name}, round {round_name}, phase {phase_name} due to empty DataFrame.")
-                            continue
-
-                        if 'experiment_elapsed_time' not in original_phase_df.columns:
-                            print(f"    Skipping dCor for {metric_name}, {round_name}, {phase_name}: 'experiment_elapsed_time' column missing.")
-                            continue
-
-                        try:
-                            print(f"    Calculating Distance Correlation for {metric_name}, round {round_name}, phase {phase_name}...")
-                            # Ensure value column is numeric
-                            original_phase_df['value'] = pd.to_numeric(original_phase_df['value'], errors='coerce')
-                            
-                            dcor_matrix = calculate_pairwise_distance_correlation(
-                                data_df=original_phase_df,
-                                time_col='experiment_elapsed_time',
-                                metric_col='value',  # 'value' is the actual metric value column
-                                group_col='tenant',  # 'tenant' is the column containing tenant IDs
-                                min_observations=args.min_obs_dcor
-                            )
-                            
-                            if not dcor_matrix.empty:
-                                plot_title = f"Distance Correlation - {metric_name}"
-                                plot_filename = f"{metric_name}_{round_name}_{phase_name}_distance_correlation_heatmap.png"
-                                plot_distance_correlation_heatmap(
-                                    dcor_matrix,
-                                    title=plot_title,
-                                    output_dir=dcor_plots_dir,
-                                    filename=plot_filename,
-                                    tables_dir=dcor_tables_dir
-                                )
-                                print(f"    Distance Correlation heatmap created for {metric_name}, round {round_name}, phase {phase_name}.")
-                            else:
-                                print(f"    No Distance Correlation results for {metric_name}, round {round_name}, phase {phase_name}.")
-                                
-                        except Exception as e:
-                            print(f"    Error during Distance Correlation analysis for {metric_name}, round {round_name}, phase {phase_name}: {e}")
-                            traceback.print_exc()
-                else:
-                    original_metric_df = phases_or_metric_df
-                    print(f"  Processing round: {round_name} for metric: {metric_name} (Consolidated)")
-                    if not isinstance(original_metric_df, pd.DataFrame):
-                        print(f"    Skipping round {round_name} for metric {metric_name} (Consolidated): Expected a DataFrame, got {type(original_metric_df)}.")
-                        continue
-                    if original_metric_df.empty:
-                        print(f"    Skipping Distance Correlation for metric {metric_name}, round {round_name} (Consolidated) due to empty DataFrame.")
-                        continue
-
-                    if 'experiment_elapsed_time' not in original_metric_df.columns:
-                        print(f"    Skipping dCor for {metric_name}, {round_name} (Consolidated): 'experiment_elapsed_time' column missing.")
-                        continue
-
-                    try:
-                        print(f"    Calculating Distance Correlation for {metric_name}, round {round_name} (Consolidated)...")
-                        # Ensure value column is numeric
-                        original_metric_df['value'] = pd.to_numeric(original_metric_df['value'], errors='coerce')
-                        
-                        dcor_matrix = calculate_pairwise_distance_correlation(
-                            data_df=original_metric_df,
-                            time_col='experiment_elapsed_time',
-                            metric_col='value',  # 'value' is the actual metric value column
-                            group_col='tenant',  # 'tenant' is the column containing tenant IDs
-                            min_observations=args.min_obs_dcor
-                        )
-                        
-                        if not dcor_matrix.empty:
-                            plot_title = f"Distance Correlation - {metric_name}"
-                            plot_filename = f"{metric_name}_{round_name}_distance_correlation_heatmap.png"
-                            plot_distance_correlation_heatmap(
-                                dcor_matrix,
-                                title=plot_title,
-                                output_dir=dcor_plots_dir,
-                                filename=plot_filename,
-                                tables_dir=dcor_tables_dir
-                            )
-                            print(f"    Distance Correlation heatmap created for {metric_name}, round {round_name} (Consolidated).")
-                        else:
-                            print(f"    No Distance Correlation results for {metric_name}, round {round_name} (Consolidated).")
-                            
-                    except Exception as e:
-                        print(f"    Error during Distance Correlation analysis for {metric_name}, round {round_name} (Consolidated): {e}")
-                        traceback.print_exc()
-
-    # --- Cosine Similarity Analysis ---
-    if args.cosine_sim:
-        print("\nRunning Cosine Similarity Analysis...")
-        for metric_name, rounds_or_phases_data in all_metrics_data.items():
-            print(f"Processing metric: {metric_name}")
-            if not isinstance(rounds_or_phases_data, dict):
-                print(f"  Skipping metric {metric_name}: Expected a dictionary of round/phase data, got {type(rounds_or_phases_data)}.")
-                continue
-
-            for round_name, phases_or_metric_df in rounds_or_phases_data.items():
-                if run_per_phase_analysis:
-                    if not isinstance(phases_or_metric_df, dict):
-                        print(f"  Skipping round {round_name} for metric {metric_name}: Expected a dictionary of phase data, got {type(phases_or_metric_df)}.")
-                        continue
-                    for phase_name, original_phase_df in phases_or_metric_df.items():
-                        print(f"  Processing round: {round_name}, phase: {phase_name} for metric: {metric_name}")
-                        if not isinstance(original_phase_df, pd.DataFrame):
-                            print(f"    Skipping round {round_name}, phase {phase_name} for metric {metric_name}: Expected a DataFrame, got {type(original_phase_df)}.")
-                            continue
-                        if original_phase_df.empty:
-                            print(f"    Skipping Cosine Similarity for metric {metric_name}, round {round_name}, phase {phase_name} due to empty DataFrame.")
-                            continue
-
-                        if 'experiment_elapsed_time' not in original_phase_df.columns:
-                            print(f"    Skipping Cosine Similarity for {metric_name}, {round_name}, {phase_name}: 'experiment_elapsed_time' column missing.")
-                            continue
-
-                        try:
-                            print(f"    Calculating Cosine Similarity for {metric_name}, round {round_name}, phase {phase_name}...")
-                            # Ensure value column is numeric
-                            original_phase_df['value'] = pd.to_numeric(original_phase_df['value'], errors='coerce')
-                            
-                            cosine_matrix = calculate_pairwise_cosine_similarity(
-                                data_df=original_phase_df,
-                                time_col='experiment_elapsed_time',
-                                metric_col='value',  # 'value' is the actual metric value column
-                                group_col='tenant',  # 'tenant' is the column containing tenant IDs
-                                min_observations=args.min_obs_cosine
-                            )
-                            
-                            if not cosine_matrix.empty:
-                                plot_title = f"Cosine Similarity - {metric_name}"
-                                plot_filename = f"{metric_name}_{round_name}_{phase_name}_cosine_similarity_heatmap.png"
-                                plot_cosine_similarity_heatmap(
-                                    cosine_matrix,
-                                    title=plot_title,
-                                    output_dir=cosine_plots_dir,
-                                    filename=plot_filename,
-                                    tables_dir=cosine_tables_dir
-                                )
-                                print(f"    Cosine Similarity heatmap created for {metric_name}, round {round_name}, phase {phase_name}.")
-                            else:
-                                print(f"    No Cosine Similarity results for {metric_name}, round {round_name}, phase {phase_name}.")
-                                
-                        except Exception as e:
-                            print(f"    Error during Cosine Similarity analysis for {metric_name}, round {round_name}, phase {phase_name}: {e}")
-                            traceback.print_exc()
-                else:
-                    original_metric_df = phases_or_metric_df
-                    print(f"  Processing round: {round_name} for metric: {metric_name} (Consolidated)")
-                    if not isinstance(original_metric_df, pd.DataFrame):
-                        print(f"    Skipping round {round_name} for metric {metric_name} (Consolidated): Expected a DataFrame, got {type(original_metric_df)}.")
-                        continue
-                    if original_metric_df.empty:
-                        print(f"    Skipping Cosine Similarity for metric {metric_name}, round {round_name} (Consolidated) due to empty DataFrame.")
-                        continue
-
-                    if 'experiment_elapsed_time' not in original_metric_df.columns:
-                        print(f"    Skipping Cosine Similarity for {metric_name}, {round_name} (Consolidated): 'experiment_elapsed_time' column missing.")
-                        continue
-
-                    try:
-                        print(f"    Calculating Cosine Similarity for {metric_name}, round {round_name} (Consolidated)...")
-                        # Ensure value column is numeric
-                        original_metric_df['value'] = pd.to_numeric(original_metric_df['value'], errors='coerce')
-                        
-                        cosine_matrix = calculate_pairwise_cosine_similarity(
-                            data_df=original_metric_df,
-                            time_col='experiment_elapsed_time',
-                            metric_col='value',  # 'value' is the actual metric value column
-                            group_col='tenant',  # 'tenant' is the column containing tenant IDs
-                            min_observations=args.min_obs_cosine
-                        )
-                        
-                        if not cosine_matrix.empty:
-                            plot_title = f"Cosine Similarity - {metric_name}"
-                            plot_filename = f"{metric_name}_{round_name}_cosine_similarity_heatmap.png"
-                            plot_cosine_similarity_heatmap(
-                                cosine_matrix,
-                                title=plot_title,
-                                output_dir=cosine_plots_dir,
-                                filename=plot_filename,
-                                tables_dir=cosine_tables_dir
-                            )
-                            print(f"    Cosine Similarity heatmap created for {metric_name}, round {round_name} (Consolidated).")
-                        else:
-                            print(f"    No Cosine Similarity results for {metric_name}, round {round_name} (Consolidated).")
-                            
-                    except Exception as e:
-                        print(f"    Error during Cosine Similarity analysis for {metric_name}, round {round_name} (Consolidated): {e}")
-                        traceback.print_exc()
-
-    # --- DTW Distance Analysis ---
-    if args.dtw:
-        print("\nRunning Dynamic Time Warping (DTW) Analysis...")
-        for metric_name, rounds_or_phases_data in all_metrics_data.items():
-            print(f"Processing metric: {metric_name}")
-            if not isinstance(rounds_or_phases_data, dict):
-                print(f"  Skipping metric {metric_name}: Expected a dictionary of round/phase data, got {type(rounds_or_phases_data)}.")
-                continue
-
-            for round_name, phases_or_metric_df in rounds_or_phases_data.items():
-                if run_per_phase_analysis:
-                    if not isinstance(phases_or_metric_df, dict):
-                        print(f"  Skipping round {round_name} for metric {metric_name}: Expected a dictionary of phase data, got {type(phases_or_metric_df)}.")
-                        continue
-                    for phase_name, original_phase_df in phases_or_metric_df.items():
-                        print(f"  Processing round: {round_name}, phase: {phase_name} for metric: {metric_name}")
-                        if not isinstance(original_phase_df, pd.DataFrame):
-                            print(f"    Skipping round {round_name}, phase {phase_name} for metric {metric_name}: Expected a DataFrame, got {type(original_phase_df)}.")
-                            continue
-                        if original_phase_df.empty:
-                            print(f"    Skipping DTW for metric {metric_name}, round {round_name}, phase {phase_name} due to empty DataFrame.")
-                            continue
-
-                        if 'experiment_elapsed_time' not in original_phase_df.columns:
-                            print(f"    Skipping DTW for {metric_name}, {round_name}, phase {phase_name}: 'experiment_elapsed_time' column missing.")
-                            continue
-
-                        try:
-                            print(f"    Calculating DTW for {metric_name}, round {round_name}, phase {phase_name}...")
-                            # Ensure value column is numeric
-                            original_phase_df['value'] = pd.to_numeric(original_phase_df['value'], errors='coerce')
-                            
-                            dtw_matrix = calculate_pairwise_dtw_distance(
-                                data_df=original_phase_df,
-                                time_col='experiment_elapsed_time',
-                                metric_col='value',  # 'value' is the actual metric value column
-                                group_col='tenant',  # 'tenant' is the column containing tenant IDs
-                                min_observations=args.min_obs_dtw,
-                                normalize=args.normalize_dtw
-                            )
-                            
-                            if not dtw_matrix.empty:
-                                plot_title = f"DTW Distance - {metric_name} ({phase_name})"
-                                plot_filename = f"{metric_name}_{round_name}_{phase_name}_dtw_distance_heatmap.png"
-                                plot_dtw_distance_heatmap(
-                                    dtw_matrix,
-                                    title=plot_title,
-                                    output_dir=dtw_plots_dir,
-                                    filename=plot_filename,
-                                    tables_dir=dtw_tables_dir
-                                )
-                                print(f"    DTW Distance heatmap created for {metric_name}, round {round_name}, phase {phase_name}.")
-                            else:
-                                print(f"    No DTW Distance results for {metric_name}, round {round_name}, phase {phase_name}.")
-                                
-                        except Exception as e:
-                            print(f"    Error during DTW Distance analysis for {metric_name}, round {round_name}, phase {phase_name}: {e}")
-                            traceback.print_exc()
-                else:
-                    original_metric_df = phases_or_metric_df
-                    print(f"  Processing round: {round_name} for metric: {metric_name} (Consolidated)")
-                    if not isinstance(original_metric_df, pd.DataFrame):
-                        print(f"    Skipping round {round_name} for metric {metric_name} (Consolidated): Expected a DataFrame, got {type(original_metric_df)}.")
-                        continue
-                    if original_metric_df.empty:
-                        print(f"    Skipping DTW Distance for metric {metric_name}, round {round_name} (Consolidated) due to empty DataFrame.")
-                        continue
-
-                    if 'experiment_elapsed_time' not in original_metric_df.columns:
-                        print(f"    Skipping DTW Distance for {metric_name}, {round_name} (Consolidated): 'experiment_elapsed_time' column missing.")
-                        continue
-
-                    try:
-                        print(f"    Calculating DTW Distance for {metric_name}, round {round_name} (Consolidated)...")
-                        # Ensure value column is numeric
-                        original_metric_df['value'] = pd.to_numeric(original_metric_df['value'], errors='coerce')
-                        
-                        dtw_matrix = calculate_pairwise_dtw_distance(
-                            data_df=original_metric_df,
-                            time_col='experiment_elapsed_time',
-                            metric_col='value',  # 'value' is the actual metric value column
-                            group_col='tenant',  # 'tenant' is the column containing tenant IDs
-                            min_observations=args.min_obs_dtw,
-                            normalize=args.normalize_dtw
-                        )
-                        
-                        if not dtw_matrix.empty:
-                            plot_title = f"DTW Distance - {metric_name}"
-                            plot_filename = f"{metric_name}_{round_name}_dtw_distance_heatmap.png"
-                            plot_dtw_distance_heatmap(
-                                dtw_matrix,
-                                title=plot_title,
-                                output_dir=dtw_plots_dir,
-                                filename=plot_filename,
-                                tables_dir=dtw_tables_dir
-                            )
-                            print(f"    DTW Distance heatmap created for {metric_name}, round {round_name} (Consolidated).")
-                        else:
-                            print(f"    No DTW Distance results for {metric_name}, round {round_name} (Consolidated).")
-                            
-                    except Exception as e:
-                        print(f"    Error during DTW Distance analysis for {metric_name}, round {round_name} (Consolidated): {e}")
-                        traceback.print_exc()
-
-    # --- Mutual Information Analysis ---
-    if args.mutual_info:
-        print("\nRunning Mutual Information Analysis...")
-        for metric_name, rounds_or_phases_data in all_metrics_data.items():
-            print(f"Processing metric: {metric_name}")
-            if not isinstance(rounds_or_phases_data, dict):
-                print(f"  Skipping metric {metric_name}: Expected a dictionary of round/phase data, got {type(rounds_or_phases_data)}.")
-                continue
-
-            for round_name, phases_or_metric_df in rounds_or_phases_data.items():
-                if run_per_phase_analysis:
-                    if not isinstance(phases_or_metric_df, dict):
-                        print(f"  Skipping round {round_name} for metric {metric_name}: Expected a dictionary of phase data, got {type(phases_or_metric_df)}.")
-                        continue
-                    for phase_name, original_phase_df in phases_or_metric_df.items():
-                        phase_display_name = PHASE_DISPLAY_NAMES.get(phase_name, phase_name)
-                        print(f"  Processing round: {round_name}, phase: {phase_display_name} for metric: {metric_name}")
-                        if not isinstance(original_phase_df, pd.DataFrame):
-                            print(f"    Skipping round {round_name}, phase {phase_display_name} for metric {metric_name}: Expected a DataFrame, got {type(original_phase_df)}.")
-                            continue
-                        if original_phase_df.empty:
-                            print(f"    Skipping Mutual Information for metric {metric_name}, round {round_name}, phase {phase_display_name} due to empty DataFrame.")
-                            continue
-
-                        if 'experiment_elapsed_time' not in original_phase_df.columns:
-                            print(f"    Skipping Mutual Information for {metric_name}, {round_name}, phase {phase_display_name}: 'experiment_elapsed_time' column missing.")
-                            continue
-
-                        try:
-                            print(f"    Calculating Mutual Information for {metric_name}, round {round_name}, phase {phase_display_name}...")
-                            # Ensure value column is numeric
-                            current_df_processed = original_phase_df.copy()
-                            current_df_processed['value'] = pd.to_numeric(current_df_processed['value'], errors='coerce')
-                            
-                            mi_matrix = calculate_pairwise_mutual_information(
-                                data_df=current_df_processed,
-                                time_col='experiment_elapsed_time',
-                                metric_col='value',
-                                group_col='tenant',
-                                min_observations=args.min_obs_mi,
-                                n_neighbors=args.mi_n_neighbors,
-                                normalize=args.normalize_mi
-                            )
-                            
-                            if not mi_matrix.empty:
-                                plot_title = f"Mutual Information - {METRIC_DISPLAY_NAMES.get(metric_name, metric_name)} ({phase_display_name})"
-                                plot_filename = f"{metric_name}_{round_name}_{phase_name}_mutual_information_heatmap.png"
-                                table_filename_base = f"{metric_name}_{round_name}_{phase_name}_mutual_information_heatmap"
-                                plot_mutual_information_heatmap(
-                                    mi_matrix,
-                                    title=plot_title,
-                                    output_dir=mi_plots_dir,
-                                    filename=plot_filename,
-                                    tables_dir=mi_tables_dir,
-                                    table_filename_base=table_filename_base,
-                                    metric_name=METRIC_DISPLAY_NAMES.get(metric_name, metric_name),
-                                    round_name=round_name,
-                                    phase_name=phase_display_name
-                                )
-                                print(f"    Mutual Information heatmap created for {metric_name}, round {round_name}, phase {phase_display_name}.")
-                            else:
-                                print(f"    No Mutual Information results for {metric_name}, round {round_name}, phase {phase_display_name}.")
-                                
-                        except Exception as e:
-                            print(f"    Error during Mutual Information analysis for {metric_name}, round {round_name}, phase {phase_display_name}: {e}")
-                            traceback.print_exc()
-                else: # Consolidated analysis
-                    original_metric_df = phases_or_metric_df
-                    print(f"  Processing round: {round_name} for metric: {metric_name} (Consolidated)")
-                    if not isinstance(original_metric_df, pd.DataFrame):
-                        print(f"    Skipping round {round_name} for metric {metric_name} (Consolidated): Expected a DataFrame, got {type(original_metric_df)}.")
-                        continue
-                    if original_metric_df.empty:
-                        print(f"    Skipping Mutual Information for metric {metric_name}, round {round_name} (Consolidated) due to empty DataFrame.")
-                        continue
-
-                    if 'experiment_elapsed_time' not in original_metric_df.columns:
-                        print(f"    Skipping Mutual Information for {metric_name}, {round_name} (Consolidated): 'experiment_elapsed_time' column missing.")
-                        continue
-
-                    try:
-                        print(f"    Calculating Mutual Information for {metric_name}, round {round_name} (Consolidated)...")
-                        current_df_processed = original_metric_df.copy()
-                        current_df_processed['value'] = pd.to_numeric(current_df_processed['value'], errors='coerce')
-                        
-                        mi_matrix = calculate_pairwise_mutual_information(
-                            data_df=current_df_processed,
-                            time_col='experiment_elapsed_time',
-                            metric_col='value',
-                            group_col='tenant',
-                            min_observations=args.min_obs_mi,
-                            n_neighbors=args.mi_n_neighbors,
-                            normalize=args.normalize_mi
-                        )
-                        
-                        if not mi_matrix.empty:
-                            plot_title = f"Mutual Information - {METRIC_DISPLAY_NAMES.get(metric_name, metric_name)}"
-                            plot_filename = f"{metric_name}_{round_name}_mutual_information_heatmap.png"
-                            table_filename_base = f"{metric_name}_{round_name}_mutual_information_heatmap"
-                            plot_mutual_information_heatmap(
-                                mi_matrix,
-                                title=plot_title,
-                                output_dir=mi_plots_dir,
-                                filename=plot_filename,
-                                tables_dir=mi_tables_dir,
-                                table_filename_base=table_filename_base,
-                                metric_name=METRIC_DISPLAY_NAMES.get(metric_name, metric_name),
-                                round_name=round_name
-                            )
-                            print(f"    Mutual Information heatmap created for {metric_name}, round {round_name} (Consolidated).")
-                        else:
-                            print(f"    No Mutual Information results for {metric_name}, round {round_name} (Consolidated).")
-                            
-                    except Exception as e:
-                        print(f"    Error during Mutual Information analysis for {metric_name}, round {round_name} (Consolidated): {e}")
-                        traceback.print_exc()
-        gc.collect() # Garbage collect after processing each metric
-
-    # --- Descriptive Statistics Analysis ---
+    # Descriptive Statistics
     if args.run_descriptive_stats:
-        print("\nRunning Descriptive Statistics Analysis...")
-        for metric_name, rounds_or_phases_data in all_metrics_data.items():
-            print(f"Processing metric: {metric_name}")
-            if not isinstance(rounds_or_phases_data, dict):
-                print(f"  Skipping metric {metric_name}: Expected dict, got {type(rounds_or_phases_data)}.")
+        print("DEBUG: Running descriptive statistics module...")
+        for metric_name, rounds_data in all_metrics_data.items():
+            # Combine data across rounds and phases
+            dfs = []
+            if run_per_phase_analysis:
+                for rd in rounds_data.values():
+                    if isinstance(rd, dict):
+                        dfs.extend([df for df in rd.values() if isinstance(df, pd.DataFrame)])
+                    elif isinstance(rd, pd.DataFrame):
+                        dfs.append(rd)
+            else:
+                dfs = [df for df in rounds_data.values() if isinstance(df, pd.DataFrame)]
+            if not dfs:
+                print(f"DEBUG: No data for descriptive stats of {metric_name}, skipping.")
                 continue
-
-            for round_name, phases_or_metric_df in rounds_or_phases_data.items():
-                if run_per_phase_analysis:
-                    if not isinstance(phases_or_metric_df, dict):
-                        print(f"  Skipping round {round_name} for {metric_name}: Expected dict, got {type(phases_or_metric_df)}.")
+            metric_df = pd.concat(dfs, ignore_index=True)
+            # Calculate descriptive statistics
+            stats_df = calculate_descriptive_statistics(metric_df, metric_column='value')
+            # Export CSV
+            csv_out = os.path.join(desc_stats_tables_dir, f"{metric_name}_descriptive_stats.csv")
+            export_to_csv(stats_df, csv_out)
+            # Plots
+            # Boxplot
+            plot_descriptive_stats_boxplot(
+                metric_df, metric_name, 'value',
+                title=f"{metric_name} Distribution",
+                output_dir=desc_stats_plots_dir,
+                filename=f"{metric_name}_boxplot.png"
+            )
+            # Lineplot (use sample index if no time column)
+            metric_df_line = metric_df.copy()
+            metric_df_line.index.name = 'sample'
+            plot_descriptive_stats_lineplot(
+                metric_df_line, metric_name, 'value',
+                title=f"{metric_name} Over Samples",
+                output_dir=desc_stats_plots_dir,
+                filename=f"{metric_name}_lineplot.png"
+            )
+            print(f"DEBUG: Descriptive stats completed for {metric_name}.")
+            sys.stdout.flush()
+    
+    # Correlation and Covariance Analysis
+    if args.run_correlation_covariance:
+        print("DEBUG: Running correlation and covariance analysis module...")
+        for metric_name, rounds_data in all_metrics_data.items():
+            # Iterate through rounds
+            for round_key, rd in rounds_data.items():
+                # Determine dataframes based on per-phase flag
+                phase_dicts = {}
+                if run_per_phase_analysis and isinstance(rd, dict):
+                    phase_dicts = rd
+                elif not run_per_phase_analysis and isinstance(rd, pd.DataFrame):
+                    phase_dicts = {None: rd}
+                else:
+                    continue
+                for phase_key, df_metric in phase_dicts.items():
+                    if df_metric.empty:
                         continue
-                    for phase_name, original_phase_df in phases_or_metric_df.items():
-                        phase_display_name = PHASE_DISPLAY_NAMES.get(phase_name, phase_name)
-                        print(f"  Processing round: {round_name}, phase: {phase_display_name} for metric: {metric_name}")
-                        if not isinstance(original_phase_df, pd.DataFrame) or original_phase_df.empty:
-                            print(f"    Skipping: DataFrame is not valid or empty.")
-                            continue
-                        try:
-                            current_df_processed = original_phase_df.copy()
-                            current_df_processed['value'] = pd.to_numeric(current_df_processed['value'], errors='coerce')
-                            stats_df = calculate_descriptive_statistics(current_df_processed, groupby_cols=['tenant']) # Changed parameter name to match the function signature
-                            
-                            if not stats_df.empty:
-                                table_filename = f"{metric_name}_{round_name}_{phase_name}_descriptive_stats.csv"
-                                full_path = os.path.join(descriptive_stats_tables_dir, table_filename)
-                                export_to_csv(stats_df, full_path)
-                                print(f"    Descriptive statistics table saved to {full_path}")
+                    # Calculate inter-tenant correlation and covariance
+                    corr_df = calculate_inter_tenant_correlation_per_metric(df_metric, method=args.correlation_methods[0], time_col='datetime')
+                    cov_df = calculate_inter_tenant_covariance_per_metric(df_metric, time_col='datetime')
+                    # Export and plot if not empty
+                    label = f"{round_key}" + (f"_{phase_key}" if phase_key else "")
+                    if not corr_df.empty:
+                        # CSV
+                        corr_csv = os.path.join(correlation_tables_dir, f"{metric_name}_{label}_correlation.csv")
+                        export_to_csv(corr_df, corr_csv)
+                        # Heatmap
+                        plot_correlation_heatmap(corr_df,
+                                               title=f"{metric_name} Inter-Tenant Correlation",
+                                               output_dir=correlation_plots_dir,
+                                               filename=f"{metric_name}_{label}_correlation_heatmap.png")
+                    if not cov_df.empty:
+                        cov_csv = os.path.join(covariance_tables_dir, f"{metric_name}_{label}_covariance.csv")
+                        export_to_csv(cov_df, cov_csv)
+                        plot_covariance_heatmap(cov_df,
+                                               title=f"{metric_name} Inter-Tenant Covariance",
+                                               output_dir=covariance_plots_dir,
+                                               filename=f"{metric_name}_{label}_covariance_heatmap.png")
+        print("DEBUG: Correlation and covariance analysis completed.")
+        sys.stdout.flush()
 
-                                plot_title_base = f"Descriptive Stats - {METRIC_DISPLAY_NAMES.get(metric_name, metric_name)} ({phase_display_name})"
-                                # Example plots (can be expanded)
-                                plot_descriptive_stats_boxplot(current_df_processed, 'value', 'tenant', title=f"{plot_title_base} - Boxplot",
-                                                               output_dir=descriptive_stats_plots_dir, filename=f"{metric_name}_{round_name}_{phase_name}_boxplot.png",
-                                                               metric_name=METRIC_DISPLAY_NAMES.get(metric_name, metric_name), round_name=round_name, phase_name=phase_display_name)
-                                print(f"    Descriptive statistics boxplot created.")
-                        except Exception as e:
-                            print(f"    Error during Descriptive Statistics for {metric_name}, {round_name}, {phase_display_name}: {e}")
-                            traceback.print_exc()
-                else: # Consolidated
-                    original_metric_df = phases_or_metric_df
-                    print(f"  Processing round: {round_name} for metric: {metric_name} (Consolidated)")
-                    if not isinstance(original_metric_df, pd.DataFrame) or original_metric_df.empty:
-                        print(f"    Skipping: DataFrame is not valid or empty.")
-                        continue
-                    try:
-                        current_df_processed = original_metric_df.copy()
-                        current_df_processed['value'] = pd.to_numeric(current_df_processed['value'], errors='coerce')
-                        stats_df = calculate_descriptive_statistics(current_df_processed, groupby_cols=['tenant'])
-                        
-                        if not stats_df.empty:
-                            table_filename = f"{metric_name}_{round_name}_descriptive_stats.csv"
-                            full_path = os.path.join(descriptive_stats_tables_dir, table_filename)
-                            export_to_csv(stats_df, full_path)
-                            print(f"    Descriptive statistics table saved to {full_path}")
-                            
-                            plot_title_base = f"Descriptive Stats - {METRIC_DISPLAY_NAMES.get(metric_name, metric_name)}"
-                            plot_descriptive_stats_boxplot(current_df_processed, 'value', 'tenant', title=f"{plot_title_base} - Boxplot",
-                                                           output_dir=descriptive_stats_plots_dir, filename=f"{metric_name}_{round_name}_boxplot.png",
-                                                           metric_name=METRIC_DISPLAY_NAMES.get(metric_name, metric_name), round_name=round_name)
-                            print(f"    Descriptive statistics boxplot created.")
-                    except Exception as e:
-                        print(f"    Error during Descriptive Statistics for {metric_name}, {round_name} (Consolidated): {e}")
-                        traceback.print_exc()
-            gc.collect()
+    # Causality Analysis
+    if args.run_causality:
+        logging.info("Running causal analysis module...")
+        # Setup SEM-specific directories
+        sem_plots_dir = os.path.join(plots_dir, 'causality')
+        sem_tables_dir = os.path.join(tables_dir, 'causality')
+        os.makedirs(sem_plots_dir, exist_ok=True)
+        os.makedirs(sem_tables_dir, exist_ok=True)
 
-    # --- Correlation Analysis ---
-    if args.run_correlation or args.run_all_correlation_methods:
-        print("\nRunning Correlation Analysis...")
-        correlation_methods_to_run = args.correlation_methods
-        if args.run_all_correlation_methods:
-            correlation_methods_to_run = ['pearson', 'spearman', 'kendall']
-        
-        for method in correlation_methods_to_run:
-            print(f"  Using correlation method: {method}")
-            for metric_name, rounds_or_phases_data in all_metrics_data.items():
-                print(f"Processing metric: {metric_name}")
-                # ... (similar iteration structure as above) ...
-                for round_name, phases_or_metric_df in rounds_or_phases_data.items():
-                    if run_per_phase_analysis:
-                        for phase_name, original_phase_df in phases_or_metric_df.items():
-                            phase_display_name = PHASE_DISPLAY_NAMES.get(phase_name, phase_name)
-                            print(f"  Processing round: {round_name}, phase: {phase_display_name} for metric: {metric_name}, method: {method}")
-                            if not isinstance(original_phase_df, pd.DataFrame) or original_phase_df.empty:
-                                print(f"    Skipping: DataFrame is not valid or empty.")
-                                continue
-                            try:
-                                current_df_processed = original_phase_df.copy()
-                                current_df_processed['value'] = pd.to_numeric(current_df_processed['value'], errors='coerce')
-                                # Pivot data: time as index, tenants as columns, metric value as values
-                                pivoted_df = current_df_processed.pivot_table(index='experiment_elapsed_time', columns='tenant', values='value')
-                                pivoted_df.dropna(how='all', axis=1, inplace=True) # Drop tenant columns if all NaN
-                                pivoted_df.dropna(how='any', axis=0, inplace=True)   # Drop rows with any NaN to ensure pair-wise completeness for correlation
-
-                                if pivoted_df.shape[1] < 2: # Need at least 2 tenants to correlate
-                                    print(f"    Skipping correlation: Not enough tenants with data (need at least 2, found {pivoted_df.shape[1]}).")
-                                    continue
-
-                                correlation_matrix = calculate_inter_tenant_correlation_per_metric(pivoted_df, method=method, time_col=None) # Already pivoted
-                                
-                                if not correlation_matrix.empty:
-                                    plot_title = f"Inter-Tenant Correlation ({method.capitalize()}) - {METRIC_DISPLAY_NAMES.get(metric_name, metric_name)} ({phase_display_name})"
-                                    plot_filename = f"{metric_name}_{round_name}_{phase_name}_{method}_correlation_heatmap.png"
-                                    table_filename_base = f"{metric_name}_{round_name}_{phase_name}_{method}_correlation"
-                                    
-                                    plot_correlation_heatmap(
-                                        correlation_matrix, title=plot_title, output_dir=correlation_plots_dir, filename=plot_filename,
-                                        tables_dir=correlation_tables_dir, table_filename_base=table_filename_base,
-                                        metric_name=METRIC_DISPLAY_NAMES.get(metric_name, metric_name), round_name=round_name, phase_name=phase_display_name
-                                    )
-                                    print(f"    Correlation ({method}) heatmap created.")
-                            except Exception as e:
-                                print(f"    Error during Correlation ({method}) for {metric_name}, {round_name}, {phase_display_name}: {e}")
-                                traceback.print_exc()
-                    else: # Consolidated
-                        original_metric_df = phases_or_metric_df
-                        print(f"  Processing round: {round_name} for metric: {metric_name} (Consolidated), method: {method}")
-                        if not isinstance(original_metric_df, pd.DataFrame) or original_metric_df.empty:
-                             print(f"    Skipping: DataFrame is not valid or empty.")
-                             continue
-                        try:
-                            current_df_processed = original_metric_df.copy()
-                            current_df_processed['value'] = pd.to_numeric(current_df_processed['value'], errors='coerce')
-                            pivoted_df = current_df_processed.pivot_table(index='experiment_elapsed_time', columns='tenant', values='value')
-                            pivoted_df.dropna(how='all', axis=1, inplace=True)
-                            pivoted_df.dropna(how='any', axis=0, inplace=True)
-
-                            if pivoted_df.shape[1] < 2:
-                                print(f"    Skipping correlation: Not enough tenants with data (need at least 2, found {pivoted_df.shape[1]}).")
-                                continue
-                                
-                            correlation_matrix = calculate_inter_tenant_correlation_per_metric(pivoted_df, method=method, time_col=None)
-                            if not correlation_matrix.empty:
-                                plot_title = f"Inter-Tenant Correlation ({method.capitalize()}) - {METRIC_DISPLAY_NAMES.get(metric_name, metric_name)}"
-                                plot_filename = f"{metric_name}_{round_name}_{method}_correlation_heatmap.png"
-                                table_filename_base = f"{metric_name}_{round_name}_{method}_correlation"
-                                plot_correlation_heatmap(
-                                    correlation_matrix, title=plot_title, output_dir=correlation_plots_dir, filename=plot_filename,
-                                    tables_dir=correlation_tables_dir, table_filename_base=table_filename_base,
-                                    metric_name=METRIC_DISPLAY_NAMES.get(metric_name, metric_name), round_name=round_name
-                                )
-                                print(f"    Correlation ({method}) heatmap created.")
-                        except Exception as e:
-                            print(f"    Error during Correlation ({method}) for {metric_name}, {round_name} (Consolidated): {e}")
-                            traceback.print_exc()
-                gc.collect()
-
-    # --- Covariance Analysis ---
-    if args.run_covariance:
-        print("\nRunning Covariance Analysis...")
-        for metric_name, rounds_or_phases_data in all_metrics_data.items():
-            print(f"Processing metric: {metric_name}")
-            # ... (similar iteration structure) ...
-            for round_name, phases_or_metric_df in rounds_or_phases_data.items():
-                if run_per_phase_analysis:
-                    for phase_name, original_phase_df in phases_or_metric_df.items():
-                        phase_display_name = PHASE_DISPLAY_NAMES.get(phase_name, phase_name)
-                        print(f"  Processing round: {round_name}, phase: {phase_display_name} for metric: {metric_name}")
-                        if not isinstance(original_phase_df, pd.DataFrame) or original_phase_df.empty:
-                            print(f"    Skipping: DataFrame is not valid or empty.")
-                            continue
-                        try:
-                            current_df_processed = original_phase_df.copy()
-                            current_df_processed['value'] = pd.to_numeric(current_df_processed['value'], errors='coerce')
-                            pivoted_df = current_df_processed.pivot_table(index='experiment_elapsed_time', columns='tenant', values='value')
-                            pivoted_df.dropna(how='all', axis=1, inplace=True)
-                            pivoted_df.dropna(how='any', axis=0, inplace=True)
-
-                            if pivoted_df.shape[1] < 2:
-                                print(f"    Skipping covariance: Not enough tenants with data (need at least 2, found {pivoted_df.shape[1]}).")
-                                continue
-
-                            covariance_matrix = calculate_inter_tenant_covariance_per_metric(pivoted_df, time_col=None) # Already pivoted
-                            
-                            if not covariance_matrix.empty:
-                                plot_title = f"Inter-Tenant Covariance - {METRIC_DISPLAY_NAMES.get(metric_name, metric_name)} ({phase_display_name})"
-                                plot_filename = f"{metric_name}_{round_name}_{phase_name}_covariance_heatmap.png"
-                                table_filename_base = f"{metric_name}_{round_name}_{phase_name}_covariance"
-                                plot_covariance_heatmap(
-                                    covariance_matrix, title=plot_title, output_dir=covariance_plots_dir, filename=plot_filename,
-                                    tables_dir=covariance_tables_dir, table_filename_base=table_filename_base,
-                                    metric_name=METRIC_DISPLAY_NAMES.get(metric_name, metric_name), round_name=round_name, phase_name=phase_display_name
-                                )
-                                print(f"    Covariance heatmap created.")
-                        except Exception as e:
-                            print(f"    Error during Covariance for {metric_name}, {round_name}, {phase_display_name}: {e}")
-                            traceback.print_exc()
-                else: # Consolidated
-                    original_metric_df = phases_or_metric_df
-                    # ... (similar logic for consolidated covariance) ...
-                    print(f"  Processing round: {round_name} for metric: {metric_name} (Consolidated)")
-                    if not isinstance(original_metric_df, pd.DataFrame) or original_metric_df.empty:
-                        print(f"    Skipping: DataFrame is not valid or empty.")
-                        continue
-                    try:
-                        current_df_processed = original_metric_df.copy()
-                        current_df_processed['value'] = pd.to_numeric(current_df_processed['value'], errors='coerce')
-                        pivoted_df = current_df_processed.pivot_table(index='experiment_elapsed_time', columns='tenant', values='value')
-                        pivoted_df.dropna(how='all', axis=1, inplace=True)
-                        pivoted_df.dropna(how='any', axis=0, inplace=True)
-                        
-                        if pivoted_df.shape[1] < 2:
-                            print(f"    Skipping covariance: Not enough tenants with data (need at least 2, found {pivoted_df.shape[1]}).")
-                            continue
-
-                        covariance_matrix = calculate_inter_tenant_covariance_per_metric(pivoted_df, time_col=None)
-                        if not covariance_matrix.empty:
-                            plot_title = f"Inter-Tenant Covariance - {METRIC_DISPLAY_NAMES.get(metric_name, metric_name)}"
-                            plot_filename = f"{metric_name}_{round_name}_covariance_heatmap.png"
-                            table_filename_base = f"{metric_name}_{round_name}_covariance"
-                            plot_covariance_heatmap(
-                                covariance_matrix, title=plot_title, output_dir=covariance_plots_dir, filename=plot_filename,
-                                tables_dir=covariance_tables_dir, table_filename_base=table_filename_base,
-                                metric_name=METRIC_DISPLAY_NAMES.get(metric_name, metric_name), round_name=round_name
-                            )
-                            print(f"    Covariance heatmap created.")
-                    except Exception as e:
-                        print(f"    Error during Covariance for {metric_name}, {round_name} (Consolidated): {e}")
-                        traceback.print_exc()
-            gc.collect()
-
-    # --- PCA Analysis ---
-    if args.run_pca:
-        print("\nRunning PCA Analysis...")
-        pca_n_components_parsed = args.pca_n_components
-        if pca_n_components_parsed is not None:
-            try: pca_n_components_parsed = int(pca_n_components_parsed)
-            except ValueError:
-                try: 
-                    pca_n_components_parsed = float(pca_n_components_parsed)
-                    if not (0 < pca_n_components_parsed <= 1.0): pca_n_components_parsed = None
-                except ValueError: pca_n_components_parsed = None
-        
-        for metric_name, rounds_or_phases_data in all_metrics_data.items():
-            print(f"Processing metric: {metric_name}")
-            # ... (similar iteration structure) ...
-            for round_name, phases_or_metric_df in rounds_or_phases_data.items():
-                data_for_pca = None
-                context_suffix = ""
-                current_phase_name_for_plot = None
-
-                if run_per_phase_analysis:
-                    # PCA per phase
-                    for phase_name, original_phase_df in phases_or_metric_df.items():
-                        phase_display_name = PHASE_DISPLAY_NAMES.get(phase_name, phase_name)
-                        print(f"  Processing round: {round_name}, phase: {phase_display_name} for PCA on metric: {metric_name}")
-                        if not isinstance(original_phase_df, pd.DataFrame) or original_phase_df.empty:
-                            print(f"    Skipping PCA: DataFrame is not valid or empty.")
-                            continue
-                        
-                        current_df_processed = original_phase_df.copy()
-                        current_df_processed['value'] = pd.to_numeric(current_df_processed['value'], errors='coerce')
-                        pivoted_df = current_df_processed.pivot_table(index='experiment_elapsed_time', columns='tenant', values='value').dropna()
-                        
-                        if pivoted_df.shape[0] < 2 or pivoted_df.shape[1] < 2 : # Need enough samples and features
-                            print(f"    Skipping PCA: Not enough data after pivoting and NaN removal (shape: {pivoted_df.shape}).")
-                            continue
-                        data_for_pca = pivoted_df
-                        context_suffix = f"_{phase_name}"
-                        current_phase_name_for_plot = phase_display_name
-                        
-                        try:
-                            pca_results, pca_components, explained_variance_ratio = perform_pca(
-                                data_for_pca, n_components=pca_n_components_parsed, variance_threshold=args.pca_variance_threshold
-                            )
-                            if pca_results is not None and not pca_results.empty:
-                                pca_results_filename = os.path.join(pca_tables_dir, f"{metric_name}_{round_name}{context_suffix}_pca_results.csv")
-                                export_to_csv(pca_results, pca_results_filename)
-                                pca_components_filename = os.path.join(pca_tables_dir, f"{metric_name}_{round_name}{context_suffix}_pca_components.csv")
-                                export_to_csv(pca_components, pca_components_filename)
-                                print(f"    PCA results and components saved.")
-
-                                # Plotting
-                                plot_pca_explained_variance(explained_variance_ratio, title=f"PCA Explained Variance - {METRIC_DISPLAY_NAMES.get(metric_name, metric_name)} ({current_phase_name_for_plot})",
-                                                            output_dir=pca_plots_dir, filename=f"{metric_name}_{round_name}{context_suffix}_pca_explained_variance.png",
-                                                            metric_name=METRIC_DISPLAY_NAMES.get(metric_name, metric_name), round_name=round_name, phase_name=current_phase_name_for_plot)
-                                plot_pca_loadings_heatmap(pca_components, title=f"PCA Loadings - {METRIC_DISPLAY_NAMES.get(metric_name, metric_name)} ({current_phase_name_for_plot})",
-                                                          output_dir=pca_plots_dir, filename=f"{metric_name}_{round_name}{context_suffix}_pca_loadings_heatmap.png",
-                                                          metric_name=METRIC_DISPLAY_NAMES.get(metric_name, metric_name), round_name=round_name, phase_name=current_phase_name_for_plot)
-                                if pca_results.shape[1] >= 2:
-                                     plot_pca_biplot(pca_results, pca_components, title=f"PCA Biplot - {METRIC_DISPLAY_NAMES.get(metric_name, metric_name)} ({current_phase_name_for_plot})",
-                                                    output_dir=pca_plots_dir, filename=f"{metric_name}_{round_name}{context_suffix}_pca_biplot.png",
-                                                    metric_name=METRIC_DISPLAY_NAMES.get(metric_name, metric_name), round_name=round_name, phase_name=current_phase_name_for_plot)
-                                print(f"    PCA plots created.")
-                        except Exception as e:
-                            print(f"    Error during PCA for {metric_name}, {round_name}, {current_phase_name_for_plot}: {e}")
-                            traceback.print_exc()
-                else: # Consolidated PCA
-                    original_metric_df = phases_or_metric_df
-                    print(f"  Processing round: {round_name} for PCA on metric: {metric_name} (Consolidated)")
-                    if not isinstance(original_metric_df, pd.DataFrame) or original_metric_df.empty:
-                        print(f"    Skipping PCA: DataFrame is not valid or empty.")
-                        continue
-                    current_df_processed = original_metric_df.copy()
-                    current_df_processed['value'] = pd.to_numeric(current_df_processed['value'], errors='coerce')
-                    pivoted_df = current_df_processed.pivot_table(index='experiment_elapsed_time', columns='tenant', values='value').dropna()
-
-                    if pivoted_df.shape[0] < 2 or pivoted_df.shape[1] < 2 :
-                        print(f"    Skipping PCA: Not enough data after pivoting and NaN removal (shape: {pivoted_df.shape}).")
-                        continue
-                    data_for_pca = pivoted_df
-                    context_suffix = "_consolidated"
-                    try:
-                        # ... (PCA logic similar to per-phase, but with consolidated context_suffix and no phase_name)
-                        pca_results, pca_components, explained_variance_ratio = perform_pca(
-                            data_for_pca, n_components=pca_n_components_parsed, variance_threshold=args.pca_variance_threshold
-                        )
-                        if pca_results is not None and not pca_results.empty:
-                            # ... (save and plot logic for consolidated)
-                            print(f"    PCA (Consolidated) analysis complete.")
-                    except Exception as e:
-                        print(f"    Error during PCA (Consolidated) for {metric_name}, {round_name}: {e}")
-                        traceback.print_exc()
-            gc.collect()
-
-    # --- ICA Analysis ---
-    if args.run_ica:
-        print("\nRunning ICA Analysis...")
-        for metric_name, rounds_or_phases_data in all_metrics_data.items():
-            print(f"Processing metric: {metric_name} for ICA")
-            if not isinstance(rounds_or_phases_data, dict):
-                print(f"  Skipping metric {metric_name}: Expected dict, got {type(rounds_or_phases_data)}.")
-                continue
-
-            for round_name, phases_or_metric_df in rounds_or_phases_data.items():
-                if run_per_phase_analysis:
-                    if not isinstance(phases_or_metric_df, dict):
-                        print(f"  Skipping round {round_name} for {metric_name}: Expected dict, got {type(phases_or_metric_df)}.")
-                        continue
-                    for phase_name, original_phase_df in phases_or_metric_df.items():
-                        phase_display_name = PHASE_DISPLAY_NAMES.get(phase_name, phase_name)
-                        print(f"  Processing round: {round_name}, phase: {phase_display_name} for ICA on metric: {metric_name}")
-                        
-                        if not isinstance(original_phase_df, pd.DataFrame) or original_phase_df.empty:
-                            print(f"    Skipping ICA: DataFrame is not valid or empty for {metric_name}, {round_name}, {phase_display_name}.")
-                            continue
-                        
-                        if 'experiment_elapsed_time' not in original_phase_df.columns:
-                            print(f"    Skipping ICA for {metric_name}, {round_name}, {phase_display_name}: 'experiment_elapsed_time' column missing.")
-                            continue
-
-                        try:
-                            current_df_processed = original_phase_df.copy()
-                            current_df_processed['value'] = pd.to_numeric(current_df_processed['value'], errors='coerce')
-                            
-                            pivoted_df = current_df_processed.pivot_table(
-                                index='experiment_elapsed_time', 
-                                columns='tenant', 
-                                values='value'
-                            )
-                            pivoted_df.dropna(axis=1, how='all', inplace=True) # Drop tenant columns if all values are NaN
-                            pivoted_df.dropna(axis=0, how='any', inplace=True)   # Drop rows with any NaN
-
-                            if pivoted_df.shape[0] < 2 or pivoted_df.shape[1] < 2: 
-                                print(f"    Skipping ICA: Not enough data after pivoting and NaN removal (shape: {pivoted_df.shape}) for {metric_name}, {round_name}, {phase_display_name}.")
-                                continue
-
-                            ica_transformed_data, ica_components, ica_mixing_matrix = perform_ica(
-                                pivoted_df, 
-                                n_components=args.ica_n_components, 
-                                random_state=42, 
-                                max_iter=args.ica_max_iter
-                            )
-
-                            if ica_transformed_data is not None and not ica_transformed_data.empty and \
-                               ica_components is not None and not ica_components.empty:
-                                
-                                # Create the source signals dataframe from the transformed data
-                                ica_source_signals = ica_transformed_data.copy()
-                                
-                                context_suffix = f"_{phase_name}"
-                                metric_display = METRIC_DISPLAY_NAMES.get(metric_name, metric_name)
-
-                                # Save ICA source signals
-                                ica_sources_filename = os.path.join(ica_tables_dir, f"{metric_name}_{round_name}{context_suffix}_ica_sources.csv")
-                                export_to_csv(ica_source_signals, ica_sources_filename)
-                                print(f"    ICA source signals saved to {ica_sources_filename}")
-
-                                # Save ICA mixing matrix (components)
-                                ica_components_filename = os.path.join(ica_tables_dir, f"{metric_name}_{round_name}{context_suffix}_ica_components.csv")
-                                export_to_csv(ica_mixing_matrix, ica_components_filename)
-                                print(f"    ICA mixing matrix saved to {ica_components_filename}")
-
-                                # Plot ICA components heatmap (mixing matrix)
-                                plot_title_components = f"ICA Components (Mixing Matrix) - {metric_display} ({phase_display_name})"
-                                plot_filename_components = f"{metric_name}_{round_name}{context_suffix}_ica_components_heatmap.png"
-                                plot_ica_components_heatmap(
-                                    ica_mixing_matrix,
-                                    title=plot_title_components,
-                                    output_dir=ica_plots_dir,
-                                    filename=plot_filename_components,
-                                    metric_name=metric_display,
-                                    round_name=round_name,
-                                    phase_name=phase_display_name
-                                )
-                                print(f"    ICA components heatmap created for {metric_name}, {round_name}, {phase_display_name}.")
-
-                                # Plot ICA source signals (time series)
-                                plot_title_sources_ts = f"ICA Source Signals - {metric_display} ({phase_display_name})"
-                                plot_filename_sources_ts = f"{metric_name}_{round_name}{context_suffix}_ica_sources_timeseries.png"
-                                plot_ica_time_series(
-                                    ica_source_signals, 
-                                    title=plot_title_sources_ts,
-                                    output_dir=ica_plots_dir,
-                                    filename=plot_filename_sources_ts,
-                                    metric_name=metric_display,
-                                    round_name=round_name,
-                                    phase_name=phase_display_name
-                                )
-                                print(f"    ICA source signals time series plot created for {metric_name}, {round_name}, {phase_display_name}.")
-                                
-                                # Scatter plot of first two ICA source signals
-                                if ica_source_signals.shape[1] >= 2:
-                                    plot_title_scatter = f"ICA Source Scatter (IC1 vs IC2) - {metric_display} ({phase_display_name})"
-                                    plot_filename_scatter = f"{metric_name}_{round_name}{context_suffix}_ica_scatter_ic1_ic2.png"
-                                    plot_ica_scatter(
-                                        ica_source_signals, 
-                                        x_component=1, 
-                                        y_component=2, 
-                                        title=plot_title_scatter,
-                                        output_dir=ica_plots_dir,
-                                        filename=plot_filename_scatter,
-                                        metric_name=metric_display,
-                                        round_name=round_name,
-                                        phase_name=phase_display_name
-                                    )
-                                    print(f"    ICA scatter plot (IC1 vs IC2) created for {metric_name}, {round_name}, {phase_display_name}.")
-                            else:
-                                print(f"    ICA did not produce valid results for {metric_name}, {round_name}, {phase_display_name}.")
-                        except Exception as e:
-                            print(f"    Error during ICA for {metric_name}, {round_name}, {phase_display_name}: {e}")
-                            traceback.print_exc()
-                else: # Consolidated ICA
-                    original_metric_df = phases_or_metric_df
-                    print(f"  Processing round: {round_name} for ICA on metric: {metric_name} (Consolidated)")
-
-                    if not isinstance(original_metric_df, pd.DataFrame) or original_metric_df.empty:
-                        print(f"    Skipping ICA: DataFrame is not valid or empty for {metric_name}, {round_name} (Consolidated).")
-                        continue
-                    
-                    if 'experiment_elapsed_time' not in original_metric_df.columns:
-                        print(f"    Skipping ICA for {metric_name}, {round_name} (Consolidated): 'experiment_elapsed_time' column missing.")
-                        continue
-
-                    try:
-                        current_df_processed = original_metric_df.copy()
-                        current_df_processed['value'] = pd.to_numeric(current_df_processed['value'], errors='coerce')
-                        
-                        pivoted_df = current_df_processed.pivot_table(
-                            index='experiment_elapsed_time', 
-                            columns='tenant', 
-                            values='value'
-                        )
-                        pivoted_df.dropna(axis=1, how='all', inplace=True)
-                        pivoted_df.dropna(axis=0, how='any', inplace=True)
-
-                        if pivoted_df.shape[0] < 2 or pivoted_df.shape[1] < 2:
-                            print(f"    Skipping ICA: Not enough data after pivoting and NaN removal (shape: {pivoted_df.shape}) for {metric_name}, {round_name} (Consolidated).")
-                            continue
-                        
-                        ica_transformed_data, ica_mixing_matrix, ica_source_signals = perform_ica(
-                            pivoted_df, 
-                            n_components=args.ica_n_components, 
-                            random_state=42,
-                            max_iter=args.ica_max_iter
-                        )
-
-                        # Create the source signals dataframe from the transformed data if needed
-                        if ica_transformed_data is not None and not ica_transformed_data.empty and \
-                           ica_mixing_matrix is not None and not ica_mixing_matrix.empty:
-                            
-                            # Ensure we have ica_source_signals
-                            if 'ica_source_signals' not in locals() or ica_source_signals is None:
-                                ica_source_signals = ica_transformed_data.copy()
-                            
-                            context_suffix = "_consolidated"
-                            metric_display = METRIC_DISPLAY_NAMES.get(metric_name, metric_name)
-
-                            ica_sources_filename = os.path.join(ica_tables_dir, f"{metric_name}_{round_name}{context_suffix}_ica_sources.csv")
-                            export_to_csv(ica_source_signals, ica_sources_filename)
-                            print(f"    ICA source signals saved to {ica_sources_filename}")
-
-                            ica_components_filename = os.path.join(ica_tables_dir, f"{metric_name}_{round_name}{context_suffix}_ica_components.csv")
-                            export_to_csv(ica_mixing_matrix, ica_components_filename)
-                            print(f"    ICA mixing matrix saved to {ica_components_filename}")
-                            
-                            plot_title_components = f"ICA Components (Mixing Matrix) - {metric_display} (Consolidated)"
-                            plot_filename_components = f"{metric_name}_{round_name}{context_suffix}_ica_components_heatmap.png"
-                            plot_ica_components_heatmap(
-                                ica_mixing_matrix,
-                                title=plot_title_components,
-                                output_dir=ica_plots_dir,
-                                filename=plot_filename_components,
-                                metric_name=metric_display,
-                                round_name=round_name
-                            )
-                            print(f"    ICA components heatmap created for {metric_name}, {round_name} (Consolidated).")
-
-                            plot_title_sources_ts = f"ICA Source Signals - {metric_display} (Consolidated)"
-                            plot_filename_sources_ts = f"{metric_name}_{round_name}{context_suffix}_ica_sources_timeseries.png"
-                            plot_ica_time_series(
-                                ica_source_signals,
-                                title=plot_title_sources_ts,
-                                output_dir=ica_plots_dir,
-                                filename=plot_filename_sources_ts,
-                                metric_name=metric_display,
-                                round_name=round_name
-                            )
-                            print(f"    ICA source signals time series plot created for {metric_name}, {round_name} (Consolidated).")
-
-                            if ica_source_signals.shape[1] >= 2:
-                                plot_title_scatter = f"ICA Source Scatter (IC1 vs IC2) - {metric_display} (Consolidated)"
-                                plot_filename_scatter = f"{metric_name}_{round_name}{context_suffix}_ica_scatter_ic1_ic2.png"
-                                plot_ica_scatter(
-                                    ica_source_signals,
-                                    component_1=0,
-                                    component_2=1,
-                                    title=plot_title_scatter,
-                                    output_dir=ica_plots_dir,
-                                    filename=plot_filename_scatter,
-                                    metric_name=metric_display,
-                                    round_name=round_name
-                                )
-                                print(f"    ICA scatter plot (IC1 vs IC2) created for {metric_name}, {round_name} (Consolidated).")
-                        else:
-                            print(f"    ICA did not produce valid results for {metric_name}, {round_name} (Consolidated).")
-                    except Exception as e:
-                        print(f"    Error during ICA for {metric_name}, {round_name} (Consolidated): {e}")
-                        traceback.print_exc()
-            gc.collect() # After all rounds/phases for a metric
-
-    # --- Compare PCA and ICA ---
-    if args.compare_pca_ica:
-        print("\nComparing PCA and ICA top features...")
-        # This section requires that PCA and ICA have been run and their results (components/loadings)
-        # are stored or accessible. The current script saves them to CSVs.
-        # We will iterate through metrics, rounds, and phases, load the respective results,
-        # compare them, and save comparison tables/plots.
-
-        for metric_name, rounds_or_phases_data in all_metrics_data.items():
-            metric_display_name = METRIC_DISPLAY_NAMES.get(metric_name, metric_name)
-            print(f"Processing metric: {metric_display_name} for PCA/ICA Comparison")
-
-            if not isinstance(rounds_or_phases_data, dict):
-                print(f"  Skipping metric {metric_name} for comparison: Expected dict, got {type(rounds_or_phases_data)}.")
-                continue
-
-            for round_name, phases_or_metric_df in rounds_or_phases_data.items():
-                if run_per_phase_analysis:
-                    if not isinstance(phases_or_metric_df, dict):
-                        print(f"  Skipping round {round_name} for {metric_name} (comparison): Expected dict, got {type(phases_or_metric_df)}.")
-                        continue
-                    for phase_name, _ in phases_or_metric_df.items(): # We don't need original_phase_df here, will load from files
-                        phase_display_name = PHASE_DISPLAY_NAMES.get(phase_name, phase_name)
-                        print(f"  Comparing PCA/ICA for round: {round_name}, phase: {phase_display_name}, metric: {metric_display_name}")
-                        
-                        context_suffix = f"_{phase_name}"
-                        pca_components_file = os.path.join(pca_tables_dir, f"{metric_name}_{round_name}{context_suffix}_pca_components.csv")
-                        ica_components_file = os.path.join(ica_tables_dir, f"{metric_name}_{round_name}{context_suffix}_ica_components.csv") # Mixing matrix
-
-                        if os.path.exists(pca_components_file) and os.path.exists(ica_components_file):
-                            try:
-                                pca_components_df = pd.read_csv(pca_components_file, index_col=0)
-                                ica_mixing_matrix_df = pd.read_csv(ica_components_file, index_col=0)
-
-                                if pca_components_df.empty or ica_mixing_matrix_df.empty:
-                                    print(f"    Skipping comparison for {metric_name}, {round_name}, {phase_name}: PCA or ICA components are empty.")
-                                    continue
-
-                                # Ensure components are features x n_components for PCA, and features x n_components for ICA mixing matrix
-                                # PCA components from perform_pca are already in this format (features are index, PCs are columns)
-                                # ICA mixing matrix from perform_ica is features x n_components (features are index, ICs are columns)
-
-                                # Get top features for PCA
-                                pca_top_features = get_top_features_per_component(pca_components_df, top_n=args.n_top_features_comparison)
-                                pca_top_features_df = pd.DataFrame.from_dict(pca_top_features, orient='index')
-                                pca_top_features_filename = f"{metric_name}_{round_name}{context_suffix}_pca_top_features_comparison.csv"
-                                full_path = os.path.join(comparison_tables_dir, pca_top_features_filename)
-                                export_to_csv(pca_top_features_df, full_path)
-                                print(f"    PCA top features saved to {full_path}")
-
-                                # Get top features for ICA (based on magnitude of mixing matrix coefficients)
-                                ica_top_features = get_top_features_per_component(ica_mixing_matrix_df, top_n=args.n_top_features_comparison)
-                                ica_top_features_df = pd.DataFrame.from_dict(ica_top_features, orient='index')
-                                ica_top_features_filename = f"{metric_name}_{round_name}{context_suffix}_ica_top_features_comparison.csv"
-                                full_path = os.path.join(comparison_tables_dir, ica_top_features_filename)
-                                export_to_csv(ica_top_features_df, full_path)
-                                print(f"    ICA top features saved to {full_path}")
-                                
-                                # Basic comparison: Overlap in top features
-                                comparison_summary = {}
-                                for pc_idx, pc_features in pca_top_features.items():
-                                    for ic_idx, ic_features in ica_top_features.items():
-                                        overlap = len(set(pc_features).intersection(set(ic_features)))
-                                        comparison_summary[f"{pc_idx}_vs_{ic_idx}"] = {
-                                            'pca_component': pc_idx,
-                                            'ica_component': ic_idx,
-                                            'overlapping_features_count': overlap,
-                                            'pca_top_features': ", ".join(pc_features),
-                                            'ica_top_features': ", ".join(ic_features)
-                                        }
-                                
-                                comparison_summary_df = pd.DataFrame.from_dict(comparison_summary, orient='index')
-                                comparison_filename = f"{metric_name}_{round_name}{context_suffix}_pca_ica_feature_overlap.csv"
-                                full_path = os.path.join(comparison_tables_dir, comparison_filename)
-                                export_to_csv(comparison_summary_df, full_path)
-                                print(f"    PCA-ICA feature overlap summary saved to {full_path}")
-
-                                # TODO: Add a plot for comparison if meaningful (e.g., upset plot for feature overlap, or comparative heatmaps)
-                                # For now, focusing on table-based comparison.
-
-                            except Exception as e:
-                                print(f"    Error comparing PCA/ICA for {metric_name}, {round_name}, {phase_name}: {e}")
-                                traceback.print_exc()
-                        else:
-                            print(f"    Skipping comparison for {metric_name}, {round_name}, {phase_name}: PCA or ICA component files not found.")
-                else: # Consolidated PCA/ICA Comparison
-                    print(f"  Comparing PCA/ICA for round: {round_name}, metric: {metric_display_name} (Consolidated)")
-                    context_suffix = "_consolidated"
-                    pca_components_file = os.path.join(pca_tables_dir, f"{metric_name}_{round_name}{context_suffix}_pca_components.csv")
-                    ica_components_file = os.path.join(ica_tables_dir, f"{metric_name}_{round_name}{context_suffix}_ica_components.csv") # Mixing matrix
-
-                    if os.path.exists(pca_components_file) and os.path.exists(ica_components_file):
-                        try:
-                            pca_components_df = pd.read_csv(pca_components_file, index_col=0)
-                            ica_mixing_matrix_df = pd.read_csv(ica_components_file, index_col=0)
-
-                            if pca_components_df.empty or ica_mixing_matrix_df.empty:
-                                print(f"    Skipping comparison for {metric_name}, {round_name} (Consolidated): PCA or ICA components are empty.")
-                                continue
-
-                            pca_top_features = get_top_features_per_component(pca_components_df, top_n=args.n_top_features_comparison)
-                            pca_top_features_df = pd.DataFrame.from_dict(pca_top_features, orient='index')
-                            pca_top_features_filename = f"{metric_name}_{round_name}{context_suffix}_pca_top_features_comparison.csv"
-                            full_path = os.path.join(comparison_tables_dir, pca_top_features_filename)
-                            export_to_csv(pca_top_features_df, full_path)
-                            print(f"    PCA top features saved to {full_path}")
-
-                            ica_top_features = get_top_features_per_component(ica_mixing_matrix_df, top_n=args.n_top_features_comparison)
-                            ica_top_features_df = pd.DataFrame.from_dict(ica_top_features, orient='index')
-                            ica_top_features_filename = f"{metric_name}_{round_name}{context_suffix}_ica_top_features_comparison.csv"
-                            full_path = os.path.join(comparison_tables_dir, ica_top_features_filename)
-                            export_to_csv(ica_top_features_df, full_path)
-                            print(f"    ICA top features saved to {full_path}")
-
-                            comparison_summary = {}
-                            for pc_idx, pc_features in pca_top_features.items():
-                                for ic_idx, ic_features in ica_top_features.items():
-                                    overlap = len(set(pc_features).intersection(set(ic_features)))
-                                    comparison_summary[f"{pc_idx}_vs_{ic_idx}"] = {
-                                        'pca_component': pc_idx,
-                                        'ica_component': ic_idx,
-                                        'overlapping_features_count': overlap,
-                                        'pca_top_features': ", ".join(pc_features),
-                                        'ica_top_features': ", ".join(ic_features)
-                                    }
-                            
-                            comparison_summary_df = pd.DataFrame.from_dict(comparison_summary, orient='index')
-                            comparison_filename = f"{metric_name}_{round_name}{context_suffix}_pca_ica_feature_overlap.csv"
-                            full_path = os.path.join(comparison_tables_dir, comparison_filename)
-                            export_to_csv(comparison_summary_df, full_path)
-                            print(f"    PCA-ICA feature overlap summary saved to {full_path}")
-
-                        except Exception as e:
-                            print(f"    Error comparing PCA/ICA for {metric_name}, {round_name} (Consolidated): {e}")
-                            traceback.print_exc()
+        if not args.sem_model_spec:
+            logging.error("SEM model spec (--sem-model-spec) is required to run causal analysis. Skipping SEM block.")
+        else:
+            for metric_name, rounds_data in all_metrics_data.items():
+                for round_key, rd in rounds_data.items():
+                    phase_dicts = {}
+                    if run_per_phase_analysis and isinstance(rd, dict):
+                        phase_dicts = rd
+                    elif not run_per_phase_analysis and isinstance(rd, pd.DataFrame):
+                        phase_dicts = {None: rd}
                     else:
-                        print(f"    Skipping comparison for {metric_name}, {round_name} (Consolidated): PCA or ICA component files not found.")
-            gc.collect()
-
-    # --- Causality Analysis (SEM, TE, CCM, Granger) ---
-    # Each causality method will have its own block similar to PCA/ICA
-    # SEM
-    if args.run_sem:
-        print("\nRunning Structural Equation Modeling (SEM)...")
-        for metric_name, rounds_or_phases_data in all_metrics_data.items():
-            print(f"Processing metric: {metric_name} for SEM")
-            if not isinstance(rounds_or_phases_data, dict):
-                print(f"  Skipping metric {metric_name}: Expected dict, got {type(rounds_or_phases_data)}.")
-                continue
-
-            for round_name, phases_or_metric_df in rounds_or_phases_data.items():
-                if run_per_phase_analysis:
-                    if not isinstance(phases_or_metric_df, dict):
-                        print(f"  Skipping round {round_name} for {metric_name}: Expected dict, got {type(phases_or_metric_df)}.")
                         continue
-                    for phase_name, original_phase_df in phases_or_metric_df.items():
-                        phase_display_name = PHASE_DISPLAY_NAMES.get(phase_name, phase_name)
-                        metric_display_name = METRIC_DISPLAY_NAMES.get(metric_name, metric_name)
-                        print(f"  Processing round: {round_name}, phase: {phase_display_name} for SEM on metric: {metric_display_name}")
-                        
-                        if not isinstance(original_phase_df, pd.DataFrame) or original_phase_df.empty:
-                            print(f"    Skipping SEM: DataFrame is not valid or empty for {metric_name}, {round_name}, {phase_name}.")
+                    for phase_key, df_metric in phase_dicts.items():
+                        if df_metric.empty:
                             continue
-                        
-                        if 'experiment_elapsed_time' not in original_phase_df.columns:
-                            print(f"    Skipping SEM for {metric_name}, {round_name}, {phase_name}: 'experiment_elapsed_time' column missing.")
-                            continue
-
+                        # Prepare data for SEM: select numeric columns including exogenous/endogenous
+                        sem_data = df_metric.select_dtypes(include=[np.number]).dropna()
                         try:
-                            current_df_processed = original_phase_df.copy()
-                            current_df_processed['value'] = pd.to_numeric(current_df_processed['value'], errors='coerce')
-                            
-                            pivoted_df = current_df_processed.pivot_table(
-                                index='experiment_elapsed_time', 
-                                columns='tenant', 
-                                values='value'
+                            sem_results = perform_sem_analysis(
+                                sem_data,
+                                args.sem_model_spec,
+                                exog_vars=args.sem_exog_vars
                             )
-                            pivoted_df.dropna(axis=1, how='all', inplace=True) # Drop tenant columns if all values are NaN
-                            pivoted_df.dropna(axis=0, how='any', inplace=True)   # Drop rows with any NaN
-
-                            if pivoted_df.shape[0] < 2 or pivoted_df.shape[1] < 2: 
-                                print(f"    Skipping SEM: Not enough data after pivoting and NaN removal (shape: {pivoted_df.shape}) for {metric_name}, {round_name}, {phase_name}.")
-                                continue
-                            
-                            # SEM often starts from a correlation matrix to define the model
-                            correlation_matrix_for_sem = pivoted_df.corr(method='pearson') # Using pearson as a common default
-
-                            model_spec_df = create_sem_model_from_correlation(
-                                correlation_matrix_for_sem, 
-                                threshold=args.sem_correlation_threshold
-                            )
-                            
-                            # Handle model_spec_df which might be a string, None, or a DataFrame
-                            if model_spec_df is None or not model_spec_df:  # Check if None or empty string
-                                print(f"    Skipping SEM: No valid model specification created for {metric_name}, {round_name}, {phase_name}.")
-                                continue
-                            
-                            # If model_spec_df is a string (error message), handle it
-                            if isinstance(model_spec_df, str):
-                                print(f"    Skipping SEM: Error in model specification: {model_spec_df}")
-                                continue
-                                
-                            print(f"    Generated SEM model spec with {len(model_spec_df)} paths.")
-                            # Save model spec
-                            model_spec_filename = f"{metric_name}_{round_name}_{phase_name}_sem_model_spec.csv"
-                            full_path = os.path.join(sem_tables_dir, model_spec_filename)
-                            export_to_csv(model_spec_df, full_path)
-                            print(f"    SEM model specification saved to {full_path}")
-
-                            sem_results, fit_summary = perform_sem_analysis(
-                                data=pivoted_df, 
-                                model_spec_df=model_spec_df, 
-                                standardize=args.sem_standardize
-                            )
-
-                            context_suffix = f"_{phase_name}"
-                            title_base = f"SEM - {metric_display_name} ({phase_display_name})"
-
-                            if sem_results is not None and not sem_results.empty:
-                                sem_results_filename = f"{metric_name}_{round_name}{context_suffix}_sem_results.csv"
-                                full_path = os.path.join(sem_tables_dir, sem_results_filename)
-                                export_to_csv(sem_results, full_path)
-                                print(f"    SEM results saved to {full_path}")
-
-                                # Plot SEM path diagram
-                                plot_sem_path_diagram(
-                                    sem_results, 
-                                    title=f"{title_base} - Path Diagram",
-                                    output_dir=sem_plots_dir, 
-                                    filename=f"{metric_name}_{round_name}{context_suffix}_sem_path_diagram.png",
-                                    metric_name=metric_display_name, round_name=round_name, phase_name=phase_display_name
-                                )
-                                print(f"    SEM path diagram created.")
-
-                                # Plot SEM coefficient heatmap
-                                plot_sem_coefficient_heatmap(
-                                    sem_results, 
-                                    title=f"{title_base} - Coefficients",
-                                    output_dir=sem_plots_dir, 
-                                    filename=f"{metric_name}_{round_name}{context_suffix}_sem_coefficients_heatmap.png",
-                                    metric_name=metric_display_name, round_name=round_name, phase_name=phase_display_name
-                                )
-                                print(f"    SEM coefficient heatmap created.")
-                            else:
-                                print(f"    SEM analysis did not produce significant results for {metric_name}, {round_name}, {phase_name}.")
-
-                            if fit_summary is not None and not fit_summary.empty:
-                                sem_fit_filename = f"{metric_name}_{round_name}{context_suffix}_sem_fit_indices.csv"
-                                full_path = os.path.join(sem_tables_dir, sem_fit_filename)
-                                export_to_csv(fit_summary, full_path)
-                                print(f"    SEM fit indices saved to {full_path}")
-                                
-                                # Plot SEM fit indices (if the plotting function exists and is relevant)
-                                # Assuming plot_sem_fit_indices takes the fit_summary DataFrame
-                                plot_sem_fit_indices(
-                                    fit_summary, 
-                                    title=f"{title_base} - Fit Indices",
-                                    output_dir=sem_plots_dir, 
-                                    filename=f"{metric_name}_{round_name}{context_suffix}_sem_fit_indices.png",
-                                    metric_name=metric_display_name, round_name=round_name, phase_name=phase_display_name
-                                )
-                                print(f"    SEM fit indices plot created.")
-                            else:
-                                print(f"    SEM analysis did not produce fit summary for {metric_name}, {round_name}, {phase_name}.")
-
                         except Exception as e:
-                            print(f"    Error during SEM for {metric_name}, {round_name}, {phase_name}: {e}")
-                            traceback.print_exc()
-                else: # Consolidated SEM
-                    original_metric_df = phases_or_metric_df
-                    metric_display_name = METRIC_DISPLAY_NAMES.get(metric_name, metric_name)
-                    print(f"  Processing round: {round_name} for SEM on metric: {metric_display_name} (Consolidated)")
+                            logging.error(f"Error during SEM fit for {metric_name} {round_key} {phase_key}: {e}")
+                            continue
+                        # Export estimates and stats
+                        estimates_df = sem_results.get('estimates')
+                        stats_dict = sem_results.get('stats')
+                        stats_df = pd.DataFrame([stats_dict]) if stats_dict else pd.DataFrame()
 
-                    if not isinstance(original_metric_df, pd.DataFrame) or original_metric_df.empty:
-                        print(f"    Skipping SEM: DataFrame is not valid or empty for {metric_name}, {round_name} (Consolidated).")
+                        est_csv = os.path.join(sem_tables_dir, f"{metric_name}_{round_key}_{phase_key}_sem_estimates.csv")
+                        stats_csv = os.path.join(sem_tables_dir, f"{metric_name}_{round_key}_{phase_key}_sem_stats.csv")
+                        export_to_csv(estimates_df, est_csv)
+                        export_to_csv(stats_df, stats_csv)
+
+                        # Plot path diagram and fit indices
+                        path_file = f"{metric_name}_{round_key}_{phase_key}_sem_path.png"
+                        fit_file = f"{metric_name}_{round_key}_{phase_key}_sem_fit.png"
+                        plot_sem_path_diagram(
+                            sem_results,
+                            title=f"SEM Path Diagram for {metric_name} {round_key} {phase_key}",
+                            output_dir=sem_plots_dir,
+                            filename=path_file,
+                            metric_name=metric_name,
+                            round_name=round_key,
+                            phase_name=phase_key
+                        )
+                        plot_sem_fit_indices(
+                            sem_results,
+                            title=f"SEM Fit Indices for {metric_name} {round_key} {phase_key}",
+                            output_dir=sem_plots_dir,
+                            filename=fit_file,
+                            metric_name=metric_name,
+                            round_name=round_key,
+                            phase_name=phase_key
+                        )
+            logging.info("Causal analysis completed.")
+            sys.stdout.flush()
+
+    # Similarity Analysis
+    if args.run_similarity:
+        print("DEBUG: Running similarity analysis module...")
+        for metric_name, rounds_data in all_metrics_data.items():
+            # Iterate through rounds
+            for round_key, rd in rounds_data.items():
+                # Determine dataframes based on per-phase flag
+                phase_dicts = {}
+                if run_per_phase_analysis and isinstance(rd, dict):
+                    phase_dicts = rd
+                elif not run_per_phase_analysis and isinstance(rd, pd.DataFrame):
+                    phase_dicts = {None: rd}
+                else:
+                    continue
+                for phase_key, df_metric in phase_dicts.items():
+                    if df_metric.empty:
                         continue
+                    # Calculate pairwise distance correlation and cosine similarity
+                    distance_corr_df = calculate_pairwise_distance_correlation(
+                        df_metric, time_col='datetime', metric_col='value', group_col='tenant')
+                    cosine_sim_df = calculate_pairwise_cosine_similarity(
+                        df_metric, time_col='datetime', metric_col='value', group_col='tenant')
+                    # Export distance correlation and cosine similarity results
+                    distance_corr_csv = os.path.join(tables_dir, f"{metric_name}_{round_key}_{phase_key}_pairwise_distance_correlation.csv")
+                    cosine_sim_csv = os.path.join(tables_dir, f"{metric_name}_{round_key}_{phase_key}_pairwise_cosine_similarity.csv")
+                    export_to_csv(distance_corr_df, distance_corr_csv)
+                    export_to_csv(cosine_sim_df, cosine_sim_csv)
+                    # Plot distance correlation heatmap and cosine similarity heatmap
+                    plot_distance_correlation_heatmap(distance_corr_df, 
+                                                       title=f"Pairwise Distance Correlation for {metric_name} {round_key} {phase_key}",
+                                                       output_dir=plots_dir,
+                                                       filename=f"{metric_name}_{round_key}_{phase_key}_distance_correlation_heatmap.png")
+                    plot_cosine_similarity_heatmap(cosine_sim_df, 
+                                                   title=f"Pairwise Cosine Similarity for {metric_name} {round_key} {phase_key}",
+                                                   output_dir=plots_dir,
+                                                   filename=f"{metric_name}_{round_key}_{phase_key}_cosine_similarity_heatmap.png")
+        print("DEBUG: Similarity analysis completed.")
+        sys.stdout.flush()
+
+    print(f"DEBUG: Starting main processing loop for PCA/ICA. run_per_phase_analysis: {run_per_phase_analysis}")
+    sys.stdout.flush()
+
+    if args.run_pca or args.run_ica:
+        if not all_metrics_data:
+            print("DEBUG: Skipping PCA/ICA because all_metrics_data is empty.")
+            sys.stdout.flush()
+        else:
+            for metric_name, rounds_or_phases_data in all_metrics_data.items():
+                print(f"DEBUG: Processing metric: {metric_name} for PCA/ICA")
+                sys.stdout.flush()
+                if not rounds_or_phases_data:
+                    print(f"DEBUG: No data for metric {metric_name} in rounds_or_phases_data for PCA/ICA, skipping.")
+                    sys.stdout.flush()
+                    continue
+                for round_name, phases_or_metric_df_data in rounds_or_phases_data.items(): # Renamed to avoid conflict
+                    print(f"DEBUG: Processing round: {round_name} for metric: {metric_name} for PCA/ICA. run_per_phase_analysis: {run_per_phase_analysis}")
+                    sys.stdout.flush()
                     
-                    if 'experiment_elapsed_time' not in original_metric_df.columns:
-                        print(f"    Skipping SEM for {metric_name}, {round_name} (Consolidated): 'experiment_elapsed_time' column missing.")
-                        continue
+                    current_data_for_analysis = None # This will hold the DataFrame to be analyzed
+                    analysis_label_suffix = ""
 
-                    try:
-                        current_df_processed = original_metric_df.copy()
-                        current_df_processed['value'] = pd.to_numeric(current_df_processed['value'], errors='coerce')
+                    if run_per_phase_analysis:
+                        if not isinstance(phases_or_metric_df_data, dict):
+                            print(f"  Skipping round {round_name} for metric {metric_name}: Expected a dictionary of phase data for per-phase PCA/ICA, got {type(phases_or_metric_df_data)}.")
+                            sys.stdout.flush()
+                            continue # to next round
                         
-                        pivoted_df = current_df_processed.pivot_table(
-                            index='experiment_elapsed_time', 
-                            columns='tenant', 
-                            values='value'
-                        )
-                        pivoted_df.dropna(axis=1, how='all', inplace=True)
-                        pivoted_df.dropna(axis=0, how='any', inplace=True)
-
-                        if pivoted_df.shape[0] < 2 or pivoted_df.shape[1] < 2:
-                            print(f"    Skipping SEM: Not enough data after pivoting and NaN removal (shape: {pivoted_df.shape}) for {metric_name}, {round_name} (Consolidated).")
-                            continue
-
-                        correlation_matrix_for_sem = pivoted_df.corr(method='pearson')
-                        model_spec_df = create_sem_model_from_correlation(
-                            correlation_matrix_for_sem, 
-                            threshold=args.sem_correlation_threshold
-                        )
-                        
-                        # Handle model_spec_df which might be a string, None, or a DataFrame
-                        if model_spec_df is None or not model_spec_df:  # Check if None or empty string
-                            print(f"    Skipping SEM: No valid model specification created for {metric_name}, {round_name} (Consolidated).")
-                            continue
-                        
-                        # If model_spec_df is a string (error message), handle it
-                        if isinstance(model_spec_df, str):
-                            print(f"    Skipping SEM: Error in model specification: {model_spec_df}")
-                            continue
-                        
-                        print(f"    Generated SEM model spec with {len(model_spec_df)} paths (Consolidated).")
-                        model_spec_filename = f"{metric_name}_{round_name}_consolidated_sem_model_spec.csv"
-                        full_path = os.path.join(sem_tables_dir, model_spec_filename)
-                        export_to_csv(model_spec_df, full_path)
-                        print(f"    SEM model specification saved to {full_path}")
-
-                        sem_results, fit_summary = perform_sem_analysis(
-                            data=pivoted_df, 
-                            model_spec_df=model_spec_df, 
-                            standardize=args.sem_standardize
-                        )
-                        
-                        context_suffix = "_consolidated"
-                        title_base = f"SEM - {metric_display_name} (Consolidated)"
-
-                        if sem_results is not None and not sem_results.empty:
-                            sem_results_filename = f"{metric_name}_{round_name}{context_suffix}_sem_results.csv"
-                            full_path = os.path.join(sem_tables_dir, sem_results_filename)
-                            export_to_csv(sem_results, full_path)
-                            print(f"    SEM results saved to {full_path}")
-
-                            plot_sem_path_diagram(
-                                sem_results, 
-                                title=f"{title_base} - Path Diagram",
-                                output_dir=sem_plots_dir, 
-                                filename=f"{metric_name}_{round_name}{context_suffix}_sem_path_diagram.png",
-                                metric_name=metric_display_name, round_name=round_name
-                            )
-                            print(f"    SEM path diagram created.")
-
-                            plot_sem_coefficient_heatmap(
-                                sem_results, 
-                                title=f"{title_base} - Coefficients",
-                                output_dir=sem_plots_dir, 
-                                filename=f"{metric_name}_{round_name}{context_suffix}_sem_coefficients_heatmap.png",
-                                metric_name=metric_display_name, round_name=round_name
-                            )
-                            print(f"    SEM coefficient heatmap created.")
-                        else:
-                            print(f"    SEM analysis did not produce significant results for {metric_name}, {round_name} (Consolidated).")
-
-                        if fit_summary is not None and not fit_summary.empty:
-                            sem_fit_filename = f"{metric_name}_{round_name}{context_suffix}_sem_fit_indices.csv"
-                            full_path = os.path.join(sem_tables_dir, sem_fit_filename)
-                            export_to_csv(fit_summary, full_path)
-                            print(f"    SEM fit indices saved to {full_path}")
+                        # Loop through phases within the round for per-phase analysis
+                        for phase_name, phase_df in phases_or_metric_df_data.items():
+                            print(f"DEBUG: Per-phase PCA/ICA: Processing phase: {phase_name} for metric: {metric_name}, round: {round_name}")
+                            sys.stdout.flush()
+                            if not isinstance(phase_df, pd.DataFrame) or phase_df.empty:
+                                print(f"    Skipping phase {phase_name} for metric {metric_name}, round {round_name} due to empty or invalid DataFrame.")
+                                sys.stdout.flush()
+                                continue # to next phase
                             
-                            plot_sem_fit_indices(
-                                fit_summary, 
-                                title=f"{title_base} - Fit Indices",
-                                output_dir=sem_plots_dir, 
-                                filename=f"{metric_name}_{round_name}{context_suffix}_sem_fit_indices.png",
-                                metric_name=metric_display_name, round_name=round_name
-                            )
-                            print(f"    SEM fit indices plot created.")
-                        else:
-                            print(f"    SEM analysis did not produce fit summary for {metric_name}, {round_name} (Consolidated).")
+                            current_data_for_analysis = phase_df
+                            analysis_label_suffix = f"{phase_name}"
+                            # Proceed with PCA/ICA for this specific phase_df
+                            perform_multivariate_analysis_on_df(current_data_for_analysis, metric_name, analysis_label_suffix, round_name, args, pca_plots_output_dir, pca_tables_output_dir, ica_plots_output_dir, ica_tables_output_dir, comparison_tables_output_dir)
 
-                    except Exception as e:
-                        print(f"    Error during SEM for {metric_name}, {round_name} (Consolidated): {e}")
-                        traceback.print_exc()
-            gc.collect() # After all rounds/phases for a metric
-
-    # Transfer Entropy
-    if args.run_transfer_entropy:
-        print("\nRunning Transfer Entropy Analysis...")
-        for metric_name, rounds_or_phases_data in all_metrics_data.items():
-            print(f"Processing metric: {metric_name} for Transfer Entropy")
-            if not isinstance(rounds_or_phases_data, dict):
-                print(f"  Skipping metric {metric_name}: Expected dict, got {type(rounds_or_phases_data)}.")
-                continue
-
-            for round_name, phases_or_metric_df in rounds_or_phases_data.items():
-                if run_per_phase_analysis:
-                    if not isinstance(phases_or_metric_df, dict):
-                        print(f"  Skipping round {round_name} for {metric_name}: Expected dict, got {type(phases_or_metric_df)}.")
-                        continue
-                    for phase_name, original_phase_df in phases_or_metric_df.items():
-                        phase_display_name = PHASE_DISPLAY_NAMES.get(phase_name, phase_name)
-                        metric_display_name = METRIC_DISPLAY_NAMES.get(metric_name, metric_name)
-                        print(f"  Processing round: {round_name}, phase: {phase_display_name} for TE on metric: {metric_display_name}")
+                    else: # Consolidated Analysis (per round)
+                        print(f"DEBUG: Consolidated PCA/ICA for metric: {metric_name}, round: {round_name}")
+                        sys.stdout.flush()
+                        if not isinstance(phases_or_metric_df_data, pd.DataFrame) or phases_or_metric_df_data.empty:
+                            print(f"    Skipping consolidated analysis for metric {metric_name}, round {round_name} due to empty or invalid DataFrame. Type: {type(phases_or_metric_df_data)}")
+                            sys.stdout.flush()
+                            continue # to next round or metric
                         
-                        if not isinstance(original_phase_df, pd.DataFrame) or original_phase_df.empty:
-                            print(f"    Skipping TE: DataFrame is not valid or empty for {metric_name}, {round_name}, {phase_name}.")
-                            continue
-                        
-                        if 'experiment_elapsed_time' not in original_phase_df.columns:
-                            print(f"    Skipping TE for {metric_name}, {round_name}, {phase_name}: 'experiment_elapsed_time' column missing.")
-                            continue
+                        current_data_for_analysis = phases_or_metric_df_data
+                        analysis_label_suffix = "consolidated"
+                        # Proceed with PCA/ICA for this consolidated round_df
+                        perform_multivariate_analysis_on_df(current_data_for_analysis, metric_name, analysis_label_suffix, round_name, args, pca_plots_output_dir, pca_tables_output_dir, ica_plots_output_dir, ica_tables_output_dir, comparison_tables_output_dir)
+        
+        print("DEBUG: Finished processing all metrics and rounds for PCA/ICA.")
+        sys.stdout.flush()
 
-                        try:
-                            current_df_processed = original_phase_df.copy()
-                            current_df_processed['value'] = pd.to_numeric(current_df_processed['value'], errors='coerce')
-                            
-                            pivoted_df = current_df_processed.pivot_table(
-                                index='experiment_elapsed_time', 
-                                columns='tenant', 
-                                values='value'
-                            )
-                            pivoted_df.dropna(axis=1, how='all', inplace=True) 
-                            pivoted_df.dropna(axis=0, how='any', inplace=True)   
+    if not (args.run_pca or args.run_ica or args.run_descriptive_stats or args.run_correlation_covariance or args.compare_pca_ica):
+        print("No analysis modules selected to run. Please specify at least one analysis type.")
+        sys.stdout.flush()
 
-                            if pivoted_df.shape[0] < args.te_lag + 1 or pivoted_df.shape[1] < 2: 
-                                print(f"    Skipping TE: Not enough data after pivoting (shape: {pivoted_df.shape}, lag: {args.te_lag}) for {metric_name}, {round_name}, {phase_name}.")
-                                continue
-                            
-                            te_matrix = calculate_pairwise_transfer_entropy(
-                                data_df=pivoted_df, # Changed from data to data_df
-                                k=args.te_lag 
-                            )
-
-                            context_suffix = f"_{phase_name}"
-                            title_base = f"Transfer Entropy (Lag {args.te_lag}) - {metric_display_name} ({phase_display_name})"
-
-                            if te_matrix is not None and te_matrix:  # Check if not None and not empty
-                                # Handle dictionary result by converting to DataFrame if needed
-                                if isinstance(te_matrix, dict):
-                                    te_matrix_df = pd.DataFrame(te_matrix)
-                                else:
-                                    te_matrix_df = te_matrix
-                                    
-                                te_results_filename = f"{metric_name}_{round_name}{context_suffix}_transfer_entropy_k{args.te_lag}.csv"
-                                full_path = os.path.join(te_tables_dir, te_results_filename)
-                                export_to_csv(te_matrix_df, full_path)
-                                print(f"    Transfer Entropy results saved to {full_path}")
-
-                                # Plot TE heatmap
-                                plot_transfer_entropy_heatmap(
-                                    te_matrix_df,
-                                    title=title_base,
-                                    output_dir=te_plots_dir,
-                                    filename=f"{metric_name}_{round_name}{context_suffix}_te_heatmap_k{args.te_lag}.png",
-                                    metric_name=metric_display_name, round_name=round_name, phase_name=phase_display_name
-                                )
-                                print(f"    Transfer Entropy heatmap created.")
-
-                                # Plot TE network
-                                plot_transfer_entropy_network(
-                                    te_matrix_df,
-                                    title=f"{title_base} - Network (Threshold {args.te_threshold})",
-                                    output_dir=te_plots_dir,
-                                    filename=f"{metric_name}_{round_name}{context_suffix}_te_network_k{args.te_lag}_thresh{args.te_threshold}.png",
-                                    threshold=args.te_threshold,
-                                    metric_name=metric_display_name, round_name=round_name, phase_name=phase_display_name
-                                )
-                                print(f"    Transfer Entropy network plot created.")
-                            else:
-                                print(f"    Transfer Entropy analysis did not produce results for {metric_name}, {round_name}, {phase_name}.")
-
-                        except Exception as e:
-                            print(f"    Error during Transfer Entropy for {metric_name}, {round_name}, {phase_name}: {e}")
-                            traceback.print_exc()
-                else: # Consolidated TE
-                    original_metric_df = phases_or_metric_df
-                    metric_display_name = METRIC_DISPLAY_NAMES.get(metric_name, metric_name)
-                    print(f"  Processing round: {round_name} for TE on metric: {metric_display_name} (Consolidated)")
-
-                    if not isinstance(original_metric_df, pd.DataFrame) or original_metric_df.empty:
-                        print(f"    Skipping TE: DataFrame is not valid or empty for {metric_name}, {round_name} (Consolidated).")
-                        continue
-                    
-                    if 'experiment_elapsed_time' not in original_metric_df.columns:
-                        print(f"    Skipping TE for {metric_name}, {round_name} (Consolidated): 'experiment_elapsed_time' column missing.")
-                        continue
-                    
-                    try:
-                        current_df_processed = original_metric_df.copy()
-                        current_df_processed['value'] = pd.to_numeric(current_df_processed['value'], errors='coerce')
-                        
-                        pivoted_df = current_df_processed.pivot_table(
-                            index='experiment_elapsed_time', 
-                            columns='tenant', 
-                            values='value'
-                        )
-                        pivoted_df.dropna(axis=1, how='all', inplace=True)
-                        pivoted_df.dropna(axis=0, how='any', inplace=True)
-
-                        if pivoted_df.shape[0] < args.te_lag + 1 or pivoted_df.shape[1] < 2:
-                            print(f"    Skipping TE: Not enough data after pivoting (shape: {pivoted_df.shape}, lag: {args.te_lag}) for {metric_name}, {round_name} (Consolidated).")
-                            continue
-                        
-                        te_matrix = calculate_pairwise_transfer_entropy(
-                            data_df=pivoted_df, # Changed from data to data_df
-                            k=args.te_lag
-                        )
-
-                        context_suffix = "_consolidated"
-                        title_base = f"Transfer Entropy (Lag {args.te_lag}) - {metric_display_name} (Consolidated)"
-
-                        if te_matrix is not None and not te_matrix.empty:
-                            # Handle dictionary result by converting to DataFrame if needed
-                            if isinstance(te_matrix, dict):
-                                te_matrix_df = pd.DataFrame(te_matrix)
-                            else:
-                                te_matrix_df = te_matrix
-                                
-                            te_results_filename = f"{metric_name}_{round_name}{context_suffix}_transfer_entropy_k{args.te_lag}.csv"
-                            full_path = os.path.join(te_tables_dir, te_results_filename)
-                            export_to_csv(te_matrix_df, full_path)
-                            print(f"    Transfer Entropy results saved to {full_path}")
-
-                            plot_transfer_entropy_heatmap(
-                                te_matrix_df,
-                                title=title_base,
-                                output_dir=te_plots_dir,
-                                filename=f"{metric_name}_{round_name}{context_suffix}_te_heatmap_k{args.te_lag}.png",
-                                metric_name=metric_display_name, round_name=round_name
-                            )
-                            print(f"    Transfer Entropy heatmap created.")
-
-                            plot_transfer_entropy_network(
-                                te_matrix_df,
-                                title=f"{title_base} - Network (Threshold {args.te_threshold})",
-                                output_dir=te_plots_dir,
-                                filename=f"{metric_name}_{round_name}{context_suffix}_te_network_k{args.te_lag}_thresh{args.te_threshold}.png",
-                                threshold=args.te_threshold,
-                                metric_name=metric_display_name, round_name=round_name
-                            )
-                            print(f"    Transfer Entropy network plot created.")
-                        else:
-                            print(f"    Transfer Entropy analysis did not produce results for {metric_name}, {round_name} (Consolidated).")
-
-                    except Exception as e:
-                        print(f"    Error during Transfer Entropy for {metric_name}, {round_name} (Consolidated): {e}")
-                        traceback.print_exc()
-            gc.collect() # After all rounds/phases for a metric
-
-    # Convergent Cross Mapping (CCM)
-    if args.run_ccm:
-        print("\nRunning Convergent Cross Mapping (CCM)...")
-        for metric_name, rounds_or_phases_data in all_metrics_data.items():
-            print(f"Processing metric: {metric_name} for CCM")
-            if not isinstance(rounds_or_phases_data, dict):
-                print(f"  Skipping metric {metric_name}: Expected dict, got {type(rounds_or_phases_data)}.")
-                continue
-
-            for round_name, phases_or_metric_df in rounds_or_phases_data.items():
-                if run_per_phase_analysis:
-                    if not isinstance(phases_or_metric_df, dict):
-                        print(f"  Skipping round {round_name} for {metric_name}: Expected dict, got {type(phases_or_metric_df)}.")
-                        continue
-                    for phase_name, original_phase_df in phases_or_metric_df.items():
-                        phase_display_name = PHASE_DISPLAY_NAMES.get(phase_name, phase_name)
-                        metric_display_name = METRIC_DISPLAY_NAMES.get(metric_name, metric_name)
-                        print(f"  Processing round: {round_name}, phase: {phase_display_name} for CCM on metric: {metric_display_name}")
-                        
-                        if not isinstance(original_phase_df, pd.DataFrame) or original_phase_df.empty:
-                            print(f"    Skipping CCM: DataFrame is not valid or empty for {metric_name}, {round_name}, {phase_name}.")
-                            continue
-                        
-                        if 'experiment_elapsed_time' not in original_phase_df.columns:
-                            print(f"    Skipping CCM for {metric_name}, {round_name}, {phase_name}: 'experiment_elapsed_time' column missing.")
-                            continue
-
-                        try:
-                            current_df_processed = original_phase_df.copy()
-                            current_df_processed['value'] = pd.to_numeric(current_df_processed['value'], errors='coerce')
-                            
-                            pivoted_df = current_df_processed.pivot_table(
-                                index='experiment_elapsed_time', 
-                                columns='tenant', 
-                                values='value'
-                            )
-                            pivoted_df.dropna(axis=1, how='all', inplace=True) 
-                            pivoted_df.dropna(axis=0, how='any', inplace=True)   
-
-                            # Check if enough data points for max embedding dimension
-                            max_embed_dim = max(args.ccm_embed_dimensions) if args.ccm_embed_dimensions else 1
-                            required_len = (max_embed_dim - 1) * args.ccm_tau + 1
-                            if pivoted_df.shape[0] < required_len or pivoted_df.shape[1] < 2:
-                                print(f"    Skipping CCM: Not enough data after pivoting (shape: {pivoted_df.shape}, E_max: {max_embed_dim}, tau: {args.ccm_tau}, required_len: {required_len}) for {metric_name}, {round_name}, {phase_name}.")
-                                continue
-                            
-                            ccm_results_dict = calculate_pairwise_ccm(
-                                data_df=pivoted_df, # Changed from data to data_df
-                                E_range=args.ccm_embed_dimensions,
-                                tau=args.ccm_tau
-                            )
-
-                            context_suffix = f"_{phase_name}"
-                            base_filename_part = f"{metric_name}_{round_name}{context_suffix}_ccm_tau{args.ccm_tau}"
-
-                            if ccm_results_dict:
-                                all_ccm_summaries = []
-                                for (target, library), ccm_results in ccm_results_dict.items():
-                                    # Check if ccm_results is a DataFrame - newer format from calculate_ccm function
-                                    if isinstance(ccm_results, pd.DataFrame):
-                                        # Process the DataFrame format
-                                        for E_val in args.ccm_embed_dimensions:
-                                            # Extract information for this embedding dimension
-                                            lib_lens = ccm_results['library_size'].values
-                                            rho_vals = ccm_results['prediction_skill'].values
-                                            
-                                            # Create a simplified results dict for the convergence plot
-                                            single_pair_results = {}
-                                            # Combine both directions into a results DataFrame
-                                            combined_df = pd.DataFrame({
-                                                'library_size': lib_lens,
-                                                'prediction_skill': rho_vals,
-                                                'direction': f"{library} causes {target}"
-                                            })
-                                            single_pair_results[(library, target)] = combined_df
-                                            
-                                            # Plot CCM convergence using the expected format
-                                            plot_ccm_convergence(
-                                                ccm_results=single_pair_results,
-                                                title=f"CCM Convergence {library} -> {target} (E={E_val}) - {metric_display_name} ({phase_display_name})",
-                                                output_dir=ccm_plots_dir,
-                                                filename=f"{base_filename_part}_E{E_val}_{library}_to_{target}_convergence.png",
-                                                metric_name=metric_display_name, 
-                                                round_name=round_name, 
-                                                phase_name=phase_display_name
-                                            )
-                                    # Summarize results for this pair
-                                    ccm_summary_params = {'threshold': args.ccm_threshold}
-                                    if 'target_col' in locals() and 'library_col' in locals():
-                                        pair_summary = summarize_ccm_results(ccm_results, target_col, library_col, **ccm_summary_params)
-                                    else:
-                                        pair_summary = summarize_ccm_results(ccm_results_dict, **ccm_summary_params)
-                                    if pair_summary is not None:
-                                        all_ccm_summaries.append(pair_summary)
-                                
-                                if all_ccm_summaries:
-                                    # Combine all pair summaries into a single DataFrame for heatmap and saving
-                                    # This assumes summarize_ccm_results returns a dict or Series that can be made into a DataFrame
-                                    # For a heatmap, we usually need a matrix form. The current causality.py summarize_ccm_results returns a list of dicts.
-                                    # Let's adapt to create a DataFrame from this list of dicts first.
-                                    summary_df = pd.DataFrame(all_ccm_summaries)
-                                    if not summary_df.empty:
-                                        ccm_summary_table_filename = f"{base_filename_part}_summary_thresh{args.ccm_threshold}.csv"
-                                        full_path = os.path.join(ccm_tables_dir, ccm_summary_table_filename)
-                                        export_to_csv(summary_df, full_path)
-                                        print(f"    CCM summary table saved to {full_path}")
-
-                                        # Plot CCM causality heatmap from the summary_df
-                                        # plot_ccm_causality_heatmap expects a matrix, so we might need to pivot summary_df
-                                        # Assuming summary_df has columns like 'target', 'library', 'best_rho', 'significant'
-                                        # We need to pivot it to create a matrix of rho values for the heatmap.
-                                        if 'target' in summary_df.columns and 'library' in summary_df.columns and 'best_rho' in summary_df.columns:
-                                            try:
-                                                heatmap_data = summary_df.pivot(index='target', columns='library', values='best_rho')
-                                                plot_ccm_causality_heatmap(
-                                                    heatmap_data,
-                                                    title=f"CCM Causality - {metric_display_name} ({phase_display_name}) (Thresh {args.ccm_threshold})",
-                                                    output_dir=ccm_plots_dir,
-                                                    filename=f"{base_filename_part}_causality_heatmap_thresh{args.ccm_threshold}.png",
-                                                    metric_name=metric_display_name, round_name=round_name, phase_name=phase_display_name
-                                                )
-                                                print(f"    CCM causality heatmap created.")
-                                            except Exception as e_pivot:
-                                                print(f"    Could not pivot CCM summary for heatmap: {e_pivot}")
-                                        else:
-                                            print("    CCM summary DataFrame missing required columns for heatmap pivoting.")
-                                    else:
-                                        print(f"    No CCM summary data to save or plot for {metric_name}, {round_name}, {phase_name}.")       
-                                else:
-                                    print(f"    No CCM summaries generated for {metric_name}, {round_name}, {phase_name}.")
-                            else:
-                                print(f"    CCM analysis did not produce results for {metric_name}, {round_name}, {phase_name}.")
-
-                        except Exception as e:
-                            print(f"    Error during CCM for {metric_name}, {round_name}, {phase_name}: {e}")
-                            traceback.print_exc()
-                else: # Consolidated CCM
-                    original_metric_df = phases_or_metric_df
-                    metric_display_name = METRIC_DISPLAY_NAMES.get(metric_name, metric_name)
-                    print(f"  Processing round: {round_name} for CCM on metric: {metric_display_name} (Consolidated)")
-
-                    if not isinstance(original_metric_df, pd.DataFrame) or original_metric_df.empty:
-                        print(f"    Skipping CCM: DataFrame is not valid or empty for {metric_name}, {round_name} (Consolidated).")
-                        continue
-                    
-                    if 'experiment_elapsed_time' not in original_metric_df.columns:
-                        print(f"    Skipping CCM for {metric_name}, {round_name} (Consolidated): 'experiment_elapsed_time' column missing.")
-                        continue
-                    
-                    try:
-                        current_df_processed = original_metric_df.copy()
-                        current_df_processed['value'] = pd.to_numeric(current_df_processed['value'], errors='coerce')
-                        
-                        pivoted_df = current_df_processed.pivot_table(
-                            index='experiment_elapsed_time', 
-                            columns='tenant', 
-                            values='value'
-                        )
-                        pivoted_df.dropna(axis=1, how='all', inplace=True)
-                        pivoted_df.dropna(axis=0, how='any', inplace=True)
-
-                        max_embed_dim = max(args.ccm_embed_dimensions) if args.ccm_embed_dimensions else 1
-                        required_len = (max_embed_dim - 1) * args.ccm_tau + 1
-                        if pivoted_df.shape[0] < required_len or pivoted_df.shape[1] < 2:
-                            print(f"    Skipping CCM: Not enough data after pivoting (shape: {pivoted_df.shape}, E_max: {max_embed_dim}, tau: {args.ccm_tau}, required_len: {required_len}) for {metric_name}, {round_name} (Consolidated).")
-                            continue
-                        
-                        ccm_results_dict = calculate_pairwise_ccm(
-                            data_df=pivoted_df, # Changed from data to data_df
-                            E_range=args.ccm_embed_dimensions,
-                            tau=args.ccm_tau
-                        )
-
-                        context_suffix = "_consolidated"
-                        base_filename_part = f"{metric_name}_{round_name}{context_suffix}_ccm_tau{args.ccm_tau}"
-
-                        if ccm_results_dict:
-                            all_ccm_summaries = []
-                            for (target, library), ccm_run_results in ccm_results_dict.items():
-                                for E_val, lib_lens, rho_vals in ccm_run_results:
-                                    plot_ccm_convergence(
-                                        lib_lens=lib_lens,
-                                        rho_vals=rho_vals,
-                                        target_col=target,
-                                        library_col=library,
-                                        E=E_val,
-                                        tau=args.ccm_tau,
-                                        title=f"CCM Convergence {library} -> {target} (E={E_val}) - {metric_display_name} (Consolidated)",
-                                        output_dir=ccm_plots_dir,
-                                        filename=f"{base_filename_part}_E{E_val}_{library}_to_{target}_convergence.png",
-                                        metric_name=metric_display_name, round_name=round_name
-                                    )
-                                ccm_summary_params = {'threshold': args.ccm_threshold}
-                                if 'target_col' in locals() and 'library_col' in locals():
-                                    pair_summary = summarize_ccm_results(ccm_run_results, target_col, library_col, **ccm_summary_params)
-                                else:
-                                    pair_summary = summarize_ccm_results(ccm_results_dict, **ccm_summary_params)
-                                if pair_summary is not None:
-                                    all_ccm_summaries.append(pair_summary)
-                            
-                            if all_ccm_summaries:
-                                summary_df = pd.DataFrame(all_ccm_summaries)
-                                if not summary_df.empty:
-                                    ccm_summary_table_filename = f"{base_filename_part}_summary_thresh{args.ccm_threshold}.csv"
-                                    full_path = os.path.join(ccm_tables_dir, ccm_summary_table_filename)
-                                    export_to_csv(summary_df, full_path)
-                                    print(f"    CCM summary table saved to {full_path}")
-
-                                    if 'target' in summary_df.columns and 'library' in summary_df.columns and 'best_rho' in summary_df.columns:
-                                        try:
-                                            heatmap_data = summary_df.pivot(index='target', columns='library', values='best_rho')
-                                            plot_ccm_causality_heatmap(
-                                                heatmap_data,
-                                                title=f"CCM Causality - {metric_display_name} (Consolidated) (Thresh {args.ccm_threshold})",
-                                                output_dir=ccm_plots_dir,
-                                                filename=f"{base_filename_part}_causality_heatmap_thresh{args.ccm_threshold}.png",
-                                                metric_name=metric_display_name, round_name=round_name
-                                            )
-                                            print(f"    CCM causality heatmap created.")
-                                        except Exception as e_pivot:
-                                            print(f"    Could not pivot CCM summary for heatmap (Consolidated): {e_pivot}")
-                                    else:
-                                        print("    CCM summary DataFrame missing required columns for heatmap pivoting (Consolidated).")
-                                else:
-                                    print(f"    No CCM summary data to save or plot for {metric_name}, {round_name} (Consolidated).")
-                            else:
-                                print(f"    No CCM summaries generated for {metric_name}, {round_name} (Consolidated).")
-                        else:
-                            print(f"    CCM analysis did not produce results for {metric_name}, {round_name} (Consolidated).")
-
-                    except Exception as e:
-                        print(f"    Error during CCM for {metric_name}, {round_name} (Consolidated): {e}")
-                        traceback.print_exc()
-            gc.collect() # After all rounds/phases for a metric
-
-    # Granger Causality
-    if args.run_granger:
-        print("\nRunning Granger Causality Analysis...")
-        for metric_name, rounds_or_phases_data in all_metrics_data.items():
-            metric_display_name = METRIC_DISPLAY_NAMES.get(metric_name, metric_name)
-            print(f"Processing metric: {metric_display_name} for Granger Causality")
-            if not isinstance(rounds_or_phases_data, dict):
-                print(f"  Skipping metric {metric_name}: Expected dict, got {type(rounds_or_phases_data)}.")
-                continue
-
-            for round_name, phases_or_metric_df in rounds_or_phases_data.items():
-                if run_per_phase_analysis:
-                    if not isinstance(phases_or_metric_df, dict):
-                        print(f"  Skipping round {round_name} for {metric_name}: Expected dict, got {type(phases_or_metric_df)}.")
-                        continue
-                    for phase_name, original_phase_df in phases_or_metric_df.items():
-                        phase_display_name = PHASE_DISPLAY_NAMES.get(phase_name, phase_name)
-                        print(f"  Processing round: {round_name}, phase: {phase_display_name} for Granger on metric: {metric_display_name}")
-
-                        if not isinstance(original_phase_df, pd.DataFrame) or original_phase_df.empty:
-                            print(f"    Skipping Granger: DataFrame is not valid or empty for {metric_name}, {round_name}, {phase_name}.")
-                            continue
-                        
-                        if 'experiment_elapsed_time' not in original_phase_df.columns or 'tenant' not in original_phase_df.columns or 'value' not in original_phase_df.columns:
-                            print(f"    Skipping Granger for {metric_name}, {round_name}, {phase_name}: missing required columns ('experiment_elapsed_time', 'tenant', 'value').")
-                            continue
-
-                        try:
-                            current_df_processed = original_phase_df.copy()
-                            current_df_processed['value'] = pd.to_numeric(current_df_processed['value'], errors='coerce')
-                            
-                            pivoted_df = current_df_processed.pivot_table(
-                                index='experiment_elapsed_time', 
-                                columns='tenant', 
-                                values='value'
-                            )
-                            pivoted_df.dropna(axis=1, how='all', inplace=True) # Drop tenants with no data
-                            pivoted_df.interpolate(method='linear', axis=0, limit_direction='both', inplace=True) # Interpolate NaNs
-                            pivoted_df.dropna(axis=0, how='any', inplace=True) # Drop rows that still have NaNs (e.g., if all tenants were NaN at a time)
-                            pivoted_df.dropna(axis=1, how='any', inplace=True) # Drop tenants that are all NaN after interpolation (should not happen if dropna(how='all') worked)
+    print("DEBUG: Script new_main.py finished.")
+    sys.stdout.flush()
 
 
-                            if pivoted_df.shape[0] < args.granger_max_lag + 5 or pivoted_df.shape[1] < 2: # Need enough observations for lags and at least 2 series
-                                print(f"    Skipping Granger: Not enough data after pivoting/cleaning (shape: {pivoted_df.shape}, max_lag: {args.granger_max_lag}) for {metric_name}, {round_name}, {phase_name}.")
-                                continue
-                            
-                            granger_results_dict = calculate_pairwise_granger_causality(
-                                pivoted_df, 
-                                max_lag=args.granger_max_lag, 
-                                criterion=args.granger_criterion
-                            )
+def perform_multivariate_analysis_on_df(data_df, metric_name, analysis_label, round_name, args, pca_plots_dir, pca_tables_dir, ica_plots_dir, ica_tables_dir, comparison_tables_dir):
+    """Helper function to perform PCA and/or ICA on a given DataFrame."""
+    print(f"DEBUG: perform_multivariate_analysis_on_df for {metric_name} - {analysis_label} (Round: {round_name}). Shape: {data_df.shape}")
+    sys.stdout.flush()
 
-                            context_suffix = f"_{phase_name}"
-                            title_base = f"Granger Causality (Lag {args.granger_max_lag}, {args.granger_criterion}) - {metric_display_name} ({phase_display_name})"
+    numeric_df = data_df.select_dtypes(include=np.number)
+    numeric_df_cleaned = numeric_df.dropna(axis=0, how='any').dropna(axis=1, how='all')
 
-                            if granger_results_dict and not granger_results_dict['p_values'].empty:
-                                # Save tables
-                                p_values_filename = f"{metric_name}_{round_name}{context_suffix}_granger_pvalues_lag{args.granger_max_lag}_{args.granger_criterion}.csv"
-                                full_path = os.path.join(granger_tables_dir, p_values_filename)
-                                export_to_csv(granger_results_dict['p_values'], full_path)
-                                print(f"    Granger p-values saved to {full_path}")
+    if numeric_df_cleaned.empty or numeric_df_cleaned.shape[0] < 2 or numeric_df_cleaned.shape[1] < 1:
+        print(f"Skipping PCA/ICA for {metric_name} - {analysis_label} (Round: {round_name}) due to insufficient data after cleaning (Shape: {numeric_df_cleaned.shape}).")
+        sys.stdout.flush()
+        return
 
-                                lags_filename = f"{metric_name}_{round_name}{context_suffix}_granger_optlags_lag{args.granger_max_lag}_{args.granger_criterion}.csv"
-                                full_path = os.path.join(granger_tables_dir, lags_filename)
-                                export_to_csv(granger_results_dict['optimal_lags'], full_path)
-                                print(f"    Granger optimal lags saved to {full_path}")
+    print(f"Preparing for PCA/ICA for {metric_name} - {analysis_label} (Round: {round_name}). Cleaned Shape: {numeric_df_cleaned.shape}")
+    sys.stdout.flush()
 
-                                fstats_filename = f"{metric_name}_{round_name}{context_suffix}_granger_fstats_lag{args.granger_max_lag}_{args.granger_criterion}.csv"
-                                full_path = os.path.join(granger_tables_dir, fstats_filename)
-                                export_to_csv(granger_results_dict['f_statistics'], full_path)
-                                print(f"    Granger F-statistics saved to {full_path}")
+    pca_components_df_for_comparison = None
+    ica_components_df_for_comparison = None
 
-                                # Plot Granger heatmap
-                                plot_granger_causality_heatmap(
-                                    granger_results_dict,
-                                    title=title_base,
-                                    output_dir=granger_plots_dir,
-                                    filename=f"{metric_name}_{round_name}{context_suffix}_granger_heatmap_lag{args.granger_max_lag}_{args.granger_criterion}.png",
-                                    metric_name=metric_display_name, round_name=round_name, phase_name=phase_display_name,
-                                    alpha=args.granger_alpha
-                                )
-                                print(f"    Granger causality heatmap created.")
+    # PCA Analysis
+    if args.run_pca:
+        print(f"Running PCA for {metric_name} ({analysis_label} - Round: {round_name})...")
+        sys.stdout.flush()
+        pca_results_df, pca_components_df, pca_explained_variance = None, None, None
+        try:
+            pca_n_components_arg = args.pca_n_components
+            if pca_n_components_arg and not isinstance(pca_n_components_arg, int):
+                try: pca_n_components_arg = float(pca_n_components_arg) 
+                except ValueError: pass # Keep as string if not float for int conversion attempt
+            if isinstance(pca_n_components_arg, str): # If still string, try int
+                try: pca_n_components_arg = int(pca_n_components_arg)
+                except ValueError:
+                    print(f"Invalid pca_n_components value: {pca_n_components_arg}. Using default variance threshold.")
+                    pca_n_components_arg = None # Fallback to variance threshold if invalid string
+            
+            pca_results_df, pca_components_df, pca_explained_variance = perform_pca(
+                numeric_df_cleaned.copy(), 
+                n_components=pca_n_components_arg if isinstance(pca_n_components_arg, int) else None,
+                variance_threshold=pca_n_components_arg if isinstance(pca_n_components_arg, float) else args.pca_variance_threshold
+            )
+            pca_components_df_for_comparison = pca_components_df
+            
+            base_filename_pca = f"{metric_name}_{analysis_label}_{round_name}_pca"
+            if pca_results_df is not None: export_to_csv(pca_results_df, os.path.join(pca_tables_dir, f"{base_filename_pca}_principal_components.csv"))
+            if pca_components_df is not None: export_to_csv(pca_components_df, os.path.join(pca_tables_dir, f"{base_filename_pca}_loadings.csv"))
+            
+            if pca_explained_variance is not None:
+                explained_variance_df = pd.DataFrame({
+                    'Component': [f'PC{i+1}' for i in range(len(pca_explained_variance))],
+                    'ExplainedVarianceRatio': pca_explained_variance,
+                    'CumulativeVarianceRatio': np.cumsum(pca_explained_variance)
+                })
+                export_to_csv(explained_variance_df, os.path.join(pca_tables_dir, f"{base_filename_pca}_explained_variance.csv"))
+            print(f"PCA results saved for {metric_name} ({analysis_label} - Round: {round_name}).")
+            sys.stdout.flush()
 
-                                # Plot Granger network
-                                plot_granger_causality_network(
-                                    granger_results_dict,
-                                    title=f"{title_base} - Network (alpha {args.granger_alpha})",
-                                    output_dir=granger_plots_dir,
-                                    filename=f"{metric_name}_{round_name}{context_suffix}_granger_network_lag{args.granger_max_lag}_{args.granger_criterion}_alpha{args.granger_alpha}.png",
-                                    metric_name=metric_display_name, round_name=round_name, phase_name=phase_display_name,
-                                    alpha=args.granger_alpha,
-                                    f_stat_threshold=args.granger_fstat_threshold 
-                                )
-                                print(f"    Granger causality network plot created.")
-                            else:
-                                print(f"    Granger causality analysis did not produce results for {metric_name}, {round_name}, {phase_name}.")
+            if pca_explained_variance is not None and len(pca_explained_variance) > 0:
+                plot_pca_explained_variance(pca_explained_variance, np.cumsum(pca_explained_variance), 
+                                          title="PCA Explained Variance", 
+                                          output_dir=pca_plots_dir, 
+                                          filename=f"{base_filename_pca}_explained_variance.png", 
+                                          metric_name=metric_name,
+                                          round_name=round_name,
+                                          phase_name=analysis_label)
+            if pca_results_df is not None and not pca_results_df.empty and pca_results_df.shape[1] >= 2:
+                plot_pca_biplot(pca_results_df, pca_components_df, 
+                              x_component=1, y_component=2,
+                              title="PCA Biplot", 
+                              output_dir=pca_plots_dir, 
+                              filename=f"{base_filename_pca}_biplot_pc1_pc2.png",
+                              metric_name=metric_name,
+                              round_name=round_name,
+                              phase_name=analysis_label)
+            if pca_components_df is not None and not pca_components_df.empty:
+                plot_pca_loadings_heatmap(pca_components_df, 
+                                        title="PCA Loadings Heatmap", 
+                                        output_dir=pca_plots_dir, 
+                                        filename=f"{base_filename_pca}_loadings_heatmap.png",
+                                        metric_name=metric_name,
+                                        round_name=round_name,
+                                        phase_name=analysis_label)
 
-                        except Exception as e:
-                            print(f"    Error during Granger Causality for {metric_name}, {round_name}, {phase_name}: {e}")
-                            traceback.print_exc()
-                else: # Consolidated Granger
-                    original_metric_df = phases_or_metric_df
-                    print(f"  Processing round: {round_name} for Granger on metric: {metric_display_name} (Consolidated)")
+        except Exception as e:
+            print(f"ERROR during PCA for {metric_name} ({analysis_label} - {round_name}): {e}", file=sys.stderr)
+            print(f"Full traceback for PCA error:\\n{traceback.format_exc()}", file=sys.stderr)
+            sys.stderr.flush()
 
-                    if not isinstance(original_metric_df, pd.DataFrame) or original_metric_df.empty:
-                        print(f"    Skipping Granger: DataFrame is not valid or empty for {metric_name}, {round_name} (Consolidated).")
-                        continue
-                    
-                    if 'experiment_elapsed_time' not in original_metric_df.columns or 'tenant' not in original_metric_df.columns or 'value' not in original_metric_df.columns:
-                        print(f"    Skipping Granger for {metric_name}, {round_name} (Consolidated): missing required columns ('experiment_elapsed_time', 'tenant', 'value').")
-                        continue
-                    
-                    try:
-                        current_df_processed = original_metric_df.copy()
-                        current_df_processed['value'] = pd.to_numeric(current_df_processed['value'], errors='coerce')
-                        
-                        pivoted_df = current_df_processed.pivot_table(
-                            index='experiment_elapsed_time', 
-                            columns='tenant', 
-                            values='value'
-                        )
-                        pivoted_df.dropna(axis=1, how='all', inplace=True)
-                        pivoted_df.interpolate(method='linear', axis=0, limit_direction='both', inplace=True)
-                        pivoted_df.dropna(axis=0, how='any', inplace=True)
-                        pivoted_df.dropna(axis=1, how='any', inplace=True)
+    # ICA Analysis
+    if args.run_ica:
+        print(f"Running ICA for {metric_name} ({analysis_label} - Round: {round_name})...")
+        sys.stdout.flush()
+        ica_results_df, ica_components_df, ica_mixing_df = None, None, None
+        try:
+            ica_results_df, ica_components_df, ica_mixing_df = perform_ica(
+                numeric_df_cleaned.copy(), 
+                n_components=args.ica_n_components
+            )
+            ica_components_df_for_comparison = ica_components_df
+            
+            base_filename_ica = f"{metric_name}_{analysis_label}_{round_name}_ica"
+            if ica_results_df is not None: export_to_csv(ica_results_df, os.path.join(ica_tables_dir, f"{base_filename_ica}_independent_components.csv"))
+            if ica_components_df is not None: export_to_csv(ica_components_df, os.path.join(ica_tables_dir, f"{base_filename_ica}_unmixing_matrix.csv"))
+            if ica_mixing_df is not None: export_to_csv(ica_mixing_df, os.path.join(ica_tables_dir, f"{base_filename_ica}_mixing_matrix.csv"))
+            print(f"ICA results saved for {metric_name} ({analysis_label} - Round: {round_name}).")
+            sys.stdout.flush()
 
+            if ica_results_df is not None and not ica_results_df.empty and ica_results_df.shape[1] >= 2:
+                plot_ica_scatter(ica_results_df, 
+                               x_component=1, y_component=2,
+                               title="ICA Scatter Plot", 
+                               output_dir=ica_plots_dir, 
+                               filename=f"{base_filename_ica}_scatter_plot_ic1_ic2.png",
+                               metric_name=metric_name,
+                               round_name=round_name,
+                               phase_name=analysis_label)
+            if ica_components_df is not None and not ica_components_df.empty:
+                plot_ica_components_heatmap(ica_components_df, 
+                                          title="ICA Components Heatmap", 
+                                          output_dir=ica_plots_dir, 
+                                          filename=f"{base_filename_ica}_components_heatmap.png",
+                                          metric_name=metric_name,
+                                          round_name=round_name,
+                                          phase_name=analysis_label)
 
-                        if pivoted_df.shape[0] < args.granger_max_lag + 5 or pivoted_df.shape[1] < 2:
-                            print(f"    Skipping Granger: Not enough data after pivoting/cleaning (shape: {pivoted_df.shape}, max_lag: {args.granger_max_lag}) for {metric_name}, {round_name} (Consolidated).")
-                            continue
-                            
-                        granger_results_dict = calculate_pairwise_granger_causality(
-                            pivoted_df, 
-                            max_lag=args.granger_max_lag, 
-                            criterion=args.granger_criterion
-                        )
+        except Exception as e:
+            print(f"ERROR during ICA for {metric_name} ({analysis_label} - {round_name}): {e}", file=sys.stderr)
+            print(f"Full traceback for ICA error:\\n{traceback.format_exc()}", file=sys.stderr)
+            sys.stderr.flush()
 
-                        context_suffix = "_consolidated"
-                        title_base = f"Granger Causality (Lag {args.granger_max_lag}, {args.granger_criterion}) - {metric_display_name} (Consolidated)"
-
-                        if granger_results_dict and not granger_results_dict['p_values'].empty:
-                            p_values_filename = f"{metric_name}_{round_name}{context_suffix}_granger_pvalues_lag{args.granger_max_lag}_{args.granger_criterion}.csv"
-                            full_path = os.path.join(granger_tables_dir, p_values_filename)
-                            export_to_csv(granger_results_dict['p_values'], full_path)
-                            print(f"    Granger p-values saved to {full_path}")
-
-                            lags_filename = f"{metric_name}_{round_name}{context_suffix}_granger_optlags_lag{args.granger_max_lag}_{args.granger_criterion}.csv"
-                            full_path = os.path.join(granger_tables_dir, lags_filename)
-                            export_to_csv(granger_results_dict['optimal_lags'], full_path)
-                            print(f"    Granger optimal lags saved to {full_path}")
-
-                            fstats_filename = f"{metric_name}_{round_name}{context_suffix}_granger_fstats_lag{args.granger_max_lag}_{args.granger_criterion}.csv"
-                            full_path = os.path.join(granger_tables_dir, fstats_filename)
-                            export_to_csv(granger_results_dict['f_statistics'], full_path)
-                            print(f"    Granger F-statistics saved to {full_path}")
-                            
-                            plot_granger_causality_heatmap(
-                                granger_results_dict,
-                                title=title_base,
-                                output_dir=granger_plots_dir,
-                                filename=f"{metric_name}_{round_name}{context_suffix}_granger_heatmap_lag{args.granger_max_lag}_{args.granger_criterion}.png",
-                                metric_name=metric_display_name, round_name=round_name,
-                                alpha=args.granger_alpha
-                            )
-                            print(f"    Granger causality heatmap created.")
-
-                            plot_granger_causality_network(
-                                granger_results_dict,
-                                title=f"{title_base} - Network (alpha {args.granger_alpha})",
-                                output_dir=granger_plots_dir,
-                                filename=f"{metric_name}_{round_name}{context_suffix}_granger_network_lag{args.granger_max_lag}_{args.granger_criterion}_alpha{args.granger_alpha}.png",
-                                metric_name=metric_display_name, round_name=round_name,
-                                alpha=args.granger_alpha,
-                                f_stat_threshold=args.granger_fstat_threshold
-                            )
-                            print(f"    Granger causality network plot created.")
-                        else:
-                            print(f"    Granger causality analysis did not produce results for {metric_name}, {round_name} (Consolidated).")
-                            
-                    except Exception as e:
-                        print(f"    Error during Granger Causality for {metric_name}, {round_name} (Consolidated): {e}")
-                        traceback.print_exc()
-            gc.collect()
-
-    close_all_figures() # Close any open matplotlib figures
-    print("\nAnalysis pipeline finished.")
-
-if __name__ == '__main__':
-    main()
+    # PCA vs ICA Comparison
+    if args.compare_pca_ica and pca_components_df_for_comparison is not None and ica_components_df_for_comparison is not None:
+        print(f"Generating PCA vs ICA top features comparison for {metric_name} ({analysis_label} - Round: {round_name})...")
+        sys.stdout.flush()
+        try:
+            top_pca_features = get_top_features_per_component(pca_components_df_for_comparison, args.n_top_features_comparison)
+            top_ica_features = get_top_features_per_component(ica_components_df_for_comparison, args.n_top_features_comparison)
+            top_pca_features['Method'] = 'PCA'
+            top_ica_features['Method'] = 'ICA'
+            comparison_df = pd.concat([top_pca_features, top_ica_features], ignore_index=True)
+            comparison_df = comparison_df[['Method', 'Component', 'Rank', 'Feature', 'Coefficient']]
+            base_filename_comparison = f"{metric_name}_{analysis_label}_{round_name}_pca_ica_top_features_comparison.csv"
+            export_to_csv(comparison_df, os.path.join(comparison_tables_dir, base_filename_comparison))
+            print(f"PCA vs ICA top features comparison table saved for {metric_name} ({analysis_label} - Round: {round_name}).")
+            sys.stdout.flush()
+        except Exception as e:
+            print(f"Error generating PCA vs ICA comparison for {metric_name} ({analysis_label} - {round_name}): {e}", file=sys.stderr)
+            print(f"Full traceback:\\n{traceback.format_exc()}", file=sys.stderr)
+            sys.stderr.flush()
+    elif args.compare_pca_ica:
+        print(f"Skipping PCA vs ICA comparison for {metric_name} ({analysis_label} - {round_name}) as PCA or ICA components are missing.")
+        sys.stdout.flush()
