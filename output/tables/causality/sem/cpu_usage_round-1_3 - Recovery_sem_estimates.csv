@@ -1,5 +1,0 @@
-lval,op,rval,Estimate,Std. Err,z-value,p-value
-experiment_elapsed_minutes,~,experiment_elapsed_seconds,1.06,0.00,713.56,0.00
-experiment_elapsed_seconds,~,experiment_elapsed_minutes,1.02,0.00,367.43,0.00
-experiment_elapsed_minutes,~~,experiment_elapsed_minutes,0.00,0.00,11.05,0.00
-experiment_elapsed_seconds,~~,experiment_elapsed_seconds,0.00,0.00,9.16,0.00

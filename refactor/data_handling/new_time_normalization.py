@@ -80,6 +80,9 @@ def add_experiment_elapsed_time(df, experiment_start_time=None, group_by=None):
     result['experiment_elapsed_seconds'] = (result['datetime'] - result['experiment_start_time']).dt.total_seconds()
     result['experiment_elapsed_minutes'] = result['experiment_elapsed_seconds'] / 60.0
     
+    # Add experiment_elapsed_time as an alias for experiment_elapsed_seconds (for compatibility)
+    result['experiment_elapsed_time'] = result['experiment_elapsed_seconds']
+    
     return result
 
 
