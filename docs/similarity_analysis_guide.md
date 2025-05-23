@@ -6,6 +6,7 @@ This guide explains the similarity analysis techniques available in the k8s-nois
 - [Distance Correlation (dCor)](#distance-correlation)
 - [Cosine Similarity](#cosine-similarity)
 - [Dynamic Time Warping (DTW)](#dynamic-time-warping)
+- [Mutual Information (MI)](#mutual-information)
 - [Using Similarity Analysis in Your Pipeline](#using-similarity-analysis-in-your-pipeline)
 
 ## Distance Correlation
@@ -122,6 +123,47 @@ plot_dtw_distance_heatmap(
 - Particularly useful for detecting similar patterns regardless of phase shifts
 - Z-score normalization is applied to focus on pattern shapes rather than magnitudes
 
+## Mutual Information
+
+Mutual Information (MI) is an information-theoretic measure that quantifies the amount of information obtained about one random variable through observing another random variable. It measures both linear and non-linear dependencies between variables and is zero if and only if the variables are statistically independent.
+
+### Implementation
+
+```python
+from refactor.analysis_modules.similarity import calculate_pairwise_mutual_information, plot_mutual_information_heatmap
+
+# Calculate pairwise mutual information matrix
+mi_matrix = calculate_pairwise_mutual_information(
+    data_df,           # DataFrame containing time series data
+    time_col,          # Name of the column representing time
+    metric_col,        # Name of the column representing the metric to analyze
+    group_col,         # Name of the column representing the groups (e.g., 'tenant')
+    min_observations,  # Minimum observations required for a valid series
+    n_neighbors=3,     # Number of neighbors for MI estimation
+    normalize=True     # Whether to normalize MI values to range [0,1]
+)
+
+# Visualize the mutual information matrix
+plot_mutual_information_heatmap(
+    mi_matrix,         # DataFrame containing the MI values
+    title,             # Title for the plot
+    output_dir,        # Directory to save the plot
+    filename,          # Base filename for the plot (without extension)
+    cmap="viridis",    # Colormap for the heatmap
+    fmt=".2f",         # Format for cell annotations
+    annot=True,        # Whether to show annotations
+    tables_dir         # Optional: directory to save the CSV table
+)
+```
+
+### Interpretation
+
+- When normalized, values range from 0 (statistical independence) to 1 (perfect dependency)
+- Higher values indicate stronger dependencies between time series
+- MI can detect both linear and non-linear relationships
+- Particularly useful for identifying complex dependencies that correlation might miss
+- Complements other similarity measures by focusing on shared information content
+
 ## Using Similarity Analysis in Your Pipeline
 
 ### Basic Usage
@@ -138,7 +180,8 @@ Example:
 from refactor.analysis_modules.similarity import (
     calculate_pairwise_distance_correlation, plot_distance_correlation_heatmap,
     calculate_pairwise_cosine_similarity, plot_cosine_similarity_heatmap,
-    calculate_pairwise_dtw_distance, plot_dtw_distance_heatmap
+    calculate_pairwise_dtw_distance, plot_dtw_distance_heatmap,
+    calculate_pairwise_mutual_information, plot_mutual_information_heatmap
 )
 
 # For each metric and experiment phase
@@ -185,6 +228,20 @@ for metric in metrics:
             f"{metric}_{round_name}_{phase_name}_dtw_distance_heatmap", 
             tables_dir="output/tables/similarity/dtw"
         )
+        
+        # Mutual Information
+        mi_matrix = calculate_pairwise_mutual_information(
+            phase_data, 'timestamp', 'value', 'tenant', min_observations=10, 
+            n_neighbors=3, normalize=True
+        )
+        
+        plot_mutual_information_heatmap(
+            mi_matrix,
+            f"Mutual Information: {metric} ({round_name}, {phase_name})",
+            "output/plots/similarity/mutual_information",
+            f"{metric}_{round_name}_{phase_name}_mutual_information_heatmap", 
+            tables_dir="output/tables/similarity/mutual_information"
+        )
 ```
 
 ### Command Line Usage
@@ -192,7 +249,7 @@ for metric in metrics:
 The similarity analyses are automatically run when using the main script with appropriate flags:
 
 ```bash
-python -m refactor.new_main --data-dir your-data-dir --output-dir output-dir --dcor --cosine-sim --dtw
+python -m refactor.new_main --data-dir your-data-dir --output-dir output-dir --dcor --cosine-sim --dtw --mutual-info
 ```
 
 Available flags:
@@ -203,6 +260,10 @@ Available flags:
 - `--dtw`: Run Dynamic Time Warping analysis
 - `--min-obs-dtw`: Minimum observations for DTW (default: 10)
 - `--normalize-dtw`: Normalize DTW distance by path length (default: True)
+- `--mutual-info`: Run Mutual Information analysis
+- `--min-obs-mi`: Minimum observations for MI (default: 10)
+- `--mi-n-neighbors`: Number of neighbors for MI estimation (default: 3)
+- `--normalize-mi`: Normalize MI values to range [0,1] (default: True)
 
 ### Best Practices
 

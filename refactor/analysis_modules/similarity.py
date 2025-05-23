@@ -6,6 +6,7 @@ import matplotlib.pyplot as plt
 import os
 from itertools import combinations
 from tslearn.metrics import dtw  # Import tslearn.metrics.dtw for Dynamic Time Warping
+from sklearn.feature_selection import mutual_info_regression  # Import for Mutual Information calculation
 from ..data_handling.save_results import save_figure # Import save_figure
 
 def calculate_pairwise_distance_correlation(data_df: pd.DataFrame, time_col: str, metric_col: str, group_col: str, min_observations: int = 10):
@@ -483,3 +484,196 @@ def plot_dtw_distance_heatmap(dtw_matrix: pd.DataFrame, title: str, output_dir: 
         print(f"Error plotting DTW distance heatmap: {e}")
     finally:
         plt.close(fig)  # Close the figure object
+
+def calculate_pairwise_mutual_information(data_df: pd.DataFrame, time_col: str, metric_col: str, group_col: str, min_observations: int = 10, n_neighbors: int = 3, normalize: bool = True):
+    """
+    Calculates the pairwise Mutual Information (MI) between time series of a specific metric
+    for different groups (e.g., tenants).
+    
+    Mutual Information measures how much information one variable provides about another.
+    It's a non-parametric measure of dependency between variables that can detect both linear
+    and non-linear relationships, and is zero if and only if the variables are statistically independent.
+    
+    Args:
+        data_df (pd.DataFrame): DataFrame containing the time series data.
+                                Must include time, metric, and group columns.
+        time_col (str): Name of the column representing time.
+        metric_col (str): Name of the column representing the metric to analyze.
+        group_col (str): Name of the column representing the groups to compare (e.g., 'tenant').
+        min_observations (int): Minimum number of observations required for a series to be included.
+        n_neighbors (int): Number of neighbors to use for MI estimation.
+                           Higher values reduce variance but increase bias.
+        normalize (bool): Whether to normalize MI values to the range [0,1] by dividing by
+                          the geometric mean of the entropies of each variable.
+        
+    Returns:
+        pd.DataFrame: A DataFrame where the index and columns are the group IDs,
+                      and values are the MI values between them for the specified metric.
+                      Returns an empty DataFrame if not enough groups or data.
+                      
+    Notes:
+        - Implementation uses scikit-learn's mutual_info_regression, which estimates MI 
+          using nearest neighbors approach
+        - Higher values indicate stronger dependency between variables
+    """
+    groups = data_df[group_col].unique()
+    valid_series = {}
+    
+    # Extract valid series for each group
+    for group in groups:
+        group_data = data_df[data_df[group_col] == group]
+        if metric_col not in group_data.columns:
+            print(f"Metric '{metric_col}' not found for group '{group}'. Skipping this group.")
+            continue
+        series = group_data.set_index(time_col)[metric_col].dropna()
+        if len(series) >= min_observations:
+            valid_series[group] = series.values
+        else:
+            print(f"Series for group '{group}', metric '{metric_col}' has {len(series)} observations, less than minimum {min_observations}. Skipping.")
+    
+    if len(valid_series) < 2:
+        print(f"Not enough valid series (found {len(valid_series)}) for metric '{metric_col}' to calculate pairwise mutual information.")
+        return pd.DataFrame()
+    
+    # Create mutual information matrix
+    group_ids = list(valid_series.keys())
+    mi_matrix = pd.DataFrame(index=group_ids, columns=group_ids, dtype=float)
+    
+    # Self-MI is equal to the entropy of the variable
+    # We'll set diagonal to 1.0 (perfect information overlap)
+    for gid in group_ids:
+        mi_matrix.loc[gid, gid] = 1.0
+    
+    # Calculate pairwise MI
+    for group1, group2 in combinations(group_ids, 2):
+        series1 = valid_series[group1]
+        series2 = valid_series[group2]
+        
+        # Find minimum length between the two series
+        min_len = min(len(series1), len(series2))
+        
+        if min_len < 2:  # Need at least 2 observations
+            print(f"Skipping mutual information between {group1} and {group2} for metric '{metric_col}' due to insufficient data points ({min_len}) after alignment.")
+            mi_val = np.nan
+        else:
+            # Trim series to same length
+            series1_trimmed = series1[:min_len]
+            series2_trimmed = series2[:min_len]
+            
+            try:
+                # Check if either series is constant (would result in zero MI)
+                if np.all(series1_trimmed == series1_trimmed[0]) or np.all(series2_trimmed == series2_trimmed[0]):
+                    mi_val = 0.0
+                else:
+                    # Calculate mutual information using scikit-learn
+                    # Reshape series to column vectors
+                    X = series1_trimmed.reshape(-1, 1)
+                    y = series2_trimmed
+                    
+                    # Calculate mutual information from X to y
+                    mi_forward = mutual_info_regression(X, y, n_neighbors=n_neighbors)[0]
+                    
+                    # Calculate mutual information from y to X
+                    X = series2_trimmed.reshape(-1, 1)
+                    y = series1_trimmed
+                    mi_backward = mutual_info_regression(X, y, n_neighbors=n_neighbors)[0]
+                    
+                    # Average the two directions for symmetry
+                    mi_val = (mi_forward + mi_backward) / 2.0
+                    
+                    # Normalize if requested
+                    if normalize:
+                        # Estimate entropy of each series
+                        # For normalization, we use the same n_neighbors parameter
+                        entropy1 = mutual_info_regression(X=series1_trimmed.reshape(-1, 1), 
+                                                         y=series1_trimmed, 
+                                                         n_neighbors=n_neighbors)[0]
+                        entropy2 = mutual_info_regression(X=series2_trimmed.reshape(-1, 1), 
+                                                         y=series2_trimmed, 
+                                                         n_neighbors=n_neighbors)[0]
+                        
+                        # Normalize by geometric mean of entropies (ranges from 0 to 1)
+                        if entropy1 > 0 and entropy2 > 0:
+                            mi_val = mi_val / np.sqrt(entropy1 * entropy2)
+                        else:
+                            mi_val = 0.0  # If either entropy is zero, set MI to zero
+            except Exception as e:
+                print(f"Error calculating mutual information between {group1} and {group2} for metric '{metric_col}': {e}")
+                mi_val = np.nan
+        
+        # Assign MI value to both positions in the matrix (it's symmetric)
+        mi_matrix.loc[group1, group2] = mi_val
+        mi_matrix.loc[group2, group1] = mi_val
+    
+    return mi_matrix
+
+def plot_mutual_information_heatmap(mi_matrix: pd.DataFrame, title: str, output_dir: str, filename: str, cmap: str = "viridis", fmt: str = ".2f", annot: bool = True, tables_dir: str = None):
+    """
+    Plots a heatmap of the Mutual Information matrix and optionally exports the data as CSV.
+    
+    Args:
+        mi_matrix (pd.DataFrame): DataFrame containing the mutual information values.
+        title (str): Title of the plot.
+        output_dir (str): Directory to save the plot.
+        filename (str): Name of the file to save the plot (e.g., 'mutual_info_heatmap_metric').
+                        The .png extension will be added by save_figure.
+        cmap (str): Colormap for the heatmap.
+        fmt (str): String formatting for annotations.
+        annot (bool): Whether to annotate the cells with mutual information values.
+        tables_dir (str, optional): Directory to save the CSV table. If None, no table is saved.
+        
+    Notes:
+        - The diagonal is always 1.0 (perfect information overlap with itself)
+        - MI values range from 0 (no shared information) to 1 (perfect information overlap) when normalized
+        - Both the heatmap plot and the raw data (as CSV) are saved if tables_dir is provided
+    """
+    if mi_matrix.empty:
+        print(f"Skipping heatmap plot for '{title}' as the mutual information matrix is empty.")
+        return
+    
+    try:
+        mi_matrix_numeric = mi_matrix.astype(float)
+        
+        fig = plt.figure(figsize=(10, 8))
+        ax = plt.gca()
+        
+        # Create heatmap
+        sns.heatmap(
+            mi_matrix_numeric,
+            annot=annot,
+            fmt=fmt,
+            cmap=cmap,
+            vmin=0,
+            vmax=1,
+            square=True,
+            linewidths=.5,
+            cbar_kws={"shrink": .8, "label": "Mutual Information"},
+            ax=ax
+        )
+        
+        plt.title(title, fontsize=14)
+        plt.tight_layout()
+        
+        # Save figure
+        save_figure(fig, output_dir, filename)
+        
+        print(f"Mutual information heatmap saved to {os.path.join(output_dir, filename)}")
+        
+        # Save data as CSV if tables_dir is provided
+        if tables_dir is not None:
+            # Extract base filename without extension
+            base_filename = os.path.splitext(filename)[0] if '.' in filename else filename
+            csv_filename = os.path.join(tables_dir, f"{base_filename}.csv")
+            
+            # Create the tables directory if it doesn't exist
+            os.makedirs(tables_dir, exist_ok=True)
+            
+            # Export the matrix to CSV
+            from ..data_handling.save_results import export_to_csv
+            export_to_csv(mi_matrix, csv_filename, float_format='.4f')
+            print(f"Mutual information matrix exported to {csv_filename}")
+        
+    except Exception as e:
+        print(f"Error plotting mutual information heatmap: {e}")
+    finally:
+        plt.close(fig)  # Close the figure object to prevent memory issues
