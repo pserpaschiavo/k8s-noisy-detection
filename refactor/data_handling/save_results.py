@@ -16,14 +16,26 @@ def format_float_columns(df, float_format='.2f'):
     Returns:
         DataFrame: DataFrame com colunas formatadas
     """
-    # Fazer uma cópia para não modificar o original
     result = df.copy()
     
-    # Para cada coluna, verificar se é ponto flutuante
+    # Inner function for robust formatting with debugging
+    def _formatter(x_val, fmt_str):
+        if pd.notna(x_val):
+            try:
+                # Ensure x_val is treated as a Python float for robust formatting
+                return format(float(x_val), fmt_str)
+            except ValueError as e:
+                # This will catch "Invalid format specifier" or "could not convert string to float"
+                print(f"DEBUG: format_float_columns ValueError: val='{x_val}' (type {type(x_val)}), fmt='{fmt_str}' (type {type(fmt_str)}), error: {e}")
+                return str(x_val) # fallback to string representation
+            except TypeError as e:
+                print(f"DEBUG: format_float_columns TypeError: val='{x_val}' (type {type(x_val)}), fmt='{fmt_str}' (type {type(fmt_str)}), error: {e}")
+                return str(x_val) # fallback to string representation
+        return ""
+
     for col in result.columns:
-        if result[col].dtype in [np.float32, np.float64]:
-            # Ensure x is a Python float for robust formatting, handles 0-d arrays
-            result[col] = result[col].map(lambda x: f"{float(x):{float_format}}" if pd.notna(x) else "")
+        if result[col].dtype in [np.float32, np.float64, object]: # Include object to attempt conversion
+            result[col] = result[col].map(lambda x: _formatter(x, float_format))
     
     return result
 
@@ -55,29 +67,20 @@ def save_causality_results_to_csv(causality_results_df, output_path, float_forma
     Saves the causality analysis results to a CSV file.
     Uses the main export_to_csv function with specific formatting for causality data.
     """
-    # Ensure the directory exists (handled by export_to_csv)
-    # Format p_value if it exists, and any other specific formatting needs for causality results.
-    # The main export_to_csv handles general float formatting, but p-values might need higher precision.
     df_to_save = causality_results_df.copy()
 
-    # Example: Ensure p_value is formatted with more precision if it exists
-    # This is a bit redundant if export_to_csv handles all float columns with its float_format.
-    # However, if different columns need different float precisions, this is where it would be handled.
-    # For now, we assume export_to_csv's float_format is sufficient or can be adjusted.
-    # If 'p_value' needs specific formatting different from other floats, that logic would go here.
-    # For instance, if export_to_csv uses .2f, but p_value needs .4f:
     if 'p_value' in df_to_save.columns:
-        df_to_save['p_value'] = df_to_save['p_value'].map(lambda x: f"{x:{float_format}}" if pd.notna(x) else "")
-    if 'lag' in df_to_save.columns: # Lag is often integer, but ensure it's handled if float
-        if df_to_save['lag'].dtype in [np.float32, np.float64]:
-             df_to_save['lag'] = df_to_save['lag'].map(lambda x: f"{x:.0f}" if pd.notna(x) else "")
+        df_to_save['p_value'] = df_to_save['p_value'].map(
+            lambda x: format(float(x), float_format) if pd.notna(x) else ""
+        )
+    if 'lag' in df_to_save.columns:
+        # Check if the column is numeric-like before attempting float conversion and formatting
+        if pd.api.types.is_numeric_dtype(df_to_save['lag'].dropna()):
+             df_to_save['lag'] = df_to_save['lag'].map(
+                 lambda x: format(float(x), ".0f") if pd.notna(x) else ""
+             )
 
-    # Call the main CSV export function
-    # The float_format in export_to_csv will apply to any remaining float columns
-    # that weren't specifically handled above.
-    export_to_csv(df_to_save, output_path, float_format=float_format) # Pass the specific float_format for p-values
-    # Original print from causality_analysis: print(f"Causality results saved to {output_path}")
-    # This is now handled by export_to_csv.
+    export_to_csv(df_to_save, output_path, float_format=float_format)
 
 def save_figure(figure, output_path, filename, dpi=300, bbox_inches='tight', **kwargs):
     """

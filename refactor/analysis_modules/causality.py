@@ -339,20 +339,22 @@ def plot_sem_coefficient_heatmap(sem_results, title, output_dir, filename,
 
 def create_sem_model_from_correlation(correlation_matrix, threshold=0.3):
     """
-    Automatically creates a SEM model specification from a correlation matrix.
+    Generates a SEM model specification string from a correlation matrix.
     
     Args:
-        correlation_matrix: DataFrame with pairwise correlations
-        threshold: Minimum absolute correlation to include in the model
+        correlation_matrix (pd.DataFrame): DataFrame of correlations between variables.
+        threshold (float): Absolute correlation threshold to include a path in the model.
         
     Returns:
-        String with the SEM model specification
+        str: SEM model specification string for semopy.
+             Returns an empty string if no significant correlations are found or if the input is invalid.
     """
-    # Get variables
-    variables = correlation_matrix.columns.tolist()
-    
-    # Initialize model spec
-    model_lines = []
+    if not isinstance(correlation_matrix, pd.DataFrame) or correlation_matrix.empty:
+        print("Warning: Invalid or empty correlation matrix provided to create_sem_model_from_correlation.")
+        return "" # Return empty string for invalid input
+
+    model_spec = []
+    variables = correlation_matrix.columns
     
     # For each variable pair with correlation above threshold
     for i, var1 in enumerate(variables):
@@ -362,12 +364,11 @@ def create_sem_model_from_correlation(correlation_matrix, threshold=0.3):
                 # If correlation is negative, var2 "causes" var1
                 # This is a simple heuristic and not necessarily accurate
                 if correlation_matrix.loc[var1, var2] > 0:
-                    model_lines.append(f"{var2} ~ {var1}")
+                    model_spec.append(f"{var2} ~ {var1}")
                 else:
-                    model_lines.append(f"{var1} ~ {var2}")
+                    model_spec.append(f"{var1} ~ {var2}")
     
-    # Return model specification
-    return "\n".join(model_lines)
+    return "\n".join(model_spec)
 
 
 def calculate_transfer_entropy(source, target, k=1, bins=None, bandwidth=0.1):

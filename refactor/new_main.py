@@ -1777,7 +1777,7 @@ def main():
                                 continue
                             
                             te_matrix = calculate_pairwise_transfer_entropy(
-                                data=pivoted_df,
+                                data_df=pivoted_df, # Changed from data to data_df
                                 k=args.te_lag 
                             )
 
@@ -1846,7 +1846,7 @@ def main():
                             continue
                         
                         te_matrix = calculate_pairwise_transfer_entropy(
-                            data=pivoted_df,
+                            data_df=pivoted_df, # Changed from data to data_df
                             k=args.te_lag
                         )
 
@@ -1932,7 +1932,7 @@ def main():
                                 continue
                             
                             ccm_results_dict = calculate_pairwise_ccm(
-                                data=pivoted_df,
+                                data_df=pivoted_df, # Changed from data to data_df
                                 E_range=args.ccm_embed_dimensions,
                                 tau=args.ccm_tau
                             )
@@ -2038,7 +2038,7 @@ def main():
                             continue
                         
                         ccm_results_dict = calculate_pairwise_ccm(
-                            data=pivoted_df,
+                            data_df=pivoted_df, # Changed from data to data_df
                             E_range=args.ccm_embed_dimensions,
                             tau=args.ccm_tau
                         )
