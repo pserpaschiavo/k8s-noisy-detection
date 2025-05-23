@@ -16,9 +16,9 @@ COMPLETED:
  • Wrote test_correlation_covariance.py, validated outputs and plots
  • Sketched CLI flags and blocks for causality (--run-causality) and similarity (--run-similarity) analysis
  • Replaced prints with logging in setup and data-load phases
+ • Fully parameterized and implemented SEM block: added CLI flags (--sem-model-spec, --sem-exog-vars), integrated perform_sem_analysis in new_main.py, CSV export & plots, and tests in test_causality.py
 
 PENDING:
- • Parameterize and fully implement SEM block: add --sem-model-spec, --sem-exog-vars, call perform_sem_analysis, write test_causality.py
  • Flesh out similarity block: pass time_col, metric_col, group_col to calculate_pairwise_*, write test_similarity.py
  • Integrate non-linear multivariate techniques (KernelPCA, t-SNE, UMAP, transfer entropy, MI heatmaps) with CLI flags and tests
  • Refactor new_main.py to remove commented code, unify logging, extract helper functions, improve error handling

@@ -11,19 +11,19 @@ import matplotlib.pyplot as plt
 # Added for itertools.combinations
 # Added for plt.close
 
-from refactor.new_config import TENANT_COLORS, METRICS_CONFIG
+from new_config import TENANT_COLORS, METRICS_CONFIG
 # from data_handling.loader import load_data_from_all_rounds_and_phases, load_data_from_specific_round_consolidated # Corrected import names
-from refactor.data_handling.loader import load_experiment_data # Changed to import load_experiment_data
-from refactor.data_handling.save_results import export_to_csv
-from refactor.analysis_modules.multivariate_exploration import (
+from data_handling.loader import load_experiment_data # Changed to import load_experiment_data
+from data_handling.save_results import export_to_csv
+from analysis_modules.multivariate_exploration import (
     perform_pca, perform_ica, get_top_features_per_component,
     perform_kpca, perform_tsne
 )
-from refactor.analysis_modules.descritive_statistics import calculate_descriptive_statistics
-from refactor.analysis_modules.correlation_covariance import calculate_inter_tenant_correlation_per_metric, calculate_inter_tenant_covariance_per_metric
-from refactor.analysis_modules.causality import perform_sem_analysis, plot_sem_path_diagram, plot_sem_fit_indices
-from refactor.analysis_modules.root_cause import RootCauseAnalyzer, perform_complete_root_cause_analysis
-from refactor.analysis_modules.similarity import (
+from analysis_modules.descritive_statistics import calculate_descriptive_statistics
+from analysis_modules.correlation_covariance import calculate_inter_tenant_correlation_per_metric, calculate_inter_tenant_covariance_per_metric
+from analysis_modules.causality import perform_sem_analysis, plot_sem_path_diagram, plot_sem_fit_indices
+from analysis_modules.root_cause import RootCauseAnalyzer, perform_complete_root_cause_analysis
+from analysis_modules.similarity import (
     calculate_pairwise_distance_correlation,
     calculate_pairwise_cosine_similarity,
     calculate_pairwise_mutual_information,
@@ -32,7 +32,7 @@ from refactor.analysis_modules.similarity import (
 )
 # Alias distance-correlation plot for cosine similarity heatmap
 plot_cosine_similarity_heatmap = plot_distance_correlation_heatmap
-from refactor.visualization.new_plots import (
+from visualization.new_plots import (
     plot_correlation_heatmap, plot_covariance_heatmap, plot_scatter_comparison,
     plot_pca_explained_variance, plot_pca_biplot, plot_pca_loadings_heatmap,
     plot_ica_components_heatmap, plot_ica_scatter,
@@ -46,7 +46,7 @@ def parse_arguments():
     parser = argparse.ArgumentParser(description="Run data analysis pipeline for k8s noisy detection.")
     parser.add_argument("--data-dir", required=True, help="Root directory containing the experimental data.")
     parser.add_argument("--output-dir", required=True, help="Directory to save results and plots.")
-    parser.add_argument("--metrics-config", default="refactor/new_config.py", help="Path to the metrics configuration file.")
+    parser.add_argument("--metrics-config", default="new_config.py", help="Path to the metrics configuration file.")
     parser.add_argument("--selected-metrics", nargs='*', help="List of specific metrics to process (e.g., cpu_usage memory_usage). Processes all if not specified.")
     parser.add_argument("--start-time", help="Global start time for analysis (YYYY-MM-DDTHH:MM:SS or relative like -60s, -10m, -1h from first event).")
     parser.add_argument("--end-time", help="Global end time for analysis (YYYY-MM-DDTHH:MM:SS or relative like +60s, +10m, +1h from last event).")
@@ -54,6 +54,7 @@ def parse_arguments():
     parser.add_argument("--time-normalization-target", nargs='*', default=['AttackStart', 'AttackEnd'], help="Event names to normalize time against.")
     parser.add_argument("--feature-scaling-method", choices=['minmax', 'standard', 'none'], default='minmax', help="Method for feature scaling.")
     parser.add_argument("--run-per-phase", action='store_true', help="Run analysis per phase instead of consolidated per round.")
+    parser.add_argument("--verbose", action='store_true', help="Enable verbose logging.")
     
     parser.add_argument("--run-descriptive-stats", action="store_true", help="Run descriptive statistics module.")
     parser.add_argument("--run-correlation-covariance", action="store_true", help="Run correlation and covariance analysis module.")
@@ -73,6 +74,8 @@ def parse_arguments():
     parser.add_argument("--run-tsne", action="store_true", help="Run t-SNE module.")
     parser.add_argument("--tsne-perplexity", type=float, default=30.0, help="Perplexity for t-SNE.")
     parser.add_argument("--tsne-random-state", type=int, default=42, help="Random state for t-SNE.")
+    parser.add_argument("--compare-pca-ica", action="store_true", help="Compare PCA and ICA results.")
+    parser.add_argument("--n-top-features-comparison", type=int, default=10, help="Number of top features to compare between PCA and ICA.")
 
     # SEM Analysis parameters
     sem_group = parser.add_argument_group('SEM Analysis')
@@ -820,3 +823,6 @@ def perform_multivariate_analysis_on_df(data_df, metric_name, analysis_label, ro
     elif args.compare_pca_ica:
         print(f"Skipping PCA vs ICA comparison for {metric_name} ({analysis_label} - {round_name}) as PCA or ICA components are missing.")
         sys.stdout.flush()
+
+if __name__ == "__main__":
+    main()
