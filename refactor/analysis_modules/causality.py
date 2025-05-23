@@ -493,7 +493,7 @@ def calculate_pairwise_transfer_entropy(data_df, time_col=None, k=1, bins=None,
         min_observations: Minimum number of observations required
         
     Returns:
-        Dict: Dictionary with Transfer Entropy values for each variable pair
+        DataFrame: DataFrame with Transfer Entropy values for each variable pair
     """
     # Sort by time if time column is provided
     if time_col is not None and time_col in data_df.columns:
@@ -509,10 +509,10 @@ def calculate_pairwise_transfer_entropy(data_df, time_col=None, k=1, bins=None,
     # Check if we have enough observations
     if len(data_df) < min_observations:
         print(f"Not enough observations for Transfer Entropy: {len(data_df)} < {min_observations}")
-        return {}
+        return pd.DataFrame()  # Return empty DataFrame instead of dictionary
     
-    # Initialize results dictionary
-    te_results = {}
+    # Initialize results list to store individual results
+    te_results_list = []
     
     # Calculate pairwise Transfer Entropy
     for i, source_col in enumerate(numeric_cols):
@@ -537,17 +537,22 @@ def calculate_pairwise_transfer_entropy(data_df, time_col=None, k=1, bins=None,
                         k=k, bins=bins, bandwidth=bandwidth
                     )
                     
-                    te_results[(source_col, target_col)] = {
+                    # Add results to the list instead of dictionary
+                    te_results_list.append({
                         'source': source_col,
                         'target': target_col,
                         'transfer_entropy': te_value,
                         'direction': f'{source_col} -> {target_col}'
-                    }
+                    })
                 except Exception as e:
                     print(f"Error calculating Transfer Entropy for {source_col} -> {target_col}: {e}")
                     continue
     
-    return te_results
+    # Convert the list of dictionaries to a DataFrame
+    if not te_results_list:
+        return pd.DataFrame()  # Return empty DataFrame if no results
+    
+    return pd.DataFrame(te_results_list)
 
 
 def plot_transfer_entropy_heatmap(te_results, title, output_dir, filename,
@@ -557,7 +562,7 @@ def plot_transfer_entropy_heatmap(te_results, title, output_dir, filename,
     Create a heatmap visualization of Transfer Entropy results.
     
     Args:
-        te_results: Dictionary with Transfer Entropy results
+        te_results: DataFrame or dictionary with Transfer Entropy results
         title: Title of the plot
         output_dir: Directory to save the plot
         filename: Filename to save the plot
@@ -570,28 +575,45 @@ def plot_transfer_entropy_heatmap(te_results, title, output_dir, filename,
     Returns:
         Figure object
     """
-    if not te_results:
+    # Handle empty result case
+    if isinstance(te_results, pd.DataFrame) and te_results.empty:
+        fig, ax = plt.subplots(figsize=figsize)
+        ax.text(0.5, 0.5, "No Transfer Entropy results available",
+                ha='center', va='center', fontsize=14)
+        plt.axis('off')
+        return fig
+    elif isinstance(te_results, dict) and not te_results:
         fig, ax = plt.subplots(figsize=figsize)
         ax.text(0.5, 0.5, "No Transfer Entropy results available",
                 ha='center', va='center', fontsize=14)
         plt.axis('off')
         return fig
     
+    # Convert dictionary to DataFrame if needed
+    if isinstance(te_results, dict):
+        results_list = []
+        for key, result in te_results.items():
+            results_list.append(result)
+        te_df = pd.DataFrame(results_list)
+    else:
+        # Already a DataFrame
+        te_df = te_results
+    
     # Extract all variable names
     all_vars = set()
-    for result in te_results.values():
-        all_vars.add(result['source'])
-        all_vars.add(result['target'])
+    for _, row in te_df.iterrows():
+        all_vars.add(row['source'])
+        all_vars.add(row['target'])
     all_vars = sorted(list(all_vars))
     
     # Create matrix
     n_vars = len(all_vars)
     te_matrix = np.zeros((n_vars, n_vars))
     
-    for result in te_results.values():
-        source_idx = all_vars.index(result['source'])
-        target_idx = all_vars.index(result['target'])
-        te_value = result['transfer_entropy']
+    for _, row in te_df.iterrows():
+        source_idx = all_vars.index(row['source'])
+        target_idx = all_vars.index(row['target'])
+        te_value = row['transfer_entropy']
         
         if te_value >= threshold:
             te_matrix[source_idx, target_idx] = te_value
@@ -651,7 +673,7 @@ def plot_transfer_entropy_network(te_results, title, output_dir, filename,
     Create a network visualization of Transfer Entropy relationships.
     
     Args:
-        te_results: Dictionary with Transfer Entropy results
+        te_results: DataFrame or dictionary with Transfer Entropy results
         title: Title of the plot
         output_dir: Directory to save the plot
         filename: Filename to save the plot
@@ -667,18 +689,35 @@ def plot_transfer_entropy_network(te_results, title, output_dir, filename,
     # Create a directed graph
     G = nx.DiGraph()
     
-    if not te_results:
+    # Handle empty result case
+    if isinstance(te_results, pd.DataFrame) and te_results.empty:
+        fig, ax = plt.subplots(figsize=figsize)
+        ax.text(0.5, 0.5, "No Transfer Entropy results available",
+                ha='center', va='center', fontsize=14)
+        plt.axis('off')
+        return fig
+    elif isinstance(te_results, dict) and not te_results:
         fig, ax = plt.subplots(figsize=figsize)
         ax.text(0.5, 0.5, "No Transfer Entropy results available",
                 ha='center', va='center', fontsize=14)
         plt.axis('off')
         return fig
     
+    # Convert dictionary to DataFrame if needed
+    if isinstance(te_results, dict):
+        results_list = []
+        for key, result in te_results.items():
+            results_list.append(result)
+        te_df = pd.DataFrame(results_list)
+    else:
+        # Already a DataFrame
+        te_df = te_results
+    
     # Add nodes and edges
-    for result in te_results.values():
-        source = result['source']
-        target = result['target']
-        te_value = result['transfer_entropy']
+    for _, row in te_df.iterrows():
+        source = row['source']
+        target = row['target']
+        te_value = row['transfer_entropy']
         
         # Add nodes
         G.add_node(source)
@@ -869,14 +908,26 @@ def _create_consensus_matrix(results, variables, threshold):
     method_count = np.zeros((n_vars, n_vars))
     
     # Transfer Entropy contributions
-    if 'transfer_entropy' in results and results['transfer_entropy']:
-        for result in results['transfer_entropy'].values():
-            source_idx = var_to_idx.get(result['source'])
-            target_idx = var_to_idx.get(result['target'])
-            if source_idx is not None and target_idx is not None:
-                if result['transfer_entropy'] > threshold:
-                    consensus[source_idx, target_idx] += 1
-                method_count[source_idx, target_idx] += 1
+    if 'transfer_entropy' in results and results['transfer_entropy'] is not None:
+        te_results = results['transfer_entropy']
+        
+        # Handle both DataFrame and dictionary formats for transfer entropy
+        if isinstance(te_results, pd.DataFrame) and not te_results.empty:
+            for _, row in te_results.iterrows():
+                source_idx = var_to_idx.get(row['source'])
+                target_idx = var_to_idx.get(row['target'])
+                if source_idx is not None and target_idx is not None:
+                    if row['transfer_entropy'] > threshold:
+                        consensus[source_idx, target_idx] += 1
+                    method_count[source_idx, target_idx] += 1
+        elif isinstance(te_results, dict) and te_results:
+            for result in te_results.values():
+                source_idx = var_to_idx.get(result['source'])
+                target_idx = var_to_idx.get(result['target'])
+                if source_idx is not None and target_idx is not None:
+                    if result['transfer_entropy'] > threshold:
+                        consensus[source_idx, target_idx] += 1
+                    method_count[source_idx, target_idx] += 1
     
     # Granger Causality contributions
     if 'granger' in results and 'p_values' in results['granger']:
@@ -1470,7 +1521,7 @@ def plot_ccm_convergence(ccm_results, title, output_dir, filename,
     return fig
 
 
-def summarize_ccm_results(ccm_results, min_library_size=30, significance_threshold=0.3):
+def summarize_ccm_results(ccm_results, min_library_size=30, significance_threshold=0.3, threshold=None):
     """
     Create a summary matrix showing the causal relationships detected by CCM.
     
@@ -1478,10 +1529,14 @@ def summarize_ccm_results(ccm_results, min_library_size=30, significance_thresho
         ccm_results: Dictionary with CCM results from calculate_pairwise_ccm
         min_library_size: Minimum library size to consider for convergence
         significance_threshold: Threshold for considering a relationship significant
+        threshold: Alternative name for significance_threshold (for compatibility)
         
     Returns:
         DataFrame: Matrix of causal strengths
     """
+    # If threshold is provided and significance_threshold is not, use threshold
+    if threshold is not None and significance_threshold == 0.3:
+        significance_threshold = threshold
     if not ccm_results:
         return pd.DataFrame()
     

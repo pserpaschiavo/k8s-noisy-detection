@@ -22,15 +22,31 @@ def format_float_columns(df, float_format='.2f'):
     def _formatter(x_val, fmt_str):
         if pd.notna(x_val):
             try:
-                # Ensure x_val is treated as a Python float for robust formatting
-                return format(float(x_val), fmt_str)
+                # Check and fix the format string - ensure it's a valid float format
+                # Most common format is '.4f' or similar - ensure it starts with a dot if not
+                # and has a valid format specifier at the end
+                fixed_fmt = fmt_str
+                if not fmt_str.startswith('.') and not fmt_str.startswith('%'):
+                    fixed_fmt = '.' + fmt_str
+                    
+                # Ensure format ends with a type specification (f, g, e, etc.)
+                if not any(fixed_fmt.endswith(c) for c in 'fFeEgGdiouxXcrs%'):
+                    fixed_fmt = fixed_fmt + 'f'
+                
+                # Now use the fixed format string with the float value
+                return format(float(x_val), fixed_fmt)
             except ValueError as e:
-                # This will catch "Invalid format specifier" or "could not convert string to float"
+                # For debugging, print the problematic value and format string
                 print(f"DEBUG: format_float_columns ValueError: val='{x_val}' (type {type(x_val)}), fmt='{fmt_str}' (type {type(fmt_str)}), error: {e}")
-                return str(x_val) # fallback to string representation
+                # Return the original value as a safe fallback
+                return str(x_val)
             except TypeError as e:
                 print(f"DEBUG: format_float_columns TypeError: val='{x_val}' (type {type(x_val)}), fmt='{fmt_str}' (type {type(fmt_str)}), error: {e}")
-                return str(x_val) # fallback to string representation
+                return str(x_val)
+            except Exception as e:
+                # Catch any other formatting errors we might encounter
+                print(f"DEBUG: format_float_columns unexpected error: {e}")
+                return str(x_val)
         return ""
 
     for col in result.columns:
@@ -49,17 +65,35 @@ def export_to_csv(df, filename, float_format='.2f'): # Modified to use a default
         filename (str): Nome do arquivo de saída
         float_format (str, optional): Formato para valores de ponto flutuante. Default '.2f'.
     """
-    # Garantir que o diretório existe
-    os.makedirs(os.path.dirname(os.path.abspath(filename)), exist_ok=True)
+    # Verify float_format is valid
+    valid_float_format = float_format
     
-    # Formatar float columns antes de exportar
-    # Using the provided float_format or the default '.2f'
-    formatted_df = format_float_columns(df, float_format) 
+    # Ensure it starts with a dot if it's supposed to be a standard format like .2f
+    if not valid_float_format.startswith('.') and not valid_float_format.startswith('%'):
+        valid_float_format = '.' + valid_float_format
     
-    # Exportar para CSV
-    formatted_df.to_csv(filename, index=False)
+    # Make sure it has a format type at the end
+    if not any(valid_float_format.endswith(c) for c in 'fFeEgGdiouxXcrs%'):
+        valid_float_format = valid_float_format + 'f'
     
-    print(f"Tabela exportada como CSV para {filename}")
+    try:    
+        # Garantir que o diretório existe
+        os.makedirs(os.path.dirname(os.path.abspath(filename)), exist_ok=True)
+        
+        # Formatar float columns antes de exportar
+        # Using the provided float_format or the default '.2f'
+        formatted_df = format_float_columns(df, valid_float_format) 
+        
+        # Exportar para CSV
+        formatted_df.to_csv(filename, index=False)
+        
+        print(f"Tabela exportada como CSV para {filename}")
+    except IsADirectoryError:
+        print(f"Error: '{filename}' is a directory, not a file. Please provide a valid file path.")
+    except PermissionError:
+        print(f"Error: Permission denied when writing to '{filename}'. Check your file permissions.")
+    except Exception as e:
+        print(f"Error exporting CSV to {filename}: {e}")
 
 # Added to centralize CSV saving for causality results
 def save_causality_results_to_csv(causality_results_df, output_path, float_format='.4f'): # Added float_format for p-values

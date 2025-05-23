@@ -559,16 +559,36 @@ def plot_pca_explained_variance(
     
     # Calculate cumulative variance if not provided
     if cumulative_variance is None:
-        cumulative_variance = np.cumsum(explained_variance_ratio)
+        # Handle NaN values
+        if np.isnan(explained_variance_ratio).any():
+            clean_ratios = np.nan_to_num(explained_variance_ratio, nan=0.0)
+            cumulative_variance = np.cumsum(clean_ratios)
+        else:
+            cumulative_variance = np.cumsum(explained_variance_ratio)
+    elif np.isnan(cumulative_variance).any():
+        # If cumulative_variance was provided but contains NaNs
+        cumulative_variance = np.nan_to_num(cumulative_variance, nan=0.0)
     
     # Plot individual explained variance (bar chart)
-    bars = ax1.bar(x_indices, explained_variance_ratio * 100, 
+    # Check if explained_variance_ratio contains NaN values
+    if np.isnan(explained_variance_ratio).any():
+        print("Warning: NaN values found in explained variance ratios. Replacing with zeros for plotting.")
+        explained_variance_ratio_plot = np.nan_to_num(explained_variance_ratio, nan=0.0)
+    else:
+        explained_variance_ratio_plot = explained_variance_ratio
+        
+    bars = ax1.bar(x_indices, explained_variance_ratio_plot * 100, 
                    alpha=0.7, color=VISUALIZATION_CONFIG.get('pca_bar_color', '#3498db'),
                    label='Individual Explained Variance')
     ax1.set_xlabel('Principal Component', fontsize=VISUALIZATION_CONFIG.get('label_size', 14))
     ax1.set_ylabel('Explained Variance (%)', fontsize=VISUALIZATION_CONFIG.get('label_size', 14))
     ax1.set_xlim(0.5, n_components + 0.5)
-    ax1.set_ylim(0, max(explained_variance_ratio * 100) * 1.1)
+    
+    # Safely set y-axis limits
+    if not np.isnan(explained_variance_ratio_plot).all() and not np.all(explained_variance_ratio_plot == 0):
+        ax1.set_ylim(0, max(explained_variance_ratio_plot * 100) * 1.1)
+    else:
+        ax1.set_ylim(0, 100)  # Default to 0-100% if we can't determine a safe max
     
     # Plot cumulative explained variance (line chart)
     line = ax2.plot(x_indices, cumulative_variance * 100, 'o-', color=VISUALIZATION_CONFIG.get('pca_line_color', '#e74c3c'),
