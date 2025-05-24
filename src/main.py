@@ -1,38 +1,80 @@
+"""
+Main entry point for the k8s-noisy-detection analysis pipeline.
+
+This refactored version uses modular analysis runners to improve maintainability
+and reduce the complexity of the main function.
+"""
+
 import argparse
 import logging
 import os
 import sys
 import traceback
 
-# Import centralized utilities
+# Import centralized utilities and exceptions
 from .utils.common import plt, pd, np
+try:
+    from .utils.exceptions import (
+        handle_critical_error, handle_recoverable_error,
+        ConfigurationError, DataLoadingError
+    )
+except ImportError:
+    # Fallback error handling if exceptions module fails
+    import logging
+    def handle_critical_error(error, operation):
+        logging.critical(f"Critical error during {operation}: {str(error)}")
+    def handle_recoverable_error(error, operation, default_return=None):
+        logging.warning(f"Recoverable error during {operation}: {str(error)}")
+        return default_return
+    class ConfigurationError(Exception): pass
+    class DataLoadingError(Exception): pass
 
+# Import configuration and core modules
 from .config import TENANT_COLORS, METRICS_CONFIG
 from .data.loader import load_experiment_data
-from .data.io_utils import export_to_csv
-from .analysis.multivariate import (
-    perform_pca, perform_ica, get_top_features_per_component,
-    perform_kpca, perform_tsne
+
+# Import modular analysis runners
+from .analysis.analysis_runners import (
+    run_descriptive_statistics_analysis,
+    run_correlation_covariance_analysis,
+    run_causality_analysis,
+    run_similarity_analysis,
+    run_multivariate_analysis,
+    run_root_cause_analysis
 )
+
+# Import individual analysis functions for backward compatibility
 from .analysis.descriptive_statistics import calculate_descriptive_statistics
-from .analysis.correlation_covariance import calculate_inter_tenant_correlation_per_metric, calculate_inter_tenant_covariance_per_metric
+from .analysis.correlation_covariance import (
+    calculate_inter_tenant_correlation_per_metric,
+    calculate_inter_tenant_covariance_per_metric
+)
 from .analysis.causality import perform_sem_analysis, plot_sem_path_diagram, plot_sem_fit_indices
-from .analysis.root_cause import RootCauseAnalyzer, perform_complete_root_cause_analysis
 from .analysis.similarity import (
     calculate_pairwise_distance_correlation,
     calculate_pairwise_cosine_similarity,
     calculate_pairwise_mutual_information,
     plot_distance_correlation_heatmap,
+    plot_cosine_similarity_heatmap,
     plot_mutual_information_heatmap
 )
-# Alias distance-correlation plot for cosine similarity heatmap
-plot_cosine_similarity_heatmap = plot_distance_correlation_heatmap
-from .visualization.plots import (
-    plot_correlation_heatmap, plot_covariance_heatmap, plot_scatter_comparison,
-    plot_pca_explained_variance, plot_pca_biplot, plot_pca_loadings_heatmap,
-    plot_ica_components_heatmap, plot_ica_scatter,
-    plot_descriptive_stats_boxplot, plot_descriptive_stats_lineplot
+from .analysis.multivariate import (
+    perform_pca, perform_ica, get_top_features_per_component,
+    perform_kpca, perform_tsne
 )
+from .analysis.root_cause import perform_complete_root_cause_analysis
+from .visualization.plots import (
+    plot_correlation_heatmap,
+    plot_covariance_heatmap,
+    plot_descriptive_stats_boxplot,
+    plot_descriptive_stats_lineplot,
+    plot_pca_explained_variance,
+    plot_pca_biplot,
+    plot_pca_loadings_heatmap,
+    plot_ica_scatter,
+    plot_ica_components_heatmap
+)
+from .data.io_utils import export_to_csv
 
 # Function definitions (parse_arguments, setup_output_directories, load_and_preprocess_data, etc.)
 # are assumed to be defined in this file or correctly imported if they were meant to be elsewhere.
@@ -162,19 +204,16 @@ def load_and_preprocess_data(data_dir, metrics_config_path, selected_metrics_lis
 def main():
     logging.debug("Script new_main.py starting...")
     args = parse_arguments()
-    # Validate SEM parameters
-    if args.run_causality and not args.sem_model_spec:
-        logging.error("SEM model spec (--sem-model-spec) is required when --run-causality is set.")
-        sys.exit(1)
+    
     # Configure logging
     log_level = logging.DEBUG if args.verbose else logging.INFO
     logging.basicConfig(level=log_level, format="%(asctime)s - %(levelname)s - %(message)s")
     logging.debug(f"Parsed arguments: {args}")
 
-    # Validate SEM args
+    # Validate SEM parameters (single validation)
     if args.run_causality and not args.sem_model_spec:
-        logging.error("--sem-model-spec is required when --run-causality is set.")
-        return
+        logging.error("SEM model spec (--sem-model-spec) is required when --run-causality is set.")
+        sys.exit(1)
 
     try:
         # Unpack all 15 values returned by the corrected setup_output_directories

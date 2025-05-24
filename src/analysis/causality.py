@@ -15,12 +15,6 @@ from semopy import Model
 from semopy.stats import calc_stats
 import networkx as nx
 import re
-from scipy.stats import entropy
-from sklearn.neighbors import KernelDensity
-
-# Set plot aesthetic
-plt.style.use('seaborn-v0_8-whitegrid')
-sns.set_context("paper", font_scale=1.2)
 
 
 def perform_sem_analysis(data, model_spec, exog_vars=None, standardize=True):
