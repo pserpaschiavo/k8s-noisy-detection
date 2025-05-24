@@ -1,0 +1,46 @@
+analysis:
+  mode: extended
+  tenants: [a, b, c, d]
+  metrics: all
+  techniques: [correlation, pca, ica, clustering]
+  timeframe: all
+  
+data:
+  path: demo-data/
+  file_pattern: "*.csv"
+  
+processing:
+  auto_format: true
+  remove_outliers: true
+  normalize: true
+  anomaly_detection: true
+  
+advanced:
+  pca_components: auto
+  correlation_methods: [pearson, spearman, kendall]
+  clustering_methods: [kmeans, dbscan]
+  ica_components: 3
+  
+output:
+  format: [png, svg, csv]
+  directory: ./output/extended_analysis
+  save_data: true
+  save_plots: true
+  save_models: true
+  
+debug:
+  verbose: true
+  save_intermediate: true
+  show_data_issues: true
+  profile_performance: true
+  
+plots:
+  basic_timeseries: true
+  boxplots: true
+  correlation_matrix: true
+  tenant_comparison: true
+  pca_plots: true
+  clustering_plots: true
+  anomaly_plots: true
+  dpi: 300
+  figsize: [15, 10]

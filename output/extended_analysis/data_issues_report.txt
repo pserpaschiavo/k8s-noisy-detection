@@ -1,0 +1,61 @@
+RELATÓRIO DE PROBLEMAS NOS DADOS
+==================================================
+
+Gerado em: 2025-05-24 16:08:16.778175
+Fonte: demo-data/demo-experiment-1-round/round-1
+
+1 - Baseline/tenant-a:
+  - Arquivo a.csv ausente
+  - Arquivo l.csv ausente
+  - Arquivo l.csv ausente
+
+1 - Baseline/tenant-c:
+  - Arquivo a.csv ausente
+  - Arquivo l.csv ausente
+  - Arquivo l.csv ausente
+
+1 - Baseline/tenant-d:
+  - Arquivo a.csv ausente
+  - Arquivo l.csv ausente
+  - Arquivo l.csv ausente
+
+2 - Attack/tenant-a:
+  - Arquivo a.csv ausente
+  - Arquivo l.csv ausente
+  - Arquivo l.csv ausente
+
+2 - Attack/tenant-b:
+  - Arquivo a.csv ausente
+  - Arquivo l.csv ausente
+  - Arquivo l.csv ausente
+
+2 - Attack/tenant-c:
+  - Arquivo a.csv ausente
+  - Arquivo l.csv ausente
+  - Arquivo l.csv ausente
+
+2 - Attack/tenant-d:
+  - Arquivo a.csv ausente
+  - Arquivo l.csv ausente
+  - Arquivo l.csv ausente
+
+3 - Recovery/tenant-a:
+  - Arquivo a.csv ausente
+  - Arquivo l.csv ausente
+  - Arquivo l.csv ausente
+
+3 - Recovery/tenant-b:
+  - Arquivo a.csv ausente
+  - Arquivo l.csv ausente
+  - Arquivo l.csv ausente
+
+3 - Recovery/tenant-c:
+  - Arquivo a.csv ausente
+  - Arquivo l.csv ausente
+  - Arquivo l.csv ausente
+
+3 - Recovery/tenant-d:
+  - Arquivo a.csv ausente
+  - Arquivo l.csv ausente
+  - Arquivo l.csv ausente
+

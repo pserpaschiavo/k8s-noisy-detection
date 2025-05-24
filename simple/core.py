@@ -1,65 +1,163 @@
 #!/usr/bin/env python3
 """
-Core Simples para K8s Noisy Detection
-Foco em debugging e análise básica rápida
+K8s Noisy Detection - Simplified Core
+=====================================
+
+Core simplificado para análise de dados K8s com configuração YAML.
+Substitui o pipeline complexo de 700+ linhas por uma abordagem modular e clara.
+
+Autor: Phil
+Versão: 2.0 (Simplificado)
 """
 
-import sys
 import os
-sys.path.insert(0, '.')
-
+import sys
+import yaml
 import pandas as pd
 import numpy as np
 import matplotlib.pyplot as plt
 import seaborn as sns
 from pathlib import Path
+from typing import Dict, List, Optional, Tuple, Any
 from datetime import datetime
 import warnings
 warnings.filterwarnings('ignore')
 
+# Add src to path for imports
+current_dir = Path(__file__).parent
+project_root = current_dir.parent
+sys.path.append(str(project_root / 'src'))
+
+try:
+    from src.utils.metric_formatter import MetricFormatter
+except ImportError:
+    print("⚠️ MetricFormatter não disponível, usando formatação básica")
+    MetricFormatter = None
+
+
 class SimpleK8sAnalyzer:
     """
-    Analisador simples para debugging e análise básica do K8s Noisy Detection.
-    Foco em clareza, velocidade e facilidade de debugging.
+    Analisador simplificado para dados K8s com suporte a configuração YAML.
+    
+    Foco em:
+    - Debugging rápido de problemas de dados
+    - Análises essenciais em < 5 minutos
+    - Interface clara e modular
+    - Configuração flexível via YAML
     """
     
-    def __init__(self, data_path, tenants=None, metrics=None, output_dir='simple_output'):
-        self.data_path = Path(data_path)
-        self.tenants = tenants or ['tenant-a', 'tenant-b', 'tenant-c', 'tenant-d'] 
-        self.metrics = metrics or ['memory_usage', 'disk_throughput_total', 'network_total_bandwidth', 'cpu_usage']
-        self.output_dir = Path(output_dir)
-        self.output_dir.mkdir(exist_ok=True)
+    def __init__(self, config_path: Optional[str] = None, data_path: Optional[str] = None):
+        """
+        Inicializa o analisador com configuração YAML ou parâmetros diretos.
         
-        # Data storage
+        Args:
+            config_path: Caminho para arquivo YAML de configuração
+            data_path: Caminho direto para dados (opcional se config_path fornecido)
+        """
+        self.config = self._load_config(config_path)
+        self.data_path = data_path or self.config['data']['path']
+        self.output_dir = Path(self.config['output']['directory'])
+        self.output_dir.mkdir(parents=True, exist_ok=True)
+        
+        # Initialize formatter if available
+        self.formatter = MetricFormatter() if MetricFormatter else None
+        
+        # Data containers
         self.raw_data = {}
         self.processed_data = {}
-        self.data_issues = {}
-        self.summary_stats = {}
+        self.stats = {}
         
-        # Estado do sistema
-        self.data_loaded = False
+        # Analysis state
         self.analysis_complete = False
+        self.plots_generated = False
         
-        print(f"🎯 SimpleK8sAnalyzer inicializado")
+        print(f"🚀 SimpleK8sAnalyzer inicializado")
         print(f"📁 Dados: {self.data_path}")
-        print(f"👥 Tenants: {self.tenants}")
-        print(f"📊 Métricas: {self.metrics}")
-        print(f"📁 Saída: {self.output_dir}")
+        print(f"📊 Output: {self.output_dir}")
+        print(f"🎯 Modo: {self.config['analysis']['mode']}")
     
-    def load_basic_data(self):
-        """Carrega dados básicos com detecção de problemas."""
-        print("\n📊 CARREGANDO DADOS BÁSICOS...")
+    def _load_config(self, config_path: Optional[str] = None) -> Dict[str, Any]:
+        """Carrega configuração YAML ou usa defaults."""
+        if config_path and os.path.exists(config_path):
+            with open(config_path, 'r') as f:
+                return yaml.safe_load(f)
         
+        # Default basic config
+        return {
+            'analysis': {
+                'mode': 'basic',
+                'tenants': ['a', 'b', 'c', 'd'],
+                'metrics': ['memory_usage', 'disk_throughput_total', 'network_total_bandwidth', 'cpu_usage']
+            },
+            'data': {'path': 'demo-data/'},
+            'output': {'directory': './output/simple_analysis', 'format': 'png'},
+            'debug': {'verbose': True},
+            'plots': {'basic_timeseries': True, 'boxplots': True, 'figsize': [12, 8], 'dpi': 300}
+        }
+    
+    def quick_analysis(self) -> Dict[str, Any]:
+        """
+        Executa análise completa rápida (< 5 minutos).
+        
+        Returns:
+            Dicionário com resultados da análise
+        """
+        print("\n🔍 Iniciando análise rápida...")
+        
+        # 1. Load and validate data
+        print("📥 Carregando dados...")
+        self.load_data()
+        
+        # 2. Debug data issues
+        print("🐛 Verificando problemas nos dados...")
+        data_issues = self.debug_data_issues()
+        
+        # 3. Process data
+        print("⚙️ Processando dados...")
+        self.process_data()
+        
+        # 4. Generate basic statistics
+        print("📊 Gerando estatísticas...")
+        self.generate_basic_stats()
+        
+        # 5. Create basic plots
+        print("📈 Criando plots...")
+        self.create_basic_plots()
+        
+        # 6. Generate summary report
+        print("📋 Gerando relatório...")
+        summary = self.generate_summary_report()
+        
+        self.analysis_complete = True
+        print(f"\n✅ Análise completa! Resultados em: {self.output_dir}")
+        
+        return {
+            'data_issues': data_issues,
+            'stats': self.stats,
+            'summary': summary,
+            'output_dir': str(self.output_dir)
+        }
+    
+    def load_data(self) -> bool:
+        """Carrega dados dos tenants especificados na configuração."""
         self.raw_data = {}
         self.data_issues = {}
         
+        data_path = Path(self.data_path)
+        tenants = self.config['analysis']['tenants']
+        metrics = self.config['analysis']['metrics']
+        
         # Busca por estrutura de dados
-        if not self.data_path.exists():
-            print(f"❌ Caminho não encontrado: {self.data_path}")
+        if not data_path.exists():
+            print(f"❌ Caminho não encontrado: {data_path}")
             return False
         
         # Lista fases disponíveis
-        phases = [d for d in self.data_path.iterdir() if d.is_dir()]
+        phases = [d for d in data_path.iterdir() if d.is_dir()]
+        if not phases:
+            print("❌ Nenhuma fase encontrada no diretório de dados")
+            return False
+            
         print(f"📁 Fases encontradas: {[p.name for p in phases]}")
         
         for phase in sorted(phases):
@@ -68,16 +166,17 @@ class SimpleK8sAnalyzer:
             
             print(f"\n  📂 Processando {phase_name}...")
             
-            for tenant in self.tenants:
-                tenant_path = phase / tenant
+            for tenant in tenants:
+                tenant_dir = f"tenant-{tenant}"
+                tenant_path = phase / tenant_dir
                 if not tenant_path.exists():
-                    print(f"    ⚠️ {tenant} não encontrado em {phase_name}")
+                    print(f"    ⚠️ {tenant_dir} não encontrado em {phase_name}")
                     continue
                 
-                self.raw_data[phase_name][tenant] = {}
+                self.raw_data[phase_name][tenant_dir] = {}
                 tenant_issues = []
                 
-                for metric in self.metrics:
+                for metric in metrics:
                     metric_file = tenant_path / f"{metric}.csv"
                     if not metric_file.exists():
                         tenant_issues.append(f"Arquivo {metric}.csv ausente")
@@ -87,23 +186,23 @@ class SimpleK8sAnalyzer:
                         df = pd.read_csv(metric_file)
                         
                         # Verificações básicas
-                        issues = self._check_data_quality(df, metric, tenant, phase_name)
+                        issues = self._check_data_quality(df, metric, tenant_dir, phase_name)
                         if issues:
                             tenant_issues.extend(issues)
                         
-                        self.raw_data[phase_name][tenant][metric] = df
-                        print(f"    ✅ {tenant}/{metric}: {len(df)} registros")
+                        self.raw_data[phase_name][tenant_dir][metric] = df
+                        print(f"    ✅ {tenant_dir}/{metric}: {len(df)} registros")
                         
                     except Exception as e:
-                        error_msg = f"Erro ao carregar {tenant}/{metric}: {e}"
+                        error_msg = f"Erro ao carregar {tenant_dir}/{metric}: {e}"
                         tenant_issues.append(error_msg)
                         print(f"    ❌ {error_msg}")
                 
                 if tenant_issues:
-                    self.data_issues[f"{phase_name}/{tenant}"] = tenant_issues
+                    self.data_issues[f"{phase_name}/{tenant_dir}"] = tenant_issues
         
-        self.data_loaded = True
-        print(f"\n✅ Carregamento concluído. Issues detectados: {len(self.data_issues)}")
+        total_files = sum(len(phase_data) for phase_data in self.raw_data.values() for tenant_data in phase_data.values())
+        print(f"\n✅ Carregamento concluído. {total_files} arquivos carregados, {len(self.data_issues)} issues detectados")
         
         return True
     
@@ -143,17 +242,17 @@ class SimpleK8sAnalyzer:
                 
         return issues
     
-    def debug_data_issues(self):
+    def debug_data_issues(self) -> Dict[str, List[str]]:
         """Função específica para debugging de problemas nos dados."""
         print("\n🔍 DEBUGGING DE PROBLEMAS NOS DADOS...")
         
-        if not self.data_loaded:
-            print("❌ Dados não carregados. Execute load_basic_data() primeiro.")
-            return
+        if not self.raw_data:
+            print("❌ Dados não carregados. Execute load_data() primeiro.")
+            return {}
         
         if not self.data_issues:
             print("✅ Nenhum problema detectado nos dados!")
-            return
+            return {}
         
         print(f"⚠️ {len(self.data_issues)} problemas detectados:")
         
@@ -177,23 +276,53 @@ class SimpleK8sAnalyzer:
                 f.write("\n")
         
         print(f"\n📄 Relatório salvo: {issues_file}")
-    
-    def generate_basic_stats(self):
+        return self.data_issues
+
+    def process_data(self) -> None:
+        """Processa os dados carregados aplicando formatação e conversões."""
+        print("\n⚙️ Processando dados...")
+        
+        self.processed_data = {}
+        
+        for phase_name, phase_data in self.raw_data.items():
+            self.processed_data[phase_name] = {}
+            
+            for tenant, tenant_data in phase_data.items():
+                self.processed_data[phase_name][tenant] = {}
+                
+                for metric, df in tenant_data.items():
+                    processed_df = df.copy()
+                    
+                    # Aplica formatação inteligente se disponível
+                    if self.formatter and self.config['processing']['auto_format']:
+                        try:
+                            processed_df = self.formatter.format_dataframe(processed_df, metric)
+                        except Exception as e:
+                            print(f"    ⚠️ Erro na formatação de {tenant}/{metric}: {e}")
+                    
+                    self.processed_data[phase_name][tenant][metric] = processed_df
+        
+        print("✅ Processamento concluído")
+
+    def generate_basic_stats(self) -> Dict[str, Any]:
         """Gera estatísticas básicas para todos os dados."""
         print("\n📈 GERANDO ESTATÍSTICAS BÁSICAS...")
         
-        if not self.data_loaded:
-            print("❌ Dados não carregados. Execute load_basic_data() primeiro.")
-            return
+        if not self.processed_data and not self.raw_data:
+            print("❌ Dados não carregados. Execute load_data() primeiro.")
+            return {}
         
-        self.summary_stats = {}
+        # Use processed data if available, otherwise raw data
+        data_source = self.processed_data if self.processed_data else self.raw_data
         
-        for phase_name, phase_data in self.raw_data.items():
+        self.stats = {}
+        
+        for phase_name, phase_data in data_source.items():
             print(f"\n  📊 Processando {phase_name}...")
-            self.summary_stats[phase_name] = {}
+            self.stats[phase_name] = {}
             
             for tenant, tenant_data in phase_data.items():
-                self.summary_stats[phase_name][tenant] = {}
+                self.stats[phase_name][tenant] = {}
                 
                 for metric, df in tenant_data.items():
                     if 'value' not in df.columns:
@@ -203,39 +332,36 @@ class SimpleK8sAnalyzer:
                     if len(values) == 0:
                         continue
                     
-                    # Aplica formatação inteligente
-                    try:
-                        from src.utils.metric_formatter import detect_and_convert_units
-                        df_formatted = detect_and_convert_units(df.copy(), metric)
-                        formatted_values = df_formatted['value'].dropna()
-                        unit = df_formatted.get('display_unit', ['unknown']).iloc[0] if 'display_unit' in df_formatted.columns else 'unknown'
-                    except:
-                        formatted_values = values
-                        unit = 'raw'
+                    # Determina unidade
+                    unit = 'unknown'
+                    if 'display_unit' in df.columns:
+                        unit = df['display_unit'].iloc[0] if len(df) > 0 else 'unknown'
+                    elif 'unit' in df.columns:
+                        unit = df['unit'].iloc[0] if len(df) > 0 else 'unknown'
                     
                     stats = {
-                        'count': len(formatted_values),
-                        'mean': float(formatted_values.mean()),
-                        'median': float(formatted_values.median()),
-                        'std': float(formatted_values.std()),
-                        'min': float(formatted_values.min()),
-                        'max': float(formatted_values.max()),
-                        'q25': float(formatted_values.quantile(0.25)),
-                        'q75': float(formatted_values.quantile(0.75)),
+                        'count': len(values),
+                        'mean': float(values.mean()),
+                        'median': float(values.median()),
+                        'std': float(values.std()),
+                        'min': float(values.min()),
+                        'max': float(values.max()),
+                        'q25': float(values.quantile(0.25)),
+                        'q75': float(values.quantile(0.75)),
                         'unit': unit
                     }
                     
-                    self.summary_stats[phase_name][tenant][metric] = stats
+                    self.stats[phase_name][tenant][metric] = stats
                     print(f"    ✅ {tenant}/{metric}: {stats['count']} registros, média {stats['mean']:.2f} {stats['unit']}")
         
         print("✅ Estatísticas básicas concluídas")
-        return self.summary_stats
+        return self.stats
     
-    def create_basic_plots(self):
+    def create_basic_plots(self) -> None:
         """Cria plots básicos para análise visual."""
         print("\n📈 CRIANDO PLOTS BÁSICOS...")
         
-        if not self.summary_stats:
+        if not self.stats:
             print("❌ Estatísticas não calculadas. Execute generate_basic_stats() primeiro.")
             return
         
@@ -252,37 +378,37 @@ class SimpleK8sAnalyzer:
         self._create_distribution_plots(plots_dir)
         
         # Plot 4: Heatmap de correlação simples
-        self._create_simple_correlation_heatmap(plots_dir)
+        if self.config['plots'].get('correlation_matrix', False):
+            self._create_simple_correlation_heatmap(plots_dir)
         
+        self.plots_generated = True
         print("✅ Plots básicos criados")
     
     def _create_mean_comparison_plot(self, plots_dir):
         """Cria plot de comparação de médias."""
         print("    📊 Criando comparação de médias...")
         
+        metrics = self.config['analysis']['metrics']
+        tenants = [f"tenant-{t}" for t in self.config['analysis']['tenants']]
+        
         fig, axes = plt.subplots(2, 2, figsize=(15, 10))
         fig.suptitle('Comparação de Médias por Tenant e Fase', fontsize=16)
         
-        for idx, metric in enumerate(self.metrics):
-            if idx >= 4:
-                break
-                
+        for idx, metric in enumerate(metrics[:4]):  # Limite para 4 métricas no plot
             row = idx // 2
             col = idx % 2
             ax = axes[row, col]
             
-            phases = list(self.summary_stats.keys())
-            tenants = self.tenants
+            phases = list(self.stats.keys())
             
             data_matrix = []
             for phase in phases:
                 phase_data = []
                 for tenant in tenants:
-                    if (phase in self.summary_stats and 
-                        tenant in self.summary_stats[phase] and 
-                        metric in self.summary_stats[phase][tenant]):
-                        mean_val = self.summary_stats[phase][tenant][metric]['mean']
-                        unit = self.summary_stats[phase][tenant][metric]['unit']
+                    if (phase in self.stats and 
+                        tenant in self.stats[phase] and 
+                        metric in self.stats[phase][tenant]):
+                        mean_val = self.stats[phase][tenant][metric]['mean']
                         phase_data.append(mean_val)
                     else:
                         phase_data.append(0)
@@ -296,7 +422,7 @@ class SimpleK8sAnalyzer:
                     ax.bar(x + i * width, data_matrix[i], width, label=phase, alpha=0.8)
                 
                 ax.set_xlabel('Tenants')
-                ax.set_ylabel(f'{metric} ({unit})')
+                ax.set_ylabel(f'{metric}')
                 ax.set_title(f'{metric.replace("_", " ").title()}')
                 ax.set_xticks(x + width)
                 ax.set_xticklabels([t.replace('tenant-', '') for t in tenants])
@@ -313,17 +439,20 @@ class SimpleK8sAnalyzer:
         """Cria plots de evolução temporal."""
         print("    📊 Criando plots temporais...")
         
-        for metric in self.metrics:
-            fig, axes = plt.subplots(len(self.summary_stats), 1, figsize=(12, 4*len(self.summary_stats)))
-            if len(self.summary_stats) == 1:
+        metrics = self.config['analysis']['metrics']
+        tenants = [f"tenant-{t}" for t in self.config['analysis']['tenants']]
+        
+        for metric in metrics:
+            fig, axes = plt.subplots(len(self.stats), 1, figsize=(12, 4*len(self.stats)))
+            if len(self.stats) == 1:
                 axes = [axes]
             
             fig.suptitle(f'Evolução Temporal: {metric.replace("_", " ").title()}', fontsize=16)
             
-            for phase_idx, (phase_name, phase_data) in enumerate(self.summary_stats.items()):
+            for phase_idx, (phase_name, phase_data) in enumerate(self.stats.items()):
                 ax = axes[phase_idx]
                 
-                for tenant in self.tenants:
+                for tenant in tenants:
                     if tenant in phase_data and metric in phase_data[tenant]:
                         # Para temporal simples, vamos simular uma série
                         stats = phase_data[tenant][metric]
@@ -340,7 +469,7 @@ class SimpleK8sAnalyzer:
                 
                 ax.set_title(f'{phase_name}')
                 ax.set_xlabel('Tempo (amostras)')
-                ax.set_ylabel(f'Valor ({phase_data.get(list(phase_data.keys())[0], {}).get(metric, {}).get("unit", "unknown")})')
+                ax.set_ylabel(f'Valor')
                 ax.legend()
                 ax.grid(True, alpha=0.3)
             
@@ -349,19 +478,19 @@ class SimpleK8sAnalyzer:
             plt.savefig(plot_file, dpi=300, bbox_inches='tight')
             plt.close()
         
-        print(f"      ✅ {len(self.metrics)} plots temporais salvos")
+        print(f"      ✅ {len(metrics)} plots temporais salvos")
     
     def _create_distribution_plots(self, plots_dir):
         """Cria plots de distribuição (boxplots)."""
         print("    📊 Criando plots de distribuição...")
         
+        metrics = self.config['analysis']['metrics']
+        tenants = [f"tenant-{t}" for t in self.config['analysis']['tenants']]
+        
         fig, axes = plt.subplots(2, 2, figsize=(15, 10))
         fig.suptitle('Distribuições por Tenant e Métrica', fontsize=16)
         
-        for idx, metric in enumerate(self.metrics):
-            if idx >= 4:
-                break
-                
+        for idx, metric in enumerate(metrics[:4]):  # Limite para 4 métricas
             row = idx // 2
             col = idx % 2
             ax = axes[row, col]
@@ -370,13 +499,13 @@ class SimpleK8sAnalyzer:
             box_data = []
             labels = []
             
-            for tenant in self.tenants:
+            for tenant in tenants:
                 tenant_values = []
-                for phase_data in self.summary_stats.values():
+                for phase_data in self.stats.values():
                     if tenant in phase_data and metric in phase_data[tenant]:
                         stats = phase_data[tenant][metric]
                         # Simula distribuição baseada nas estatísticas
-                        simulated = np.random.normal(stats['mean'], stats['std'], stats['count'])
+                        simulated = np.random.normal(stats['mean'], stats['std'], min(stats['count'], 1000))
                         tenant_values.extend(simulated)
                 
                 if tenant_values:
@@ -394,7 +523,7 @@ class SimpleK8sAnalyzer:
         plt.savefig(plot_file, dpi=300, bbox_inches='tight')
         plt.close()
         print(f"      ✅ Salvo: {plot_file}")
-    
+
     def _create_simple_correlation_heatmap(self, plots_dir):
         """Cria heatmap de correlação simples entre métricas."""
         print("    📊 Criando heatmap de correlação...")
@@ -402,12 +531,12 @@ class SimpleK8sAnalyzer:
         # Cria matriz de correlação baseada nas médias
         correlation_data = {}
         
-        for phase_name, phase_data in self.summary_stats.items():
+        for phase_name, phase_data in self.stats.items():
             for tenant, tenant_data in phase_data.items():
                 key = f"{tenant}_{phase_name}"
                 correlation_data[key] = {}
                 
-                for metric in self.metrics:
+                for metric in self.config['analysis']['metrics']:
                     if metric in tenant_data:
                         correlation_data[key][metric] = tenant_data[metric]['mean']
                     else:
@@ -428,9 +557,12 @@ class SimpleK8sAnalyzer:
             plt.close()
             print(f"      ✅ Salvo: {plot_file}")
     
-    def save_summary_report(self):
+    def generate_summary_report(self) -> Dict[str, Any]:
         """Salva relatório resumo da análise."""
-        print("\n📄 SALVANDO RELATÓRIO RESUMO...")
+        print("\n📄 GERANDO RELATÓRIO RESUMO...")
+        
+        tenants = [f"tenant-{t}" for t in self.config['analysis']['tenants']]
+        metrics = self.config['analysis']['metrics']
         
         # Relatório texto
         report_file = self.output_dir / "summary_report.txt"
@@ -439,8 +571,8 @@ class SimpleK8sAnalyzer:
             f.write("=" * 50 + "\n\n")
             f.write(f"Gerado em: {datetime.now()}\n")
             f.write(f"Fonte dos dados: {self.data_path}\n")
-            f.write(f"Tenants analisados: {self.tenants}\n")
-            f.write(f"Métricas analisadas: {self.metrics}\n\n")
+            f.write(f"Tenants analisados: {tenants}\n")
+            f.write(f"Métricas analisadas: {metrics}\n\n")
             
             if self.data_issues:
                 f.write("PROBLEMAS DETECTADOS:\n")
@@ -453,7 +585,7 @@ class SimpleK8sAnalyzer:
             
             f.write("ESTATÍSTICAS RESUMO:\n")
             f.write("-" * 30 + "\n")
-            for phase_name, phase_data in self.summary_stats.items():
+            for phase_name, phase_data in self.stats.items():
                 f.write(f"\n{phase_name}:\n")
                 for tenant, tenant_data in phase_data.items():
                     f.write(f"  {tenant}:\n")
@@ -463,7 +595,7 @@ class SimpleK8sAnalyzer:
         
         # Relatório CSV com estatísticas
         stats_data = []
-        for phase_name, phase_data in self.summary_stats.items():
+        for phase_name, phase_data in self.stats.items():
             for tenant, tenant_data in phase_data.items():
                 for metric, stats in tenant_data.items():
                     stats_data.append({
@@ -479,6 +611,15 @@ class SimpleK8sAnalyzer:
                         'unit': stats['unit']
                     })
         
+        summary_data = {
+            'total_phases': len(self.stats),
+            'total_tenants': len(tenants),
+            'total_metrics': len(metrics),
+            'data_issues_count': len(self.data_issues),
+            'analysis_complete': self.analysis_complete,
+            'plots_generated': self.plots_generated
+        }
+        
         if stats_data:
             stats_df = pd.DataFrame(stats_data)
             csv_file = self.output_dir / "summary_statistics.csv"
@@ -486,42 +627,12 @@ class SimpleK8sAnalyzer:
             print(f"✅ CSV salvo: {csv_file}")
         
         print(f"✅ Relatório salvo: {report_file}")
-        self.analysis_complete = True
-    
-    def quick_analysis(self):
-        """Executa análise completa básica."""
-        print("🚀 EXECUTANDO ANÁLISE RÁPIDA COMPLETA...")
-        print("=" * 60)
         
-        success = self.load_basic_data()
-        if not success:
-            print("❌ Falha no carregamento de dados")
-            return False
-        
-        self.debug_data_issues()
-        self.generate_basic_stats()
-        self.create_basic_plots()
-        self.save_summary_report()
-        
-        print("\n" + "=" * 60)
-        print("🎉 ANÁLISE RÁPIDA CONCLUÍDA!")
-        print(f"📁 Resultados em: {self.output_dir}")
-        print("📄 Arquivos gerados:")
-        
-        for file in self.output_dir.glob("*"):
-            if file.is_file():
-                print(f"  - {file.name}")
-        
-        for subdir in self.output_dir.glob("*/"):
-            files = list(subdir.glob("*"))
-            if files:
-                print(f"  - {subdir.name}/: {len(files)} arquivos")
-        
-        return True
+        return summary_data
     
     def show_data_summary(self):
         """Mostra resumo dos dados carregados."""
-        if not self.data_loaded:
+        if not self.raw_data:
             print("❌ Dados não carregados")
             return
         
@@ -549,7 +660,17 @@ class SimpleK8sAnalyzer:
             for location, issues in list(self.data_issues.items())[:3]:
                 print(f"  - {location}: {len(issues)} problemas")
 
+
 if __name__ == "__main__":
     # Exemplo de uso
-    analyzer = SimpleK8sAnalyzer('demo-data/demo-experiment-1-round/round-1')
-    analyzer.quick_analysis()
+    print("🚀 Testando SimpleK8sAnalyzer...")
+    
+    # Teste com configuração padrão
+    analyzer = SimpleK8sAnalyzer(data_path='demo-data/demo-experiment-1-round/round-1')
+    result = analyzer.quick_analysis()
+    
+    if result:
+        print("\n✅ Teste concluído com sucesso!")
+        print(f"📂 Resultados em: {result['output_dir']}")
+    else:
+        print("\n❌ Teste falhou")

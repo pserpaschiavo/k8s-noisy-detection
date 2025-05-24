@@ -1,0 +1,33 @@
+analysis:
+  mode: basic
+  tenants: [a, b, c, d]
+  metrics: [memory_usage, disk_throughput_total, network_total_bandwidth, cpu_usage]
+  timeframe: all
+  
+data:
+  path: demo-data/
+  file_pattern: "*.csv"
+  
+processing:
+  auto_format: true
+  remove_outliers: false
+  normalize: false
+  
+output:
+  format: png
+  directory: ./output/simple_analysis
+  save_data: true
+  save_plots: true
+  
+debug:
+  verbose: true
+  save_intermediate: false
+  show_data_issues: true
+  
+plots:
+  basic_timeseries: true
+  boxplots: true
+  correlation_matrix: false
+  tenant_comparison: true
+  dpi: 300
+  figsize: [12, 8]
