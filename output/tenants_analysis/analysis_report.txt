@@ -1,0 +1,30 @@
+ANÁLISE DE TENANTS A, B, C, D
+Sistema de Formatação Inteligente de Métricas
+======================================================================
+
+Data da análise: 2025-05-24 15:14:26.943622
+Dados fonte: demo-data/demo-experiment-1-round/round-1
+Tenants analisados: tenant-a, tenant-b, tenant-c, tenant-d
+Fases analisadas: 1 - Baseline, 2 - Attack, 3 - Recovery
+Métricas processadas: memory_usage, disk_throughput_total, network_total_bandwidth, cpu_usage
+
+MELHORIAS IMPLEMENTADAS:
+✅ Conversões hard-coded removidas
+✅ Sistema de formatação inteligente aplicado
+✅ Unidades automáticas detectadas
+✅ Plots com escalas legíveis
+✅ Tabelas com unidades corretas
+
+ARQUIVOS GERADOS:
+- memory_usage_comparison.png (Plot comparativo)
+- memory_usage_summary.csv (Dados estatísticos)
+- memory_usage_summary.txt (Resumo formatado)
+- disk_throughput_total_comparison.png (Plot comparativo)
+- disk_throughput_total_summary.csv (Dados estatísticos)
+- disk_throughput_total_summary.txt (Resumo formatado)
+- network_total_bandwidth_comparison.png (Plot comparativo)
+- network_total_bandwidth_summary.csv (Dados estatísticos)
+- network_total_bandwidth_summary.txt (Resumo formatado)
+- cpu_usage_comparison.png (Plot comparativo)
+- cpu_usage_summary.csv (Dados estatísticos)
+- cpu_usage_summary.txt (Resumo formatado)
