@@ -83,6 +83,7 @@ def parse_arguments():
     parser = argparse.ArgumentParser(description="Run data analysis pipeline for k8s noisy detection.")
     parser.add_argument("--data-dir", required=True, help="Root directory containing the experimental data.")
     parser.add_argument("--output-dir", required=True, help="Directory to save results and plots.")
+    parser.add_argument("--verbose", "-v", action="store_true", help="Enable verbose logging.")
     parser.add_argument("--metrics-config", default="src/config.py", help="Path to the metrics configuration file.")
     parser.add_argument("--selected-metrics", nargs='*', help="List of specific metrics to process (e.g., cpu_usage memory_usage). Processes all if not specified.")
     parser.add_argument("--start-time", help="Global start time for analysis (YYYY-MM-DDTHH:MM:SS or relative like -60s, -10m, -1h from first event).")
@@ -103,6 +104,8 @@ def parse_arguments():
     parser.add_argument("--pca-variance-threshold", type=float, default=0.95, help="Variance threshold for PCA if n_components is not an int.")
     parser.add_argument("--run-ica", action="store_true", help="Run ICA module.")
     parser.add_argument("--ica-n-components", type=int, default=None, help="Number of independent components.")
+    parser.add_argument("--compare-pca-ica", action="store_true", help="Compare PCA and ICA top features.")
+    parser.add_argument("--n-top-features-comparison", type=int, default=5, help="Number of top features to compare between PCA and ICA.")
     # Non-linear multivariate analysis
     parser.add_argument("--run-kpca", action="store_true", help="Run KernelPCA module.")
     parser.add_argument("--kpca-kernel", choices=['linear','poly','rbf','sigmoid'], default='rbf', help="Kernel to use for KernelPCA.")

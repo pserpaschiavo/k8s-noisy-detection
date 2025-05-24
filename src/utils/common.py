@@ -12,8 +12,33 @@ from typing import Dict, List, Optional, Union, Any
 # Core scientific computing libraries
 import pandas as pd
 import numpy as np
-import matplotlib.pyplot as plt
-import seaborn as sns
+
+# Ensure matplotlib backend is set before any GUI or plotting libraries are imported
+import os
+import sys
+
+# Set non-interactive backend for matplotlib
+os.environ.setdefault('MPLBACKEND', 'Agg')
+
+try:
+    # First import matplotlib and force the Agg backend
+    import matplotlib
+    matplotlib.use('Agg', force=True)
+    
+    # Then import pyplot with interactive mode disabled
+    import matplotlib.pyplot as plt
+    plt.ioff()  # Turn off interactive mode
+    
+    # Close any existing plots that might be open
+    plt.close('all')
+    
+    # Now it's safe to import seaborn
+    import seaborn as sns
+    
+    print("Matplotlib and Seaborn imported successfully with Agg backend")
+except Exception as e:
+    print(f"Error configuring matplotlib: {str(e)}")
+    # Proceed without plotting capabilities if matplotlib fails
 
 # Additional scientific libraries
 from scipy import stats
@@ -28,16 +53,24 @@ logging.basicConfig(
 )
 logger = logging.getLogger(__name__)
 
-# Configure matplotlib for better plots
-plt.style.use('seaborn-v0_8-whitegrid')
-plt.rcParams['figure.figsize'] = (10, 6)
-plt.rcParams['figure.dpi'] = 100
-plt.rcParams['font.size'] = 12
-plt.rcParams['axes.titlesize'] = 16
-plt.rcParams['axes.labelsize'] = 14
-plt.rcParams['xtick.labelsize'] = 12
-plt.rcParams['ytick.labelsize'] = 12
-plt.rcParams['legend.fontsize'] = 12
+# Configure matplotlib for better plots - wrapped in try/except to avoid hanging
+try:
+    plt.style.use('seaborn-v0_8-whitegrid')
+except:
+    # Fallback to default style if seaborn style is not available
+    pass
+
+# Set matplotlib parameters safely
+plt.rcParams.update({
+    'figure.figsize': (10, 6),
+    'figure.dpi': 100,
+    'font.size': 12,
+    'axes.titlesize': 16,
+    'axes.labelsize': 14,
+    'xtick.labelsize': 12,
+    'ytick.labelsize': 12,
+    'legend.fontsize': 12
+})
 
 # Configure pandas for better display
 pd.set_option('display.max_columns', 20)

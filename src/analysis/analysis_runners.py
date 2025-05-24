@@ -64,7 +64,8 @@ from .multivariate import (
     perform_pca, perform_ica, get_top_features_per_component,
     perform_kpca, perform_tsne
 )
-from .root_cause import perform_complete_root_cause_analysis, calculate_inter_tenant_correlation_per_metric as rca_correlation
+from .root_cause import perform_complete_root_cause_analysis
+from .correlation_covariance import calculate_inter_tenant_correlation_per_metric as rca_correlation
 from ..visualization.plots import (
     plot_correlation_heatmap,
     plot_covariance_heatmap,
