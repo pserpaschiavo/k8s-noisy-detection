@@ -2,17 +2,75 @@
 
 This project provides a comprehensive pipeline for analyzing and detecting noisy neighbors in Kubernetes environments through time series analysis.
 
-## Features
+## 🚀 Quick Start
+
+### Installation
+
+```bash
+# Clone the repository
+git clone https://github.com/phil/k8s-noisy-detection.git
+cd k8s-noisy-detection
+
+# Install dependencies
+pip install -r requirements.txt
+
+# Install the package in development mode
+pip install -e .
+```
+
+### Basic Usage
+
+```bash
+# Run analysis on demo data
+python -m src.main --data-dir demo-data/demo-experiment-1-round --output-dir output
+
+# Run with specific metrics
+python -m src.main --data-dir demo-data/demo-experiment-1-round --output-dir output --selected-metrics cpu_usage memory_usage
+```
+
+## 📁 Project Structure
+
+```
+k8s-noisy-detection/
+├── src/                          # Main source code
+│   ├── config.py                 # Configuration settings
+│   ├── main.py                   # Main analysis pipeline
+│   ├── analysis/                 # Analysis modules
+│   │   ├── causality.py          # Causal analysis
+│   │   ├── correlation_covariance.py
+│   │   ├── descriptive_statistics.py
+│   │   ├── multivariate.py       # PCA, ICA, t-SNE
+│   │   ├── root_cause.py         # Root cause analysis
+│   │   └── similarity.py         # Similarity metrics
+│   ├── data/                     # Data handling
+│   │   ├── loader.py             # Data loading utilities
+│   │   ├── normalization.py      # Data normalization
+│   │   └── io_utils.py           # I/O operations
+│   ├── utils/                    # Utilities
+│   │   ├── common.py             # Common imports and utilities
+│   │   └── figure_management.py  # Plot management
+│   └── visualization/            # Visualization
+│       └── plots.py              # All plotting functions
+├── tests/                        # Test suite
+├── demo-data/                    # Sample data
+├── docs/                         # Documentation
+├── requirements.txt              # Dependencies
+├── setup.py                      # Package setup
+└── README.md
+```
+
+## 🔧 Analysis Features
 
 - **Data Loading**: Load and preprocess time series data from Kubernetes experiments
 - **Descriptive Statistics**: Calculate and visualize basic statistics for time series data
 - **Correlation Analysis**: Perform correlation analysis between different metrics and tenants
 - **Covariance Analysis**: Analyze covariance patterns in time series data
-- **Multivariate Analysis**: Apply PCA and ICA for dimensionality reduction and pattern discovery
+- **Multivariate Analysis**: Apply PCA, ICA, and t-SNE for dimensionality reduction and pattern discovery
 - **Similarity Analysis**: Measure similarity between time series using multiple techniques
-- **Causal Analysis**: Explore causal relationships using various statistical methods
+- **Causal Analysis**: Explore causal relationships using SEM and other statistical methods
+- **Root Cause Analysis**: Identify potential causes of performance issues
 
-## Time Series Similarity Methods
+## 📊 Time Series Similarity Methods
 
 The project implements three main techniques for measuring similarity between time series:
 
